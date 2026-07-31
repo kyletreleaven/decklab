@@ -931,3 +931,76 @@ textarea:focus {
   border-style: dashed;
   color: var(--text-dim);
 }
+
+/* ---------- import / export ---------- */
+
+.dialog.wide {
+  width: 620px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+}
+
+.dialog textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tabs {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.tabs button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 5px 12px;
+}
+
+.tabs button + button {
+  border-left: 1px solid var(--border);
+}
+
+.tabs button.on {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.preview-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  background: var(--bg);
+}
+
+.preview-list .row {
+  cursor: default;
+}
+
+.preview-list .row.unmatched .name,
+.preview-list .row.unmatched .meta {
+  color: var(--danger);
+}

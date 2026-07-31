@@ -3,8 +3,11 @@ import { CardDetail } from "./components/CardDetail";
 import { CardSearch } from "./components/CardSearch";
 import { CollectionView } from "./components/CollectionView";
 import { DeckView } from "./components/DeckView";
+import { ExportDialog } from "./components/ExportDialog";
+import { ImportDialog, type ImportTarget } from "./components/ImportDialog";
 import * as collectionsApi from "./lib/collections";
 import { COLLECTION_KINDS } from "./lib/collections";
+import { exportCollection, exportDeck, type ExportFormat } from "./lib/decklist";
 import * as decksApi from "./lib/decks";
 import type {
   Card,
@@ -37,6 +40,12 @@ export default function App() {
   const [draftName, setDraftName] = useState("");
   const [draftKind, setDraftKind] = useState<CollectionKind>("paper");
   const [error, setError] = useState<string | null>(null);
+  const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
+  const [exportState, setExportState] = useState<{
+    title: string;
+    filenameBase: string;
+    render: (format: ExportFormat) => string;
+  } | null>(null);
 
   // Bumped whenever collection contents change, so views recompute ownership
   // and owned-copy counts without threading callbacks everywhere.
@@ -255,6 +264,20 @@ export default function App() {
             }}
             onAddCards={() => setView({ kind: "search" })}
             onReloadEntries={() => reloadEntries(currentDeck.id)}
+            onImport={() =>
+              setImportTarget({
+                kind: "deck",
+                id: currentDeck.id,
+                name: currentDeck.name,
+              })
+            }
+            onExport={() =>
+              setExportState({
+                title: currentDeck.name,
+                filenameBase: currentDeck.name,
+                render: (format) => exportDeck(entries, format),
+              })
+            }
           />
         )}
 
@@ -285,6 +308,25 @@ export default function App() {
               bump();
             }}
             onAddCards={() => setView({ kind: "search" })}
+            onImport={() =>
+              setImportTarget({
+                kind: "collection",
+                id: currentCollection.id,
+                name: currentCollection.name,
+              })
+            }
+            onExport={async () => {
+              // The collection view owns its filtered item list, so fetch the
+              // full contents here rather than exporting whatever is on screen.
+              const items = await collectionsApi.collectionItems(
+                currentCollection.id,
+              );
+              setExportState({
+                title: currentCollection.name,
+                filenameBase: currentCollection.name,
+                render: (format) => exportCollection(items, format),
+              });
+            }}
           />
         )}
       </main>
@@ -297,6 +339,36 @@ export default function App() {
         onAddToCollection={addToCollection}
         refreshKey={refreshKey}
       />
+
+      {importTarget && (
+        <ImportDialog
+          target={importTarget}
+          onClose={() => setImportTarget(null)}
+          onImported={async (added) => {
+            const finished = importTarget;
+            setImportTarget(null);
+            if (finished.kind === "deck") {
+              await reloadDecks();
+              if (view.kind === "deck" && view.id === finished.id) {
+                await reloadEntries(finished.id);
+              }
+            } else {
+              await reloadCollections();
+              bump();
+            }
+            setError(added ? null : "Nothing was imported.");
+          }}
+        />
+      )}
+
+      {exportState && (
+        <ExportDialog
+          title={exportState.title}
+          filenameBase={exportState.filenameBase}
+          render={exportState.render}
+          onClose={() => setExportState(null)}
+        />
+      )}
 
       {dialog && (
         <div className="overlay" onClick={() => setDialog(null)}>

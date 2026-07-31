@@ -74,6 +74,26 @@ async fn cache_card_image(app: AppHandle, key: String, url: String) -> Result<St
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// Read a user-chosen text file.
+///
+/// The path always comes from a native file dialog, so the user has already
+/// consented to this exact file. Doing the read here rather than through the
+/// JS fs plugin avoids having to grant the frontend a broad filesystem scope.
+#[tauri::command]
+async fn read_text_file(path: String) -> Result<String, String> {
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("could not read {path}: {e}"))
+}
+
+/// Write exported text to a user-chosen path, for the same reason.
+#[tauri::command]
+async fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    tokio::fs::write(&path, contents)
+        .await
+        .map_err(|e| format!("could not write {path}: {e}"))
+}
+
 fn migrations() -> Vec<Migration> {
     vec![
         Migration {
@@ -97,12 +117,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:decklab.db", migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![cache_card_image])
+        .invoke_handler(tauri::generate_handler![
+            cache_card_image,
+            read_text_file,
+            write_text_file
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

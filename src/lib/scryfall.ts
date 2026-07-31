@@ -227,6 +227,46 @@ export async function printings(oracleId: string): Promise<Card[]> {
   return cards;
 }
 
+/** Identifier shapes accepted by Scryfall's /cards/collection endpoint. */
+export type Identifier =
+  | { id: string }
+  | { set: string; collector_number: string }
+  | { name: string };
+
+export interface IdentifierResult {
+  found: Card[];
+  notFound: Identifier[];
+}
+
+/**
+ * Batch-resolve arbitrary identifiers. Used by import, where a line may pin an
+ * exact printing (Archidekt gives us Scryfall ids outright, Arena gives set +
+ * collector number) or may only know a name.
+ */
+export async function resolveIdentifiers(
+  identifiers: Identifier[],
+): Promise<IdentifierResult> {
+  const found: Card[] = [];
+  const notFound: Identifier[] = [];
+
+  for (let i = 0; i < identifiers.length; i += 75) {
+    const chunk = identifiers.slice(i, i + 75);
+    const body = await request<{
+      data: ScryfallCard[];
+      not_found: Identifier[];
+    }>("/cards/collection", {
+      method: "POST",
+      body: JSON.stringify({ identifiers: chunk }),
+    });
+
+    found.push(...(body.data ?? []).map(normalize));
+    notFound.push(...(body.not_found ?? []));
+  }
+
+  await cacheCards(found);
+  return { found, notFound };
+}
+
 export interface ResolveResult {
   found: Card[];
   notFound: string[];

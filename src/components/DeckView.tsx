@@ -2,17 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { deckOwnership } from "../lib/collections";
 import {
   autoArrangePiles,
-  CATEGORY_ORDER,
-  categoryOf,
-  commanderIssues,
   createPile,
-  deckStats,
   deletePile,
   listPiles,
   renamePile,
   setEntryPile,
   type AutoArrange,
 } from "../lib/decks";
+import {
+  CATEGORY_ORDER,
+  categoryOf,
+  commanderIssues,
+  deckStats,
+} from "../lib/deckstats";
 import type {
   Card,
   Collection,
@@ -36,6 +38,8 @@ export function DeckView({
   onRename,
   onDelete,
   onAddCards,
+  onImport,
+  onExport,
   onReloadEntries,
   refreshKey,
 }: {
@@ -50,6 +54,8 @@ export function DeckView({
   onRename: (name: string) => void;
   onDelete: () => void;
   onAddCards: () => void;
+  onImport: () => void;
+  onExport: () => void;
   onReloadEntries: () => Promise<void>;
   refreshKey: number;
 }) {
@@ -241,6 +247,12 @@ export function DeckView({
 
         <button className="primary" onClick={onAddCards}>
           ＋ Add cards
+        </button>
+        <button className="ghost" onClick={onImport}>
+          Import
+        </button>
+        <button className="ghost" onClick={onExport}>
+          Export
         </button>
         <button className="ghost" onClick={() => setEditingName(true)}>
           Rename

@@ -10,11 +10,17 @@
     "sql:allow-execute",
     "sql:allow-select",
     "sql:allow-close",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "clipboard-manager:allow-write-text",
     {
       "identifier": "http:default",
       "allow": [
         { "url": "https://api.scryfall.com/*" },
-        { "url": "https://cards.scryfall.io/*" }
+        { "url": "https://cards.scryfall.io/*" },
+        { "url": "https://archidekt.com/*" },
+        { "url": "https://*.archidekt.com/*" }
       ]
     }
   ]

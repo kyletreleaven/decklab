@@ -40,6 +40,8 @@ export function CollectionView({
   onRename,
   onDelete,
   onAddCards,
+  onImport,
+  onExport,
   refreshKey,
 }: {
   collection: Collection;
@@ -50,6 +52,8 @@ export function CollectionView({
   onRename: (name: string) => void;
   onDelete: () => void;
   onAddCards: () => void;
+  onImport: () => void;
+  onExport: () => void;
   refreshKey: number;
 }) {
   const [items, setItems] = useState<CollectionItem[]>([]);
@@ -211,6 +215,12 @@ export function CollectionView({
 
         <button className="primary" onClick={onAddCards}>
           ＋ Add cards
+        </button>
+        <button className="ghost" onClick={onImport}>
+          Import
+        </button>
+        <button className="ghost" onClick={onExport}>
+          Export
         </button>
         <button className="ghost" onClick={() => setEditingName(true)}>
           Rename
