@@ -1,0 +1,262 @@
+import { fetch } from "@tauri-apps/plugin-http";
+import type { Card } from "./types";
+import { canonicalColors } from "./types";
+import { cacheCards } from "./cards";
+
+const API = "https://api.scryfall.com";
+
+/**
+ * Scryfall asks for 50-100ms between requests and a descriptive User-Agent.
+ * Requests go through the Tauri HTTP plugin rather than the webview's `fetch`
+ * so we can actually set that header, and every call is threaded through one
+ * promise chain to keep the spacing honest under concurrent callers.
+ */
+const MIN_INTERVAL_MS = 100;
+let chain: Promise<unknown> = Promise.resolve();
+
+function throttle<T>(task: () => Promise<T>): Promise<T> {
+  const result = chain.then(task, task);
+  chain = result.then(
+    () => sleep(MIN_INTERVAL_MS),
+    () => sleep(MIN_INTERVAL_MS),
+  );
+  return result;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export class ScryfallError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ScryfallError";
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return throttle(async () => {
+    const response = await fetch(`${API}${path}`, {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "DeckLab/0.1.0 (desktop)",
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      },
+    });
+
+    const body = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const detail =
+        (body as { details?: string } | null)?.details ??
+        `Scryfall returned ${response.status}`;
+      throw new ScryfallError(detail, response.status);
+    }
+
+    return body as T;
+  });
+}
+
+/** Raw Scryfall card JSON. Only the fields we denormalise are typed. */
+export interface ScryfallCard {
+  id: string;
+  oracle_id?: string;
+  name: string;
+  set: string;
+  set_name: string;
+  collector_number: string;
+  released_at?: string;
+  rarity: string;
+  layout: string;
+  mana_cost?: string;
+  cmc?: number;
+  type_line?: string;
+  oracle_text?: string;
+  power?: string;
+  toughness?: string;
+  loyalty?: string;
+  colors?: string[];
+  color_identity?: string[];
+  keywords?: string[];
+  legalities?: Record<string, string>;
+  prices?: Record<string, string | null>;
+  image_uris?: Record<string, string>;
+  card_faces?: {
+    name: string;
+    mana_cost?: string;
+    type_line?: string;
+    oracle_text?: string;
+    power?: string;
+    toughness?: string;
+    loyalty?: string;
+    colors?: string[];
+    image_uris?: Record<string, string>;
+  }[];
+  edhrec_rank?: number;
+  reserved?: boolean;
+  digital?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Double-faced cards carry their images on the faces rather than the card, and
+ * split/adventure cards duplicate text across faces. Flatten both so the cache
+ * always has something to display and search.
+ */
+export function normalize(raw: ScryfallCard): Card {
+  const front = raw.card_faces?.[0];
+  const images = raw.image_uris ?? front?.image_uris ?? {};
+
+  const oracleText =
+    raw.oracle_text ??
+    raw.card_faces?.map((f) => f.oracle_text ?? "").join("\n//\n") ??
+    "";
+
+  // A face's colours are only part of the story; fall back to colour identity
+  // so colourless-looking DFCs still filter correctly.
+  const colors = raw.colors ?? front?.colors ?? [];
+
+  return {
+    id: raw.id,
+    oracleId: raw.oracle_id ?? raw.id,
+    name: raw.name,
+    setCode: raw.set,
+    setName: raw.set_name,
+    collectorNumber: raw.collector_number,
+    releasedAt: raw.released_at ?? null,
+    rarity: raw.rarity,
+    layout: raw.layout,
+    manaCost: raw.mana_cost ?? front?.mana_cost ?? null,
+    cmc: raw.cmc ?? 0,
+    typeLine: raw.type_line ?? front?.type_line ?? "",
+    oracleText,
+    power: raw.power ?? front?.power ?? null,
+    toughness: raw.toughness ?? front?.toughness ?? null,
+    loyalty: raw.loyalty ?? front?.loyalty ?? null,
+    colors: canonicalColors(colors),
+    colorIdentity: canonicalColors(raw.color_identity),
+    keywords: raw.keywords ?? [],
+    legalities: raw.legalities ?? {},
+    prices: raw.prices ?? {},
+    imageSmall: images.small ?? null,
+    imageNormal: images.normal ?? images.large ?? null,
+    imageArtCrop: images.art_crop ?? null,
+    edhrecRank: raw.edhrec_rank ?? null,
+    reserved: !!raw.reserved,
+    digital: !!raw.digital,
+    data: raw as unknown as Record<string, unknown>,
+  };
+}
+
+export interface SearchPage {
+  cards: Card[];
+  totalCards: number;
+  hasMore: boolean;
+  nextPage: number | null;
+}
+
+interface ScryfallList {
+  data: ScryfallCard[];
+  total_cards?: number;
+  has_more?: boolean;
+}
+
+/**
+ * Full Scryfall search. Every card that comes back is written into the local
+ * cache, which is what incrementally builds up the offline catalogue.
+ */
+export async function search(query: string, page = 1): Promise<SearchPage> {
+  const params = new URLSearchParams({
+    q: query,
+    page: String(page),
+    unique: "cards",
+    order: "name",
+  });
+
+  let list: ScryfallList;
+  try {
+    list = await request<ScryfallList>(`/cards/search?${params}`);
+  } catch (error) {
+    // Scryfall 404s an empty result set rather than returning zero rows.
+    if (error instanceof ScryfallError && error.status === 404) {
+      return { cards: [], totalCards: 0, hasMore: false, nextPage: null };
+    }
+    throw error;
+  }
+
+  const cards = list.data.map(normalize);
+  await cacheCards(cards);
+
+  return {
+    cards,
+    totalCards: list.total_cards ?? cards.length,
+    hasMore: !!list.has_more,
+    nextPage: list.has_more ? page + 1 : null,
+  };
+}
+
+export async function autocomplete(partial: string): Promise<string[]> {
+  if (partial.trim().length < 2) return [];
+  const params = new URLSearchParams({ q: partial });
+  const body = await request<{ data: string[] }>(`/cards/autocomplete?${params}`);
+  return body.data ?? [];
+}
+
+export async function named(name: string, exact = true): Promise<Card> {
+  const params = new URLSearchParams(exact ? { exact: name } : { fuzzy: name });
+  const card = normalize(await request<ScryfallCard>(`/cards/named?${params}`));
+  await cacheCards([card]);
+  return card;
+}
+
+/** Every printing of a card, used by the printings picker and ownership view. */
+export async function printings(oracleId: string): Promise<Card[]> {
+  const params = new URLSearchParams({
+    q: `oracleid:${oracleId}`,
+    unique: "prints",
+    order: "released",
+  });
+  const list = await request<ScryfallList>(`/cards/search?${params}`);
+  const cards = list.data.map(normalize);
+  await cacheCards(cards);
+  return cards;
+}
+
+export interface ResolveResult {
+  found: Card[];
+  notFound: string[];
+}
+
+/**
+ * Batch name lookup, used by decklist import. Scryfall's collection endpoint
+ * takes 75 identifiers per call, so long lists are chunked.
+ */
+export async function resolveNames(names: string[]): Promise<ResolveResult> {
+  const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  const found: Card[] = [];
+  const notFound: string[] = [];
+
+  for (let i = 0; i < unique.length; i += 75) {
+    const chunk = unique.slice(i, i + 75);
+    const body = await request<{
+      data: ScryfallCard[];
+      not_found: { name?: string }[];
+    }>("/cards/collection", {
+      method: "POST",
+      body: JSON.stringify({ identifiers: chunk.map((name) => ({ name })) }),
+    });
+
+    found.push(...(body.data ?? []).map(normalize));
+    notFound.push(
+      ...(body.not_found ?? []).map((entry) => entry.name ?? "unknown"),
+    );
+  }
+
+  await cacheCards(found);
+  return { found, notFound };
+}
