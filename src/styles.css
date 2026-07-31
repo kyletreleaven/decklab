@@ -754,3 +754,180 @@ textarea:focus {
   font-size: 14px;
   line-height: 1;
 }
+
+/* ---------- piles ---------- */
+
+.piles {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.pile-column {
+  flex: 0 0 var(--pile-w);
+  --pile-w: 152px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  border: 1px dashed transparent;
+  padding: 4px;
+  min-height: 180px;
+}
+
+.pile-column.drag-over {
+  border-color: var(--accent);
+  background: rgba(216, 166, 87, 0.07);
+}
+
+.commander-column {
+  border-right: 1px solid var(--border);
+  border-radius: 8px 0 0 8px;
+  margin-right: 6px;
+}
+
+.pile-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.pile-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.pile-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pile-delete {
+  padding: 0 4px;
+  opacity: 0;
+  font-size: 13px;
+}
+
+.pile-column:hover .pile-delete {
+  opacity: 1;
+}
+
+.pile-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 5px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.pile-stack {
+  display: flex;
+  flex-direction: column;
+  /* Cards overlap so only the title strip shows, the way physical piles fan.
+     The stack still needs room for the last card in full. */
+  padding-bottom: 4px;
+}
+
+.pile-card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 488 / 680;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: grab;
+  background: var(--bg-raised);
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  transition: transform 0.08s ease;
+  /* WebKit refuses to start a drag on an element under
+     -webkit-user-select: none (which body sets for desktop feel) unless the
+     element opts back in explicitly. Without this, draggable="true" is
+     silently ignored in WKWebView. */
+  -webkit-user-drag: element;
+}
+
+.pile-card img {
+  /* The <img> is the actual drag source under the cursor; left to itself
+     WebKit drags the image as a separate item instead of the card. */
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.pile-card + .pile-card {
+  /* Percentage margins resolve against the container's WIDTH, not height, so
+     -100% offsets each card by exactly its own width. With the 488:680 card
+     ratio that leaves height - width = ~39% of the width visible: enough for
+     the name bar and a sliver of art. */
+  margin-top: -100%;
+}
+
+.pile-card.static {
+  cursor: pointer;
+}
+
+.pile-card img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.pile-card:hover {
+  /* Raise above later siblings, which would otherwise paint over it. */
+  z-index: 500 !important;
+  transform: translateY(-4px);
+  border-color: var(--accent-dim);
+}
+
+.pile-card.selected {
+  border-color: var(--accent);
+  z-index: 400;
+}
+
+.pile-card.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+.pile-card .placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 6px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.pile-empty {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 20px 8px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.pile-add {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 26px;
+  white-space: nowrap;
+  border-style: dashed;
+  color: var(--text-dim);
+}

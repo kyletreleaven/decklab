@@ -67,7 +67,17 @@ export interface DeckEntry {
   cardId: string;
   quantity: number;
   zone: DeckZone;
+  /** Null means the card has not been sorted into a pile yet. */
+  pileId: string | null;
   card: Card;
+}
+
+/** A user-arranged column in the deck's piles view. */
+export interface DeckPile {
+  id: string;
+  deckId: string;
+  name: string;
+  position: number;
 }
 
 export type CollectionKind =

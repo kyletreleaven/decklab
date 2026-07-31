@@ -254,6 +254,7 @@ export default function App() {
               setTarget(null);
             }}
             onAddCards={() => setView({ kind: "search" })}
+            onReloadEntries={() => reloadEntries(currentDeck.id)}
           />
         )}
 

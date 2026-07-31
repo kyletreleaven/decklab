@@ -1,19 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { deckOwnership } from "../lib/collections";
 import {
+  autoArrangePiles,
   CATEGORY_ORDER,
   categoryOf,
   commanderIssues,
+  createPile,
   deckStats,
+  deletePile,
+  listPiles,
+  renamePile,
+  setEntryPile,
+  type AutoArrange,
 } from "../lib/decks";
 import type {
   Card,
   Collection,
   Deck,
   DeckEntry,
+  DeckPile,
   OwnershipRow,
 } from "../lib/types";
 import { ManaCost } from "./ManaCost";
+import { PilesView } from "./PilesView";
 
 export function DeckView({
   deck,
@@ -27,6 +36,7 @@ export function DeckView({
   onRename,
   onDelete,
   onAddCards,
+  onReloadEntries,
   refreshKey,
 }: {
   deck: Deck;
@@ -40,12 +50,35 @@ export function DeckView({
   onRename: (name: string) => void;
   onDelete: () => void;
   onAddCards: () => void;
+  onReloadEntries: () => Promise<void>;
   refreshKey: number;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(deck.name);
   const [against, setAgainst] = useState<string[]>([]);
   const [ownership, setOwnership] = useState<Map<string, OwnershipRow>>(new Map());
+  const [layout, setLayout] = useState<"list" | "piles">("list");
+  const [piles, setPiles] = useState<DeckPile[]>([]);
+
+  async function reloadPiles() {
+    setPiles(await listPiles(deck.id));
+  }
+
+  useEffect(() => {
+    let active = true;
+    listPiles(deck.id).then((rows) => {
+      if (active) setPiles(rows);
+    });
+    return () => {
+      active = false;
+    };
+  }, [deck.id]);
+
+  async function handleAutoArrange(mode: AutoArrange) {
+    await autoArrangePiles(deck.id, mode, entries);
+    await reloadPiles();
+    await onReloadEntries();
+  }
 
   useEffect(() => {
     setDraftName(deck.name);
@@ -178,6 +211,34 @@ export function DeckView({
           </h1>
         )}
         <span className="spacer" />
+
+        {layout === "piles" && (
+          <>
+            <span className="filter-label">Arrange</span>
+            <button onClick={() => handleAutoArrange("type")} title="Rebuild piles by card type">
+              By type
+            </button>
+            <button onClick={() => handleAutoArrange("mv")} title="Rebuild piles by mana value">
+              By MV
+            </button>
+          </>
+        )}
+
+        <div className="segmented">
+          <button
+            className={layout === "list" ? "on" : ""}
+            onClick={() => setLayout("list")}
+          >
+            List
+          </button>
+          <button
+            className={layout === "piles" ? "on" : ""}
+            onClick={() => setLayout("piles")}
+          >
+            Piles
+          </button>
+        </div>
+
         <button className="primary" onClick={onAddCards}>
           ＋ Add cards
         </button>
@@ -275,12 +336,38 @@ export function DeckView({
         </div>
       )}
 
-      <div className="scroll">
-        {entries.length === 0 && (
-          <div className="empty">
-            This deck is empty. Use “Add cards” to search Scryfall.
-          </div>
-        )}
+      {layout === "piles" ? (
+        <PilesView
+          entries={entries}
+          piles={piles}
+          selectedCardId={selectedCardId}
+          onSelectCard={(entry) => onSelectCard(entry.card)}
+          onChangeQuantity={onChangeQuantity}
+          onMoveEntry={async (entryId, pileId) => {
+            await setEntryPile(entryId, deck.id, pileId);
+            await onReloadEntries();
+          }}
+          onCreatePile={async () => {
+            await createPile(deck.id, `Pile ${piles.length + 1}`);
+            await reloadPiles();
+          }}
+          onRenamePile={async (pileId, name) => {
+            await renamePile(pileId, name);
+            await reloadPiles();
+          }}
+          onDeletePile={async (pileId) => {
+            await deletePile(pileId, deck.id);
+            await reloadPiles();
+            await onReloadEntries();
+          }}
+        />
+      ) : (
+        <div className="scroll">
+          {entries.length === 0 && (
+            <div className="empty">
+              This deck is empty. Use “Add cards” to search Scryfall.
+            </div>
+          )}
 
         {commanders.length > 0 && (
           <div className="group">
@@ -301,15 +388,16 @@ export function DeckView({
           </div>
         ))}
 
-        {maybe.length > 0 && (
-          <div className="group">
-            <div className="group-title">
-              Maybeboard <span>{maybe.length}</span>
+          {maybe.length > 0 && (
+            <div className="group">
+              <div className="group-title">
+                Maybeboard <span>{maybe.length}</span>
+              </div>
+              {maybe.map(renderRow)}
             </div>
-            {maybe.map(renderRow)}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
