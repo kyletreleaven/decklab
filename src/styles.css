@@ -612,3 +612,145 @@ textarea:focus {
 .field select {
   width: 100%;
 }
+
+/* ---------- view toggle ---------- */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.segmented button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 5px 11px;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.segmented button.on {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* ---------- filter bar ---------- */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+
+.chip {
+  padding: 3px 9px;
+  font-size: 11px;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-dim);
+  text-transform: capitalize;
+}
+
+.chip.on {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.pip-toggle {
+  padding: 2px;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 50%;
+  line-height: 0;
+  /* Unselected colours read as available-but-off rather than disabled. */
+  opacity: 0.4;
+}
+
+.pip-toggle:hover {
+  opacity: 0.75;
+  background: transparent;
+}
+
+.pip-toggle.on {
+  opacity: 1;
+  border-color: var(--accent);
+  background: transparent;
+}
+
+/* ---------- wall tiles ---------- */
+
+.qty-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--border-strong);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.finish-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(216, 166, 87, 0.85);
+  color: #1b1b1b;
+  font-size: 10px;
+  text-transform: capitalize;
+  pointer-events: none;
+}
+
+.tile-controls {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+}
+
+.card-tile:hover .tile-controls {
+  opacity: 1;
+}
+
+.tile-controls button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.8);
+  border-color: var(--border-strong);
+  font-size: 14px;
+  line-height: 1;
+}

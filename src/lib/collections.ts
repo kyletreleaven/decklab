@@ -94,24 +94,104 @@ type CollectionItemRow = CardRow & {
   item_notes: string;
 };
 
+/** Card types worth faceting on when browsing a collection. */
+export const FILTER_TYPES = [
+  "Creature",
+  "Instant",
+  "Sorcery",
+  "Artifact",
+  "Enchantment",
+  "Planeswalker",
+  "Land",
+] as const;
+
+export const FILTER_RARITIES = ["common", "uncommon", "rare", "mythic"] as const;
+
+export interface CollectionFilter {
+  /** Substring match on card name. */
+  name?: string;
+  /** Colour identity letters; "C" means colourless. Matches ANY selected. */
+  colors?: string[];
+  /** Type-line keywords; matches ANY selected. */
+  types?: string[];
+  rarities?: string[];
+  mvMin?: number;
+  mvMax?: number;
+}
+
+export type CollectionSort = "name" | "mv" | "quantity" | "value";
+
+const SORT_SQL: Record<CollectionSort, string> = {
+  name: "c.name",
+  mv: "c.cmc, c.name",
+  quantity: "ci.quantity DESC, c.name",
+  value: "CAST(json_extract(c.prices, '$.usd') AS REAL) DESC NULLS LAST, c.name",
+};
+
 /**
- * Items in a collection. `nameFilter` is a plain substring match on the card
- * name and runs entirely against the local cache — no network involved.
+ * Items in a collection, filtered and sorted.
+ *
+ * Every predicate is pushed into SQL rather than filtered in JS: a paper
+ * collection can run to tens of thousands of rows, and this keeps the work in
+ * the index rather than shipping the whole table over the IPC bridge. All of it
+ * runs against the local cache — no network involved.
  */
 export async function collectionItems(
   collectionId: string,
-  nameFilter = "",
+  filter: CollectionFilter = {},
+  sort: CollectionSort = "name",
 ): Promise<CollectionItem[]> {
-  const filter = nameFilter.trim();
   const params: unknown[] = [collectionId];
-  let clause = "";
+  const clauses: string[] = [];
+  const hole = () => `$${params.length}`;
 
-  if (filter) {
+  const name = filter.name?.trim();
+  if (name) {
     // Escape LIKE wildcards so a literal % or _ in a card name behaves.
-    const escaped = filter.replace(/[\\%_]/g, (m) => `\\${m}`);
-    params.push(`%${escaped}%`);
-    clause = ` AND c.name LIKE $2 ESCAPE '\\'`;
+    params.push(`%${name.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
+    clauses.push(`c.name LIKE ${hole()} ESCAPE '\\'`);
   }
+
+  if (filter.colors?.length) {
+    const parts: string[] = [];
+    for (const color of filter.colors) {
+      if (color === "C") {
+        parts.push(`c.color_identity = ''`);
+      } else {
+        params.push(`%${color}%`);
+        parts.push(`c.color_identity LIKE ${hole()}`);
+      }
+    }
+    clauses.push(`(${parts.join(" OR ")})`);
+  }
+
+  if (filter.types?.length) {
+    const parts = filter.types.map((type) => {
+      params.push(`%${type}%`);
+      return `c.type_line LIKE ${hole()}`;
+    });
+    clauses.push(`(${parts.join(" OR ")})`);
+  }
+
+  if (filter.rarities?.length) {
+    const parts = filter.rarities.map((rarity) => {
+      params.push(rarity);
+      return hole();
+    });
+    clauses.push(`c.rarity IN (${parts.join(", ")})`);
+  }
+
+  if (typeof filter.mvMin === "number") {
+    params.push(filter.mvMin);
+    clauses.push(`c.cmc >= ${hole()}`);
+  }
+
+  if (typeof filter.mvMax === "number") {
+    params.push(filter.mvMax);
+    clauses.push(`c.cmc <= ${hole()}`);
+  }
+
+  const where = clauses.length ? ` AND ${clauses.join(" AND ")}` : "";
 
   const rows = await select<CollectionItemRow>(
     `SELECT c.*,
@@ -123,8 +203,8 @@ export async function collectionItems(
             ci.notes         AS item_notes
        FROM collection_items ci
        JOIN cards c ON c.id = ci.card_id
-      WHERE ci.collection_id = $1${clause}
-      ORDER BY c.name`,
+      WHERE ci.collection_id = $1${where}
+      ORDER BY ${SORT_SQL[sort]}`,
     params,
   );
 
