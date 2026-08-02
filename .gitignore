@@ -10,6 +10,13 @@ build/
 src-tauri/target/
 src-tauri/gen/
 
+# scraped/exported collection dumps — other people's data, often large
+data/
+
+# python
+__pycache__/
+*.pyc
+
 # local app data (card cache db, cached images)
 *.db
 *.db-journal
