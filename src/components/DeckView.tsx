@@ -180,6 +180,16 @@ export function DeckView({
             +
           </button>
           <button
+            title={
+              entry.zone === "commander" ? "Move to the 99" : "Make commander"
+            }
+            onClick={() =>
+              onSetZone(entry, entry.zone === "commander" ? "main" : "commander")
+            }
+          >
+            {entry.zone === "commander" ? "☆" : "★"}
+          </button>
+          <button
             title={entry.zone === "maybe" ? "Move to deck" : "Move to maybeboard"}
             onClick={() => onSetZone(entry, entry.zone === "maybe" ? "main" : "maybe")}
           >
