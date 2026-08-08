@@ -70,14 +70,184 @@ specifications**. Everything else in this section depends on getting this right.
 
 A node denotes a (multi)set of cards:
 
+**A spec is a function `card → quantity`,** with quantities in ℕ ∪ {∞}. Every
+combining operation is then *pointwise arithmetic* on those functions, which is
+why the operator list is open-ended rather than fixed at the usual four.
+
+Sources:
+
 | Node | Meaning |
 | --- | --- |
 | `Literal` | an enumerated list with quantities — a decklist, a collection, an import result. **Editable.** |
-| `Empty` | the empty set; the identity element and a useful starting point |
-| `Universe` | every printing in Magic. Unbounded — never materialised |
-| `Filter(node, predicate)` | Scryfall-style predicate over any node |
-| `Union` / `Intersect` / `Difference` / `SymmetricDifference` | boolean ops |
-| `Project(node, grain)` | collapse printings to oracle cards, or expand back out |
+| `Empty` | constant `0`. Identity for `Sum` and `Max` |
+| `Universe@g` | constant `∞` at grain `g` — every oracle card, or every printing. Identity for `Min`. Never materialised |
+
+Pointwise binary operators:
+
+| Node | Value | Reads as |
+| --- | --- | --- |
+| `Max(a, b)` | `max(a, b)` | copies needed to field both **at once** (cards shared between decks) |
+| `Sum(a, b)` | `a + b` | total copies consumed building both **separately** |
+| `Min(a, b)` | `min(a, b)` | overlap — what two lists have in common |
+| `Diff(a, b)` | `max(0, a − b)` | still needed / not owned |
+| `Sub(a, b)` | `a − b` | signed change — the deck-diff representation (see types below) |
+
+Pointwise unary operators:
+
+| Node | Value | Reads as |
+| --- | --- | --- |
+| `Clamp(a, n)` | `min(a, n)` | copy limits — `n=1` singleton, `n=4` constructed |
+| `Scale(a, k)` | `a × k` | k copies of a whole list |
+| `Mul(a, b)` | `a × b` | **this is filtering** — when `b` is binary it masks `a` |
+| `Project(a, grain)` | regroup | collapse printings to oracle cards, or expand back out |
+
+**Node types: `{grain, quantity}`**, i.e. `{oracle, printing} × {binary, natural, integer}`.
+
+A spec is a function `element → quantity`, so the two axes are just its input and
+output sides. (Avoid "domain" for the second axis — the grain *is* the domain;
+`binary`/`natural`/`integer` is the codomain. "Quantity" says it plainly.)
+
+`grain` — what counts as one element:
+
+| Grain | Element |
+| --- | --- |
+| `oracle` | the card, printing-agnostic. What legality and deck rules care about |
+| `printing` | a specific printing. What a binder cares about |
+
+`quantity` — what a card can map to:
+
+| Quantity | Values | Used for |
+| --- | --- | --- |
+| `binary` | `{0, 1}` | membership: predicates, legality masks, search results as sets |
+| `natural` | `ℕ ∪ {∞}` | inventories: decks, collections |
+| `integer` | `ℤ` | signed change: `+2 Fatal Push / −2 Cut Down` |
+
+**Boolean algebra is just the binary case** — at `binary`, `Max` is OR, `Min` is
+AND, `Diff` is AND-NOT, and complement is `1 − a`. So we get set operations for
+free rather than as a separate feature.
+
+Operator typing:
+
+| Operator | Signature |
+| --- | --- |
+| `Max`, `Min` | `T × T → T` at any quantity |
+| `Sum` | `binary × binary → natural` (1+1 escapes binary); otherwise `T × T → T` |
+| `Diff` (monus) | `natural × natural → natural` |
+| `Sub` | `natural × natural → integer` |
+| `Clamp(a, n)` | `natural → natural`; `Clamp(a, 1)` is the coercion to `binary` |
+| `Scale(a, k)` | preserves quantity for `k ∈ ℕ`; widens to `integer` for `k < 0` |
+| `Not(a)` | `binary → binary` |
+| `Mul(a, p)` | `p` must be `binary`; result keeps `a`'s quantity |
+
+**Predicates have a grain as well**, because card properties do:
+
+| Grain | Properties |
+| --- | --- |
+| `oracle` | type line, oracle text, mana cost, mana value, colour identity, legality |
+| `printing` | set, collector number, rarity, artist, frame, border, promo type, finish, language, price |
+
+So "is a red creature" is oracle-level, while "is mythic in MH2" is
+printing-level — and moving a predicate between grains **changes which set you
+get**. Grain conversion therefore carries an *aggregation*, not just a target:
+
+- `ToOracle(a, agg)` — printing → oracle.
+  At `binary`, `agg` is a quantifier and the choice is load-bearing:
+  - `any` (∃) — "has **a** mythic printing"
+  - `all` (∀) — "**every** printing is mythic"
+
+  At `natural`, `agg` is `sum` (total owned across printings), or `max` / `min`
+  where that reads better.
+
+- `ToPrintings(a)` — oracle → printing. Unambiguous at `binary`: all printings of
+  each matching card. At `natural` there is no principled way to distribute *n*
+  copies across printings, so it stays a type error rather than a guess.
+
+**Round-tripping is not the identity.** `ToPrintings(ToOracle(a, any)) ⊇ a` — the
+trip out and back widens a specific set of printings into *all* printings of
+those cards. Useful (it is exactly "show me every version of what I own"), but it
+must not be mistaken for a no-op, and the UI should not offer it as one.
+
+**Grain polymorphism, and inferring it.** A predicate is not tied to one grain; it
+is valid at whichever grains its *properties* support, and that is inferable from
+how it was built:
+
+| Built from | Valid at | Why |
+| --- | --- | --- |
+| oracle properties only | `{oracle, printing}` | oracle properties are constant across a card's printings, so they lift **down** for free |
+| any printing property | `{printing}` | printing properties vary between printings, so they cannot lift **up** without a quantifier |
+
+Composition takes the intersection:
+
+- `t:creature c:r` → valid at `{oracle, printing}`
+- `set:mh2` → valid at `{printing}`
+- `t:creature set:mh2` → valid at `{printing}` only
+
+The payoff is that **the grain is usually invisible**. The app picks it, and only
+has to ask the user anything when a printing-level predicate is used where an
+oracle-level answer is wanted — at which point the question is a real one
+("*any* mythic printing, or *every* printing mythic?") rather than bookkeeping.
+
+This also means a saved predicate stays usable in both worlds where it can be:
+"within my commander's colour identity" is oracle-built, so it filters a decklist
+and a binder alike without being written twice.
+
+**What the types buy.** You cannot intersect a printing-grained binder with an
+oracle-grained decklist without saying which you meant — the type error surfaces
+exactly the smart-ownership ambiguity that would otherwise silently produce a
+wrong number. And because `Filter` predicates are themselves binary nodes,
+"legal in Commander" or "within my commander's identity" become reusable,
+storable, composable specs rather than hardcoded checks.
+
+**Derived values, and predicates parameterised by them.** `colorIdentity(commander(deck))`
+is not a spec — it is a *scalar* read out of one, then used to build a predicate.
+So two kinds of value flow through the graph:
+
+1. **Specs** — `card → quantity`, everything above
+2. **Values** — scalars read out of specs: colour sets, counts, formats, prices
+
+with three kinds of edge between them:
+
+| Kind | Signature | Examples |
+| --- | --- | --- |
+| Zone / sub-selection | `spec → spec` | `commander(deck)`, `zone(deck, main)` |
+| Reduction | `spec → value` | `colorIdentity`, `count`, `format`, `totalPrice` |
+| Predicate constructor | `value → binary spec` | `withinIdentity(cs)`, `legalIn(fmt)`, `mvAtMost(n)` |
+
+This is what makes the Arena-style pool a *definition* rather than special-cased
+code:
+
+```
+pool = Owned
+     × legalIn(format(deck))
+     × withinIdentity(colorIdentity(commander(deck)))
+```
+
+Change the commander and the pool re-filters, because the dependency is in the
+graph. The same machinery gives "cards that fit any of my decks", "under £5 and
+legal here", and so on.
+
+**This is now a small language, and that is the risk.** The mitigation is to keep
+the vocabulary **closed** for v1 — a fixed set of reductions and predicate
+constructors, each surfaced as a UI affordance ("scope pool to this deck" is a
+checkbox that builds the expression above) rather than something typed by hand.
+A general expression language stays possible later; designing the value types now
+means it can be layered on rather than retrofitted.
+
+Two consequences to design for:
+
+- **Dependency tracking.** A pool derived from a deck must invalidate when the
+  deck changes. Same propagation the panels need, one level deeper.
+- **Cycles must be forbidden** in the spec graph. A pool derived from a deck that
+  the user then edits *from* that pool is fine — an edit is a user action, not a
+  dataflow edge — but a spec depending on itself is not.
+
+Two more things fall out that are worth keeping:
+
+- **`Universe` must be `∞`, not `1`.** Otherwise `Min(deck, Universe)` would cap
+  every entry at one copy instead of leaving the deck untouched. So `natural`
+  needs ∞, and `Mul(Universe, p)` is `∞` wherever the predicate holds.
+- **Filtering and combining are the same kind of operation**, so the compiler has
+  one thing to optimise rather than two.
 
 **Three decisions determine everything downstream.** These need answering before
 any code:
@@ -87,12 +257,9 @@ any code:
    (`max(0, a−b)`), with intersection as `min(a, b)`. Proposal: multisets
    throughout, with an explicit `dedupe` when plain set semantics is wanted.
 
-2. **What is an element — a printing or a card?** `Sol Ring (C21)` and
-   `Sol Ring (LTC)` are the same card and different printings. Legality cares
-   about the oracle card; a binder cares about the printing. Proposal: every
-   operation takes a **grain** (`printing | oracle | name`), defaulting to
-   `oracle` for deck maths and `printing` for collection maths. This is the
-   existing "smart ownership" idea generalised.
+2. ~~What is an element — a printing or a card?~~ **Resolved:** grain is part of
+   the node's *type*, not a per-operation parameter, and conversion between
+   grains is an explicit node. See the type table above.
 
 3. **Laziness.** `Universe` is ~500k printings and conceptually open-ended; it
    cannot be materialised. Nodes stay symbolic and compile to a query,
