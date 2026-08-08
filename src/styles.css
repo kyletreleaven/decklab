@@ -398,6 +398,18 @@ textarea:focus {
   flex-shrink: 0;
 }
 
+.pip-svg {
+  width: 15px;
+  height: 15px;
+  display: inline-block;
+  flex-shrink: 0;
+  /* The symbols are drawn with a light rim that vanishes on the dark panel;
+     a soft drop shadow keeps them legible without recolouring the artwork. */
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+  -webkit-user-drag: none;
+}
+
+/* Fallback pip, used only for symbols Scryfall does not publish an SVG for. */
 .pip {
   width: 15px;
   height: 15px;

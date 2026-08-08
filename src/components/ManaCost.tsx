@@ -1,11 +1,22 @@
+import { manaSymbolUrl } from "../lib/manaSymbols";
+
 const SYMBOL = /\{([^}]+)\}/g;
 
 /**
- * Render a Scryfall mana cost string ("{2}{W}{U}") as coloured pips.
- * Hybrid symbols take the colour of their first half, which is enough to read
- * a curve at a glance without pulling in an icon font.
+ * Render a Scryfall mana cost string ("{2}{W}{U}") using the official card
+ * symbols.
+ *
+ * The SVGs are bundled under `public/mana/` rather than fetched, so costs
+ * render instantly and work offline. Anything Scryfall does not publish a
+ * symbol for falls back to a coloured letter pip.
  */
-export function ManaCost({ cost }: { cost: string | null | undefined }) {
+export function ManaCost({
+  cost,
+  size = 15,
+}: {
+  cost: string | null | undefined;
+  size?: number;
+}) {
   if (!cost) return null;
 
   const symbols = [...cost.matchAll(SYMBOL)].map((m) => m[1]);
@@ -14,6 +25,22 @@ export function ManaCost({ cost }: { cost: string | null | undefined }) {
   return (
     <span className="mana">
       {symbols.map((symbol, i) => {
+        const url = manaSymbolUrl(symbol);
+
+        if (url) {
+          return (
+            <img
+              key={i}
+              className="pip-svg"
+              src={url}
+              alt={`{${symbol}}`}
+              title={`{${symbol}}`}
+              style={size === 15 ? undefined : { width: size, height: size }}
+              draggable={false}
+            />
+          );
+        }
+
         const color = ["W", "U", "B", "R", "G"].find((c) => symbol.includes(c));
         const label = symbol.replace(/\//g, "");
         return (
