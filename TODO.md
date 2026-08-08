@@ -62,6 +62,72 @@ migration. See the reasoning in git history.
 
 ## Next up
 
+### Card-set algebra — the document model ⭐⭐⭐
+
+The thing panels are views *of*. Maya and Blender give you many viewports onto one
+shared model; here the model is not a mesh but a **graph of card-set
+specifications**. Everything else in this section depends on getting this right.
+
+A node denotes a (multi)set of cards:
+
+| Node | Meaning |
+| --- | --- |
+| `Literal` | an enumerated list with quantities — a decklist, a collection, an import result. **Editable.** |
+| `Empty` | the empty set; the identity element and a useful starting point |
+| `Universe` | every printing in Magic. Unbounded — never materialised |
+| `Filter(node, predicate)` | Scryfall-style predicate over any node |
+| `Union` / `Intersect` / `Difference` / `SymmetricDifference` | boolean ops |
+| `Project(node, grain)` | collapse printings to oracle cards, or expand back out |
+
+**Three decisions determine everything downstream.** These need answering before
+any code:
+
+1. **Multiset or set?** Decks and collections carry quantities. "What am I
+   missing" is only `deck − collection` under *multiset* semantics
+   (`max(0, a−b)`), with intersection as `min(a, b)`. Proposal: multisets
+   throughout, with an explicit `dedupe` when plain set semantics is wanted.
+
+2. **What is an element — a printing or a card?** `Sol Ring (C21)` and
+   `Sol Ring (LTC)` are the same card and different printings. Legality cares
+   about the oracle card; a binder cares about the printing. Proposal: every
+   operation takes a **grain** (`printing | oracle | name`), defaulting to
+   `oracle` for deck maths and `printing` for collection maths. This is the
+   existing "smart ownership" idea generalised.
+
+3. **Laziness.** `Universe` is ~500k printings and conceptually open-ended; it
+   cannot be materialised. Nodes stay symbolic and compile to a query,
+   materialising only what a view needs to draw. The compiler decides per
+   expression whether it is answerable from local SQLite or needs Scryfall:
+   `Filter(Universe, q)` is a Scryfall query; `Intersect(Filter(Universe), Collection)`
+   pushes down into SQL over the local cache.
+
+**Editing.** `Literal` nodes are editable — dragging a card into a deck panel
+edits that node. Derived nodes are read-only but can be **baked** into a literal,
+the way Blender applies a modifier. Edits propagate to every view of a node; two
+panels showing one deck must never drift.
+
+**Re-backing the features we like.** The point of the algebra is that the quality
+-of-life behaviour of Arena, Scryfall and Moxfield falls out as presets rather
+than being reimplemented:
+
+| Feature elsewhere | Expression here |
+| --- | --- |
+| Scryfall search | `Filter(Universe, q)` |
+| Arena's card pool | `Filter(Universe ∩ Owned, format + colour identity)` |
+| Moxfield "missing cards" | `Deck − Collection` (multiset, oracle grain) |
+| "Own but never play" | `Collection − Union(all decks)` |
+| Binder / cube triage | `Collection ∩ Filter(…)` |
+| Deck diff (§4) | `SymmetricDifference(v1, v2)` |
+
+**Open questions.**
+- How is the graph persisted, and are nodes nameable/reusable across workspaces?
+- Union of multisets — sum the quantities, or take the max? ("all my decks
+  combined" wants different answers for "total copies used" vs "copies needed at
+  once")
+- How far should the compiler push down before giving up and materialising?
+- Cycles: forbid outright, presumably.
+- Do derived nodes cache their materialisation, and how is that invalidated?
+
 ### Multi-panel workspace ⭐
 
 Move from one fixed layout to a reconfigurable workspace, so the app can be
@@ -141,14 +207,14 @@ since the pool panel scopes itself by format.
 - ⬜ Target formats: Commander, Standard, Pioneer, Modern, Legacy, Vintage,
       Pauper, Brawl, and a Limited/sealed pool mode
 
-### Set operations across decks and collections
-The next conversation. Sketch:
-- ⬜ Difference — "what does this deck need that I don't own" (partly covered by
-      ownership today, but not as a first-class, exportable result)
-- ⬜ Intersection — "what do these two decks share"
-- ⬜ Union — merge collections, or build a "cards I can actually field" view
-- ⬜ Operate on decks, collections, and search results interchangeably
-- ⬜ Results are themselves lists: exportable, saveable as a new collection
+### Set operations — surfacing the algebra
+
+Subsumed by the card-set algebra above; what remains here is the UI over it.
+- ⬜ Build expressions without writing them — drag nodes together, pick an operator
+- ⬜ A graph//node editor panel, or a simpler expression bar to start with
+- ⬜ Results are first-class: viewable in any panel, exportable, bakeable into a
+      new collection or deck
+- ⬜ Common operations as one-click presets, so the algebra stays optional
 
 ### Deck builder gaps
 - ⬜ Undo / redo
