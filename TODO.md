@@ -62,6 +62,85 @@ migration. See the reasoning in git history.
 
 ## Next up
 
+### Multi-panel workspace ⭐
+
+Move from one fixed layout to a reconfigurable workspace, so the app can be
+arranged around the activity rather than around a single "current view".
+
+**First milestone — mimic the Arena deckbuilder.** Two panels stacked: the
+filtered pool of candidate cards **on top**, the deck under construction
+**below**. This is the smallest arrangement that proves the model, and it is the
+one that gets used most.
+
+- ⬜ Pool panel above, deck panel below, draggable horizontal divider
+- ⬜ Pool panel sources: Scryfall search **or** a collection, same panel type
+- ⬜ Facet filters on the pool (extract the ones collections already have)
+- ⬜ Double-click or drag a card from pool → deck
+- ⬜ Pool auto-scopes to the deck's format constraints, with a toggle —
+      format legality everywhere, plus commander colour identity in Commander
+- ⬜ Ownership badges in the pool ("you own 3") when a collection is selected
+
+**Panel types.** Each is a self-contained view over one source:
+- ⬜ Deck (list / piles / curve)
+- ⬜ Pool (search results or collection, filtered)
+- ⬜ Card detail
+- ⬜ Deck stats
+- ⬜ Ownership / missing
+- ⬜ Set-operation result (see below — results become just another pool source)
+
+**Layout model.**
+- ⬜ Nested binary splits with ratios, à la VS Code / tmux — arbitrary
+      arrangements without a fixed slot grid
+- ⬜ Tabbed panel groups, so a slot can hold several panels
+- ⬜ Persisted per workspace (new migration: `workspaces`, `panels`)
+
+**Cross-panel wiring.** The hard part, and what makes it a workspace rather than
+just split views:
+- ⬜ Shared selection — clicking a card anywhere updates linked detail panels
+- ⬜ Per-panel "follow" toggle, so a panel can be pinned instead of following
+- ⬜ Drag payloads that work across panels (cards, and later whole lists)
+- ⬜ Panel parameterisation — a pool panel scoped *by* a deck panel is the
+      mechanism behind the colour-identity filter above
+
+**Presets ("activities").** Named layouts to switch between:
+- ⬜ Brewing — deck + pool + stats
+- ⬜ Collection triage — collection wall + card detail + "decks using this"
+- ⬜ Deck diff — two deck panels + a difference panel
+- ⬜ Playtest — hand + battlefield + library stats
+
+**What this costs.** `App.tsx` hardcodes a three-column grid and a `view` union;
+`DeckView` and `CollectionView` own their toolbars and their own data loading.
+Turning them into panels means extracting the toolbars, lifting data loading to
+a workspace store, and pulling the collection facet filters out into a component
+the pool panel can reuse. Best done before more views exist, not after.
+
+**Open questions.**
+- Does a panel own its data, or subscribe to a workspace store? (Leaning store —
+  two panels showing the same deck must not drift.)
+- One database, many windows? Multiple windows is a natural extension of panels
+  but SQLite writes would need coordinating.
+- How much layout state is worth persisting — exact ratios, or just structure?
+
+### Format support ⭐
+
+The app is **Commander-first but must not be Commander-only**. Today the
+`decks.format` column exists and nothing reads it: every rule, count and label is
+hardcoded to Commander. Generalising this is a prerequisite for the panel work,
+since the pool panel scopes itself by format.
+
+- ⬜ Format registry — deck size, sideboard size, copies allowed, whether a
+      commander zone exists, whether colour identity constrains the deck
+- ⬜ Replace `commanderIssues()` with per-format rule sets sharing one
+      `LegalityIssue` shape (keep the advisory-not-blocking behaviour)
+- ⬜ Format picker on deck creation, and changeable afterwards
+- ⬜ Zones per format — Commander's commander + 99 vs a 60-card main + 15-card
+      sideboard; `maybe` stays universal
+- ⬜ Stats that adapt: the toolbar hardcodes `/100`
+- ⬜ Legality checks read `legalities[format]` rather than always `commander`
+- ⬜ Card detail legality list ordered by the current deck's format
+- ⬜ Target formats: Commander, Standard, Pioneer, Modern, Legacy, Vintage,
+      Pauper, Brawl, and a Limited/sealed pool mode
+
 ### Set operations across decks and collections
 The next conversation. Sketch:
 - ⬜ Difference — "what does this deck need that I don't own" (partly covered by
