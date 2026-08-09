@@ -944,6 +944,83 @@ textarea:focus {
   color: var(--text-dim);
 }
 
+/* ---------- split pane ---------- */
+
+.split {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.split-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.split-pane.grow {
+  flex: 1;
+}
+
+.split-divider {
+  height: 6px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: var(--border);
+  /* A hairline that thickens on approach, so it is easy to grab without
+     stealing visual weight from the panes. */
+  border-top: 1px solid var(--bg);
+  border-bottom: 1px solid var(--bg);
+}
+
+.split-divider:hover,
+.split-divider.dragging {
+  background: var(--accent-dim);
+}
+
+/* ---------- pool panel ---------- */
+
+.pool {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  background: var(--bg);
+}
+
+.pool .toolbar {
+  background: var(--bg);
+}
+
+/* Arena's convention: with both ownership boxes ticked, cards you do not own
+   stay visible but recede. */
+.card-tile.dim img {
+  opacity: 0.32;
+  filter: grayscale(0.55);
+}
+
+.card-tile.dim:hover img {
+  opacity: 0.75;
+  filter: none;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
 /* ---------- import / export ---------- */
 
 .dialog.wide {

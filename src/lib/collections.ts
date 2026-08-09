@@ -1,4 +1,5 @@
 import { CardRow, execute, newId, now, rowToCard, select } from "./db";
+import type { CardFilter } from "./filters";
 import type {
   Card,
   Collection,
@@ -94,30 +95,12 @@ type CollectionItemRow = CardRow & {
   item_notes: string;
 };
 
-/** Card types worth faceting on when browsing a collection. */
-export const FILTER_TYPES = [
-  "Creature",
-  "Instant",
-  "Sorcery",
-  "Artifact",
-  "Enchantment",
-  "Planeswalker",
-  "Land",
-] as const;
-
-export const FILTER_RARITIES = ["common", "uncommon", "rare", "mythic"] as const;
-
-export interface CollectionFilter {
-  /** Substring match on card name. */
-  name?: string;
-  /** Colour identity letters; "C" means colourless. Matches ANY selected. */
-  colors?: string[];
-  /** Type-line keywords; matches ANY selected. */
-  types?: string[];
-  rarities?: string[];
-  mvMin?: number;
-  mvMax?: number;
-}
+/**
+ * Collections share the filter model with the deck-builder pool, so the same
+ * facet selection can drive either a local query or a Scryfall search.
+ * See `filters.ts`.
+ */
+export type CollectionFilter = CardFilter;
 
 export type CollectionSort = "name" | "mv" | "quantity" | "value";
 
@@ -189,6 +172,24 @@ export async function collectionItems(
   if (typeof filter.mvMax === "number") {
     params.push(filter.mvMax);
     clauses.push(`c.cmc <= ${hole()}`);
+  }
+
+  if (filter.withinIdentity !== undefined) {
+    // Subset test: the card's identity may not contain any colour outside the
+    // allowed set. Expressed as the absence of each disallowed letter, which is
+    // five cheap comparisons rather than a set operation SQLite lacks.
+    const allowed = new Set(filter.withinIdentity.toUpperCase());
+    for (const color of ["W", "U", "B", "R", "G"]) {
+      if (!allowed.has(color)) {
+        params.push(`%${color}%`);
+        clauses.push(`c.color_identity NOT LIKE ${hole()}`);
+      }
+    }
+  }
+
+  if (filter.legalIn) {
+    params.push(filter.legalIn);
+    clauses.push(`json_extract(c.legalities, '$.' || ${hole()}) IN ('legal', 'restricted')`);
   }
 
   const where = clauses.length ? ` AND ${clauses.join(" AND ")}` : "";
@@ -269,6 +270,33 @@ export async function setCollectionItemQuantity(
 
 export async function removeCollectionItem(itemId: string): Promise<void> {
   await execute("DELETE FROM collection_items WHERE id = $1", [itemId]);
+}
+
+/**
+ * Oracle ids of every card present in the given collections, or in all of them
+ * when none are named.
+ *
+ * Keyed by oracle id so any printing counts as "collected", and returned as a
+ * Set because the caller checks it once per rendered card. Even a large paper
+ * collection is only a few thousand ids, so this is cheap to hold in memory.
+ */
+export async function ownedOracleIds(
+  collectionIds?: string[],
+): Promise<Set<string>> {
+  const scoped = collectionIds?.length;
+  const holes = scoped
+    ? collectionIds.map((_, i) => `$${i + 1}`).join(", ")
+    : "";
+
+  const rows = await select<{ oracle_id: string }>(
+    `SELECT DISTINCT c.oracle_id
+       FROM collection_items ci
+       JOIN cards c ON c.id = ci.card_id
+      ${scoped ? `WHERE ci.collection_id IN (${holes})` : ""}`,
+    scoped ? collectionIds : [],
+  );
+
+  return new Set(rows.map((r) => r.oracle_id));
 }
 
 export interface OwnedCopy {

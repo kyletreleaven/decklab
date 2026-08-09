@@ -41,6 +41,8 @@ export function DeckView({
   onImport,
   onExport,
   onReloadEntries,
+  poolOn,
+  onTogglePool,
   refreshKey,
 }: {
   deck: Deck;
@@ -57,6 +59,9 @@ export function DeckView({
   onImport: () => void;
   onExport: () => void;
   onReloadEntries: () => Promise<void>;
+  /** Whether the candidate-card pool is showing above this deck. */
+  poolOn: boolean;
+  onTogglePool: () => void;
   refreshKey: number;
 }) {
   const [editingName, setEditingName] = useState(false);
@@ -255,7 +260,14 @@ export function DeckView({
           </button>
         </div>
 
-        <button className="primary" onClick={onAddCards}>
+        <button
+          className={poolOn ? "primary" : ""}
+          onClick={onTogglePool}
+          title="Show a pool of candidate cards above the deck"
+        >
+          {poolOn ? "Hide pool" : "Show pool"}
+        </button>
+        <button className="ghost" onClick={onAddCards}>
           ＋ Add cards
         </button>
         <button className="ghost" onClick={onImport}>

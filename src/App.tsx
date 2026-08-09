@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { CardDetail } from "./components/CardDetail";
 import { CardSearch } from "./components/CardSearch";
 import { CollectionView } from "./components/CollectionView";
 import { DeckView } from "./components/DeckView";
 import { ExportDialog } from "./components/ExportDialog";
 import { ImportDialog, type ImportTarget } from "./components/ImportDialog";
+import { PoolPanel } from "./components/PoolPanel";
+import { SplitPane } from "./components/SplitPane";
+import type { CardFilter } from "./lib/filters";
 import * as collectionsApi from "./lib/collections";
 import { COLLECTION_KINDS } from "./lib/collections";
 import { exportCollection, exportDeck, type ExportFormat } from "./lib/decklist";
@@ -40,6 +43,7 @@ export default function App() {
   const [draftName, setDraftName] = useState("");
   const [draftKind, setDraftKind] = useState<CollectionKind>("paper");
   const [error, setError] = useState<string | null>(null);
+  const [showPool, setShowPool] = useState(false);
   const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
   const [exportState, setExportState] = useState<{
     title: string;
@@ -127,6 +131,54 @@ export default function App() {
     setDialog(null);
     setDraftName("");
     setDraftKind("paper");
+  }
+
+  /**
+   * What the open deck allows, expressed as a filter the pool can apply.
+   *
+   * Format legality always applies; colour identity only in Commander, and only
+   * once a commander is set — before that, restricting to colourless would hide
+   * almost everything.
+   */
+  const deckScope = useMemo<{ label: string; filter: CardFilter } | undefined>(() => {
+    if (!currentDeck) return undefined;
+
+    const commanders = entries.filter((e) => e.zone === "commander");
+    const identity = new Set<string>();
+    for (const entry of commanders) {
+      for (const color of entry.card.colorIdentity) identity.add(color);
+    }
+
+    const scoped = currentDeck.format === "commander" && commanders.length > 0;
+    const withinIdentity = scoped
+      ? ["W", "U", "B", "R", "G"].filter((c) => identity.has(c)).join("")
+      : undefined;
+
+    return {
+      label: scoped ? "Deck-legal" : "Format-legal",
+      filter: { legalIn: currentDeck.format, withinIdentity },
+    };
+  }, [currentDeck, entries]);
+
+  /** Put the candidate-card pool above a deck view when the pool is showing. */
+  function withPool(node: ReactNode): ReactNode {
+    if (!showPool || !currentDeck) return node;
+    return (
+      <SplitPane
+        storageKey="decklab.deck-pool-split"
+        defaultRatio={0.5}
+        top={
+          <PoolPanel
+            collections={collections}
+            selectedId={selectedCard?.id ?? null}
+            onSelect={setSelectedCard}
+            onAdd={(card) => addToDeck(card, currentDeck.id, false)}
+            scope={deckScope}
+          />
+        }
+        bottom={node}
+      />
+    );
   }
 
   return (
@@ -231,7 +283,7 @@ export default function App() {
           </>
         )}
 
-        {view.kind === "deck" && currentDeck && (
+        {view.kind === "deck" && currentDeck && withPool(
           <DeckView
             deck={currentDeck}
             entries={entries}
@@ -278,7 +330,9 @@ export default function App() {
                 render: (format) => exportDeck(entries, format),
               })
             }
-          />
+            poolOn={showPool}
+            onTogglePool={() => setShowPool((v) => !v)}
+          />,
         )}
 
         {view.kind === "collection" && currentCollection && (
