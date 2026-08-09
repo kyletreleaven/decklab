@@ -533,6 +533,64 @@ textarea:focus {
   color: var(--text-faint);
 }
 
+/* ---------- printings carousel ---------- */
+
+.carousel {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.carousel .art {
+  margin-bottom: 0;
+}
+
+.carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 44px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.62);
+  border-color: var(--border-strong);
+  /* Only surface on approach — the art is the point, not the chrome. */
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.carousel:hover .carousel-arrow {
+  opacity: 1;
+}
+
+.carousel-arrow.left {
+  left: 6px;
+}
+
+.carousel-arrow.right {
+  right: 6px;
+}
+
+.carousel-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.carousel-controls select {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.carousel-controls .hint {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
 .empty {
   padding: 32px 16px;
   text-align: center;

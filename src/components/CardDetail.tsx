@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { ownedCopies, type OwnedCopy } from "../lib/collections";
+import { useEffect, useMemo, useState } from "react";
+import { ownedByPrinting } from "../lib/collections";
+import { cachedPrintings } from "../lib/cards";
+import * as scryfall from "../lib/scryfall";
 import type { Card, Collection, Deck } from "../lib/types";
 import { CardImage } from "./CardImage";
 import { ManaCost } from "./ManaCost";
@@ -9,6 +11,45 @@ const LEGALITY_FORMATS = ["commander", "modern", "pioneer", "legacy", "vintage"]
 function money(value: string | null | undefined): string | null {
   const n = Number.parseFloat(value ?? "");
   return Number.isFinite(n) ? `$${n.toFixed(2)}` : null;
+}
+
+/** Printing traits that distinguish same-set variants, read from raw Scryfall JSON. */
+function variantTraits(card: Card): string[] {
+  const data = card.data as {
+    border_color?: string;
+    frame_effects?: string[];
+    promo?: boolean;
+    finishes?: string[];
+  };
+
+  const traits: string[] = [];
+  if (data.border_color === "borderless") traits.push("borderless");
+
+  const effects = data.frame_effects ?? [];
+  if (effects.includes("showcase")) traits.push("showcase");
+  if (effects.includes("extendedart")) traits.push("extended");
+  if (effects.includes("etched")) traits.push("etched");
+  if (data.promo) traits.push("promo");
+
+  // A single-finish printing is a real distinction (foil-only, etched-only);
+  // the usual nonfoil+foil pair is not worth mentioning.
+  const finishes = data.finishes ?? [];
+  if (finishes.length === 1 && finishes[0] !== "nonfoil") traits.push(finishes[0]);
+
+  return traits;
+}
+
+/**
+ * A label that actually distinguishes printings.
+ *
+ * Set name alone is not enough: Sol Ring has 30 Secret Lair printings, so
+ * without the collector number they all render identically and the list looks
+ * like it is repeating itself.
+ */
+function printingLabel(card: Card): string {
+  const base = `${card.setName} (${card.setCode.toUpperCase()}) #${card.collectorNumber}`;
+  const traits = variantTraits(card);
+  return traits.length ? `${base} · ${traits.join(", ")}` : base;
 }
 
 export function CardDetail({
@@ -27,21 +68,72 @@ export function CardDetail({
   /** Bumped by the parent when collections change, to refetch owned copies. */
   refreshKey: number;
 }) {
-  const [owned, setOwned] = useState<OwnedCopy[]>([]);
+  const [printings, setPrintings] = useState<Card[]>([]);
+  const [printingId, setPrintingId] = useState<string | null>(null);
+  const [ownedQty, setOwnedQty] = useState<Record<string, number>>({});
+  const [ownedOnly, setOwnedOnly] = useState(false);
+
+  const oracleId = card?.oracleId ?? null;
+
+  // Cache first so the strip draws immediately, then refresh from Scryfall
+  // behind it — a card met through search usually has only one printing cached.
+  useEffect(() => {
+    if (!oracleId) {
+      setPrintings([]);
+      return;
+    }
+
+    let active = true;
+    setPrintings(card ? [card] : []);
+
+    cachedPrintings(oracleId).then((rows) => {
+      if (active && rows.length) setPrintings(rows);
+    });
+
+    scryfall
+      .printings(oracleId)
+      .then((rows) => {
+        if (active && rows.length) setPrintings(rows);
+      })
+      .catch(() => {
+        /* offline is fine; the cached list stands */
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [oracleId]);
 
   useEffect(() => {
-    if (!card) {
-      setOwned([]);
+    if (!oracleId) {
+      setOwnedQty({});
       return;
     }
     let active = true;
-    ownedCopies(card.oracleId).then((rows) => {
-      if (active) setOwned(rows);
+    ownedByPrinting(oracleId).then((rows) => {
+      if (active) setOwnedQty(rows);
     });
     return () => {
       active = false;
     };
-  }, [card?.oracleId, refreshKey]);
+  }, [oracleId, refreshKey]);
+
+  // Follow the card selected elsewhere; the carousel then moves within its
+  // printings without disturbing that selection.
+  useEffect(() => {
+    setPrintingId(card?.id ?? null);
+    setOwnedOnly(false);
+  }, [card?.id]);
+
+  const visible = useMemo(
+    () => (ownedOnly ? printings.filter((p) => ownedQty[p.id]) : printings),
+    [printings, ownedOnly, ownedQty],
+  );
+
+  const ownedTotal = useMemo(
+    () => Object.values(ownedQty).reduce((sum, n) => sum + n, 0),
+    [ownedQty],
+  );
 
   if (!card) {
     return (
@@ -51,9 +143,21 @@ export function CardDetail({
     );
   }
 
-  const playable = owned.reduce((sum, o) => sum + o.quantity, 0);
-  const usd = money(card.prices.usd);
-  const usdFoil = money(card.prices.usd_foil);
+  // The carousel selection is what the panel describes and what ops act on, so
+  // picking a printing and adding it does the obvious thing.
+  const shown = printings.find((p) => p.id === printingId) ?? card;
+  const index = visible.findIndex((p) => p.id === shown.id);
+  const usd = money(shown.prices.usd);
+  const usdFoil = money(shown.prices.usd_foil);
+  const shownOwned = ownedQty[shown.id] ?? 0;
+
+  function step(delta: number) {
+    if (visible.length < 2) return;
+    // Wrap, so paging through a long print run never dead-ends.
+    const from = index === -1 ? 0 : index;
+    const next = (from + delta + visible.length) % visible.length;
+    setPrintingId(visible[next].id);
+  }
 
   return (
     <aside className="detail-rail">
@@ -67,7 +171,7 @@ export function CardDetail({
               value=""
               onChange={(e) => {
                 const [deckId, mode] = e.target.value.split("|");
-                if (deckId) onAddToDeck(card, deckId, mode === "commander");
+                if (deckId) onAddToDeck(shown, deckId, mode === "commander");
                 e.target.value = "";
               }}
               disabled={decks.length === 0}
@@ -86,7 +190,7 @@ export function CardDetail({
             <select
               value=""
               onChange={(e) => {
-                if (e.target.value) onAddToCollection(card, e.target.value);
+                if (e.target.value) onAddToCollection(shown, e.target.value);
                 e.target.value = "";
               }}
               disabled={collections.length === 0}
@@ -103,69 +207,109 @@ export function CardDetail({
           </div>
 
           {/* Any printing counts, so this is an oracle-level number. */}
-          <div className={`owned-badge ${playable ? "owned" : "missing"}`}>
-            {playable ? `${playable} owned` : "Not owned"}
+          <div className={`owned-badge ${ownedTotal ? "owned" : "missing"}`}>
+            {ownedTotal ? `${ownedTotal} owned` : "Not owned"}
           </div>
         </div>
 
-        <CardImage card={card} size="normal" className="art" />
+        {/* The image is the carousel viewport: stepping changes the printing
+            and everything printing-level below follows it. */}
+        <div className="carousel">
+          <CardImage key={shown.id} card={shown} size="normal" className="art" />
 
-        <h2>{card.name}</h2>
-        <div className="type">{card.typeLine}</div>
+          {visible.length > 1 && (
+            <>
+              <button
+                className="carousel-arrow left"
+                onClick={() => step(-1)}
+                title="Previous printing"
+              >
+                ‹
+              </button>
+              <button
+                className="carousel-arrow right"
+                onClick={() => step(1)}
+                title="Next printing"
+              >
+                ›
+              </button>
+            </>
+          )}
 
-        {card.manaCost && (
+          {shownOwned > 0 && <span className="qty-badge">{shownOwned}×</span>}
+        </div>
+
+        <div className="carousel-controls">
+          <select
+            value={shown.id}
+            onChange={(e) => setPrintingId(e.target.value)}
+            disabled={visible.length === 0}
+            title="Jump to a printing"
+          >
+            {visible.map((printing) => (
+              <option key={printing.id} value={printing.id}>
+                {printingLabel(printing)}
+                {ownedQty[printing.id] ? ` — ${ownedQty[printing.id]}× owned` : ""}
+              </option>
+            ))}
+          </select>
+
+          <span className="hint">
+            {visible.length > 1
+              ? `${index === -1 ? 1 : index + 1}/${visible.length}`
+              : ""}
+          </span>
+
+          <label className="check" title="Show only printings you hold">
+            <input
+              type="checkbox"
+              checked={ownedOnly}
+              onChange={(e) => setOwnedOnly(e.target.checked)}
+              disabled={ownedTotal === 0}
+            />
+            Owned only
+          </label>
+        </div>
+
+        <h2>{shown.name}</h2>
+        <div className="type">{shown.typeLine}</div>
+
+        {shown.manaCost && (
           <div style={{ marginBottom: 10 }}>
-            <ManaCost cost={card.manaCost} />
+            <ManaCost cost={shown.manaCost} />
           </div>
         )}
 
-        {card.oracleText && <div className="oracle">{card.oracleText}</div>}
+        {shown.oracleText && <div className="oracle">{shown.oracleText}</div>}
 
+        {/* Oracle-level: true of the card whichever printing is selected. */}
         <dl className="kv">
-          <dt>Set</dt>
-          <dd>
-            {card.setName} ({card.setCode.toUpperCase()} #{card.collectorNumber})
-          </dd>
-
-          <dt>Rarity</dt>
-          <dd style={{ textTransform: "capitalize" }}>{card.rarity}</dd>
-
           <dt>Mana value</dt>
-          <dd>{card.cmc}</dd>
+          <dd>{shown.cmc}</dd>
 
-          {(card.power || card.toughness) && (
+          {(shown.power || shown.toughness) && (
             <>
               <dt>P/T</dt>
               <dd>
-                {card.power}/{card.toughness}
+                {shown.power}/{shown.toughness}
               </dd>
             </>
           )}
 
-          {card.loyalty && (
+          {shown.loyalty && (
             <>
               <dt>Loyalty</dt>
-              <dd>{card.loyalty}</dd>
+              <dd>{shown.loyalty}</dd>
             </>
           )}
 
           <dt>Identity</dt>
-          <dd>{card.colorIdentity || "Colourless"}</dd>
+          <dd>{shown.colorIdentity || "Colourless"}</dd>
 
-          {(usd || usdFoil) && (
-            <>
-              <dt>Price</dt>
-              <dd>
-                {usd ?? "—"}
-                {usdFoil ? ` · ${usdFoil} foil` : ""}
-              </dd>
-            </>
-          )}
-
-          {card.edhrecRank && (
+          {shown.edhrecRank && (
             <>
               <dt>EDHREC rank</dt>
-              <dd>#{card.edhrecRank}</dd>
+              <dd>#{shown.edhrecRank}</dd>
             </>
           )}
         </dl>
@@ -173,7 +317,7 @@ export function CardDetail({
         <div className="group-title">Legality</div>
         <dl className="kv">
           {LEGALITY_FORMATS.map((format) => {
-            const status = card.legalities[format] ?? "unknown";
+            const status = shown.legalities[format] ?? "unknown";
             const colour =
               status === "legal"
                 ? "var(--ok)"
@@ -191,25 +335,48 @@ export function CardDetail({
           })}
         </dl>
 
-        {/* Per-printing breakdown. The printings carousel replaces this in the
-            next pass; until then it is the only place printings are visible. */}
-        {owned.length > 0 && (
-          <>
-            <div className="group-title">Copies</div>
-            <dl className="kv">
-              {owned.map((copy, i) => (
-                <div key={i} style={{ display: "contents" }}>
-                  <dt>{copy.quantity}×</dt>
-                  <dd>
-                    {copy.setName} ({copy.setCode.toUpperCase()})
-                    {copy.finish !== "nonfoil" ? ` · ${copy.finish}` : ""}
-                    <span className="hint"> — {copy.collectionName}</span>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </>
-        )}
+        {/* Printing-level: everything here changes with the carousel. */}
+        <div className="group-title">This printing</div>
+        <dl className="kv">
+          <dt>Set</dt>
+          <dd>
+            {shown.setName} ({shown.setCode.toUpperCase()} #{shown.collectorNumber})
+          </dd>
+
+          <dt>Rarity</dt>
+          <dd style={{ textTransform: "capitalize" }}>{shown.rarity}</dd>
+
+          {variantTraits(shown).length > 0 && (
+            <>
+              <dt>Variant</dt>
+              <dd style={{ textTransform: "capitalize" }}>
+                {variantTraits(shown).join(", ")}
+              </dd>
+            </>
+          )}
+
+          {shown.releasedAt && (
+            <>
+              <dt>Released</dt>
+              <dd>{shown.releasedAt}</dd>
+            </>
+          )}
+
+          {(usd || usdFoil) && (
+            <>
+              <dt>Price</dt>
+              <dd>
+                {usd ?? "—"}
+                {usdFoil ? ` · ${usdFoil} foil` : ""}
+              </dd>
+            </>
+          )}
+
+          <dt>Owned</dt>
+          <dd className={shownOwned ? "owned" : "missing"}>
+            {shownOwned ? `${shownOwned} of this printing` : "None of this printing"}
+          </dd>
+        </dl>
       </div>
     </aside>
   );

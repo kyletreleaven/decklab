@@ -317,6 +317,31 @@ export async function ownedOracleIds(
   return new Set(rows.map((r) => r.oracle_id));
 }
 
+/**
+ * Copies held of each *printing* of a card, across ownable collections.
+ * Keyed by printing id, for the carousel's per-printing badges.
+ *
+ * Finishes and conditions are summed together — the badge answers "how many of
+ * this printing do I have", and the finish breakdown lives elsewhere.
+ */
+export async function ownedByPrinting(
+  oracleId: string,
+): Promise<Record<string, number>> {
+  const rows = await select<{ card_id: string; quantity: number }>(
+    `SELECT ci.card_id, SUM(ci.quantity) AS quantity
+       FROM collection_items ci
+       JOIN cards c         ON c.id = ci.card_id
+       JOIN collections col ON col.id = ci.collection_id
+      WHERE c.oracle_id = $1 AND ${ownableClause("col")}
+      GROUP BY ci.card_id`,
+    [oracleId],
+  );
+
+  const byPrinting: Record<string, number> = {};
+  for (const row of rows) byPrinting[row.card_id] = row.quantity;
+  return byPrinting;
+}
+
 export interface OwnedCopy {
   collectionId: string;
   collectionName: string;
