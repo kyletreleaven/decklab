@@ -62,6 +62,86 @@ migration. See the reasoning in git history.
 
 ## Next up
 
+### Card panel layout — settled
+
+The detail rail currently reads image → name → oracle → details → legality →
+owned → actions, which buries the two things deckbuilding actually needs behind
+two screenfuls of reference data. Settled order:
+
+1. ⬜ **Ops** — add to deck / collection, plus a compact owned count.
+      At the top so it is reachable without scrolling.
+2. ⬜ **Picture** — the card itself.
+3. ⬜ **Oracle details** — kept as one block. It reads well whole and
+      fragmenting it to interleave actions would be worse.
+4. ⬜ **Printings carousel** — horizontal strip of every printing, each badged
+      with how many copies are held; click to switch the panel to that printing.
+
+The carousel does three jobs at once: it replaces the single static "Set: X
+(CODE #123)" line, it subsumes the per-printing ownership breakdown that
+currently sits in its own block, and it closes the **printings picker** gap —
+search returns one printing per card (`unique=cards`), so there is currently no
+way to say *which* printing you own or want.
+
+Notes:
+- ⬜ Load from the local cache first so it draws instantly, then refresh from
+      Scryfall in the background.
+- ⬜ The owned count needs a defined scope. Interim: count only *ownable* kinds
+      (exclude `wishlist` and `loaned`). Real answer: selection-as-scope, below.
+
+### Mixed-grain storage — migration 003
+
+Both `collection_items` and `deck_cards` require a printing
+(`card_id NOT NULL REFERENCES cards(id)`), so neither *"two more copies, printing
+unknown"* nor *"one Sol Ring, any art"* is expressible. Decks need this at least
+as much as collections: most decklists are oracle-level, and pinning a printing
+is the exception.
+
+**Changes, both tables:**
+- ⬜ Add `oracle_id TEXT NOT NULL`
+- ⬜ Relax `card_id` to nullable, where NULL means *printing unknown / any*
+- ⬜ Replace the UNIQUE constraint with an expression index (see the trap below)
+
+**The trap: SQLite treats NULLs as distinct in UNIQUE.** The moment `card_id`
+becomes nullable, `UNIQUE (collection_id, card_id, finish, condition)` stops
+constraining unsorted rows at all — every add would silently insert a *new*
+"unknown printing" row instead of folding into the existing one. So:
+
+```sql
+CREATE UNIQUE INDEX idx_items_identity ON collection_items
+  (collection_id, oracle_id, COALESCE(card_id, ''), finish, condition);
+
+CREATE UNIQUE INDEX idx_deck_cards_identity ON deck_cards
+  (deck_id, oracle_id, COALESCE(card_id, ''), zone);
+```
+
+This also permits `1 Sol Ring (C21)` and `1 Sol Ring (any)` to coexist in one
+deck, which is meaningful: *"I own one specific art and still need another."*
+
+**Decisions taken:**
+- ⬜ **One table, not two.** `known` and `unsorted` are a logical split; in
+      storage it is one table with a nullable `card_id`. Two tables would double
+      every query for no gain.
+- ⬜ **Storing `oracle_id` removes a join.** Ownership queries currently join
+      `cards` solely to reach it.
+- ⬜ **A representative printing is a display choice, not stored data.** An
+      oracle-grained row still needs an image: pick the newest cached printing
+      for that `oracle_id`. Safe because we only ever record cards we have
+      fetched, so one printing is always cached.
+
+**Migration shape.** SQLite cannot relax `NOT NULL` or swap a table constraint in
+place, so this is a create-copy-drop-rename rebuild of both tables rather than an
+`ALTER`. `oracle_id` backfills from `cards` through the existing `card_id`, so no
+data is lost.
+
+**Code that follows:**
+- ⬜ **Import stops fabricating printings.** A bare `4 Lightning Bolt` currently
+      resolves to whichever printing Scryfall returns first and records *that* as
+      owned — inventing information the source never gave. Bare names should land
+      with `card_id` NULL.
+- ⬜ Printings carousel gains an "unknown printing ×N" slot, and a way to promote
+      copies into a specific printing as they are sorted.
+- ⬜ Adding to a deck offers both grains: this printing, or any.
+
 ### Card-set algebra — the document model ⭐⭐⭐
 
 The thing panels are views *of*. Maya and Blender give you many viewports onto one
@@ -166,6 +246,41 @@ get**. Grain conversion therefore carries an *aggregation*, not just a target:
 trip out and back widens a specific set of printings into *all* printings of
 those cards. Useful (it is exactly "show me every version of what I own"), but it
 must not be mistaken for a no-op, and the UI should not offer it as one.
+
+**Collections are mixed-grain, and that is fine.** Real collections know some
+cards exactly and others only vaguely: *"I have this specific foil printing of X,
+plus two more copies from bulk that I have not sorted."* Both facts are true and
+both are worth storing.
+
+Do **not** model this as a mixed-grain spec — that would break the typing.
+Instead, a `Collection` *entity* holds **two** specs:
+
+| Spec | Grain | Holds |
+| --- | --- | --- |
+| `known` | `printing` | copies whose printing is identified |
+| `unsorted` | `oracle` | copies known only by card |
+
+Then the questions have clean answers:
+
+- *How many X do I own?* → `Sum(ToOracle(known, sum), unsorted)` at oracle grain
+- *Do I own this exact printing?* → read `known` alone
+- *What is my collection worth?* → priceable only over `known`; `unsorted` needs a
+  cheapest-printing or average assumption, and should say which
+
+This is why entities are a layer above specs rather than being specs themselves:
+one collection, several specs.
+
+Consequences to design for:
+
+- ⬜ **Schema.** `collection_items.card_id` currently points at a printing and is
+      required. It needs to become nullable alongside a required `oracle_id`,
+      with a null `card_id` meaning "printing unknown".
+- ⬜ **Import currently fabricates printings.** A pasted line of bare `4 Lightning
+      Bolt` resolves to whichever printing Scryfall returns first and records
+      *that* as owned. That is inventing information the source never gave. Bare
+      names should land in `unsorted`.
+- ⬜ **The printings carousel** needs an "unknown printing ×N" slot, and a way to
+      promote copies from `unsorted` into a specific printing as you sort them.
 
 **Grain polymorphism, and inferring it.** A predicate is not tied to one grain; it
 is valid at whichever grains its *properties* support, and that is inferable from
@@ -509,6 +624,14 @@ Statistical, not necessarily AI.
 
 Small, known, and cheap to fix — listed so they don't get rediscovered.
 
+- **Ownership scope is wrong, and inconsistent between views.** `ownedCopies()`
+  and `ownedOracleIds()` both sum across *every* collection with no filter, so a
+  **wishlist** card reads as owned and playable, a **loaned out** card reads as
+  available, and Arena/MTGO copies count toward a paper deck. Meanwhile
+  `deckOwnership()` makes you tick collections by hand — a third answer to the
+  same question. Selection-as-shared-context is the real fix; the cheap interim
+  one is to exclude the `wishlist` and `loaned` kinds, which removes the two
+  answers that are simply wrong without foreclosing anything.
 - **`card_tags` table is dead.** Left over from a query language that was cut.
   Nothing reads or writes it. Either wire up user tags or drop it in a migration.
 - **CSP is `null`.** Fine for local dev; tighten before shipping signed builds.
