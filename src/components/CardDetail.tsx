@@ -58,6 +58,56 @@ export function CardDetail({
   return (
     <aside className="detail-rail">
       <div className="detail">
+        {/* Operations lead: during deckbuilding these are what you reach for,
+            and burying them under the reference data meant scrolling past two
+            screenfuls to add a card. */}
+        <div className="ops">
+          <div className="ops-row">
+            <select
+              value=""
+              onChange={(e) => {
+                const [deckId, mode] = e.target.value.split("|");
+                if (deckId) onAddToDeck(card, deckId, mode === "commander");
+                e.target.value = "";
+              }}
+              disabled={decks.length === 0}
+            >
+              <option value="">
+                {decks.length ? "Add to deck…" : "No decks yet"}
+              </option>
+              {decks.map((deck) => (
+                <optgroup key={deck.id} label={deck.name}>
+                  <option value={`${deck.id}|main`}>Add to the 99</option>
+                  <option value={`${deck.id}|commander`}>Set as commander</option>
+                </optgroup>
+              ))}
+            </select>
+
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onAddToCollection(card, e.target.value);
+                e.target.value = "";
+              }}
+              disabled={collections.length === 0}
+            >
+              <option value="">
+                {collections.length ? "Add to collection…" : "No collections yet"}
+              </option>
+              {collections.map((collection) => (
+                <option key={collection.id} value={collection.id}>
+                  {collection.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Any printing counts, so this is an oracle-level number. */}
+          <div className={`owned-badge ${playable ? "owned" : "missing"}`}>
+            {playable ? `${playable} owned` : "Not owned"}
+          </div>
+        </div>
+
         <CardImage card={card} size="normal" className="art" />
 
         <h2>{card.name}</h2>
@@ -141,68 +191,25 @@ export function CardDetail({
           })}
         </dl>
 
-        <div className="group-title">
-          Owned <span className={playable ? "owned" : "missing"}>{playable} playable</span>
-        </div>
-        {owned.length === 0 ? (
-          <div className="hint" style={{ marginBottom: 12 }}>
-            Not in any collection.
-          </div>
-        ) : (
-          <dl className="kv">
-            {owned.map((copy, i) => (
-              <div key={i} style={{ display: "contents" }}>
-                <dt>{copy.quantity}×</dt>
-                <dd>
-                  {copy.setName} ({copy.setCode.toUpperCase()})
-                  {copy.finish !== "nonfoil" ? ` · ${copy.finish}` : ""}
-                  <span className="hint"> — {copy.collectionName}</span>
-                </dd>
-              </div>
-            ))}
-          </dl>
+        {/* Per-printing breakdown. The printings carousel replaces this in the
+            next pass; until then it is the only place printings are visible. */}
+        {owned.length > 0 && (
+          <>
+            <div className="group-title">Copies</div>
+            <dl className="kv">
+              {owned.map((copy, i) => (
+                <div key={i} style={{ display: "contents" }}>
+                  <dt>{copy.quantity}×</dt>
+                  <dd>
+                    {copy.setName} ({copy.setCode.toUpperCase()})
+                    {copy.finish !== "nonfoil" ? ` · ${copy.finish}` : ""}
+                    <span className="hint"> — {copy.collectionName}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </>
         )}
-
-        <div className="group-title">Add to</div>
-        <div className="detail-actions">
-          <select
-            value=""
-            onChange={(e) => {
-              const [deckId, mode] = e.target.value.split("|");
-              if (deckId) onAddToDeck(card, deckId, mode === "commander");
-              e.target.value = "";
-            }}
-            disabled={decks.length === 0}
-          >
-            <option value="">
-              {decks.length ? "Add to deck…" : "No decks yet"}
-            </option>
-            {decks.map((deck) => (
-              <optgroup key={deck.id} label={deck.name}>
-                <option value={`${deck.id}|main`}>Add to the 99</option>
-                <option value={`${deck.id}|commander`}>Set as commander</option>
-              </optgroup>
-            ))}
-          </select>
-
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) onAddToCollection(card, e.target.value);
-              e.target.value = "";
-            }}
-            disabled={collections.length === 0}
-          >
-            <option value="">
-              {collections.length ? "Add to collection…" : "No collections yet"}
-            </option>
-            {collections.map((collection) => (
-              <option key={collection.id} value={collection.id}>
-                {collection.name}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
     </aside>
   );

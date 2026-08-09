@@ -489,6 +489,50 @@ textarea:focus {
   margin-bottom: 12px;
 }
 
+/* Operations block at the top of the card rail. Sticky so it stays reachable
+   however far down the reference data you have scrolled. */
+.ops {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.ops-row {
+  display: flex;
+  gap: 6px;
+}
+
+.ops-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.owned-badge {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.owned-badge.owned {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+}
+
+.owned-badge.missing {
+  color: var(--text-faint);
+}
+
 .empty {
   padding: 32px 16px;
   text-align: center;

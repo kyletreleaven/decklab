@@ -273,8 +273,25 @@ export async function removeCollectionItem(itemId: string): Promise<void> {
 }
 
 /**
- * Oracle ids of every card present in the given collections, or in all of them
- * when none are named.
+ * Collection kinds that count as cards you actually have available.
+ *
+ * A wishlist is by definition what you do *not* own, and cards loaned out are
+ * owned but unavailable, so counting either as "playable" is simply wrong.
+ * Digital kinds stay in for now — separating paper from Arena/MTGO needs a
+ * notion of a deck's game that does not exist yet.
+ *
+ * This is the interim answer. The real one is selection-as-scope; see TODO.md.
+ */
+export const OWNABLE_KINDS: CollectionKind[] = ["paper", "arena", "mtgo", "cube"];
+
+/** SQL fragment restricting to ownable collections. No user input involved. */
+function ownableClause(alias: string): string {
+  return `${alias}.kind IN (${OWNABLE_KINDS.map((k) => `'${k}'`).join(", ")})`;
+}
+
+/**
+ * Oracle ids of every card present in the given collections, or in all *ownable*
+ * collections when none are named.
  *
  * Keyed by oracle id so any printing counts as "collected", and returned as a
  * Set because the caller checks it once per rendered card. Even a large paper
@@ -283,17 +300,18 @@ export async function removeCollectionItem(itemId: string): Promise<void> {
 export async function ownedOracleIds(
   collectionIds?: string[],
 ): Promise<Set<string>> {
-  const scoped = collectionIds?.length;
+  const scoped = !!collectionIds?.length;
   const holes = scoped
-    ? collectionIds.map((_, i) => `$${i + 1}`).join(", ")
+    ? collectionIds!.map((_, i) => `$${i + 1}`).join(", ")
     : "";
 
   const rows = await select<{ oracle_id: string }>(
     `SELECT DISTINCT c.oracle_id
        FROM collection_items ci
-       JOIN cards c ON c.id = ci.card_id
-      ${scoped ? `WHERE ci.collection_id IN (${holes})` : ""}`,
-    scoped ? collectionIds : [],
+       JOIN cards c         ON c.id = ci.card_id
+       JOIN collections col ON col.id = ci.collection_id
+      WHERE ${scoped ? `ci.collection_id IN (${holes})` : ownableClause("col")}`,
+    scoped ? collectionIds! : [],
   );
 
   return new Set(rows.map((r) => r.oracle_id));
@@ -309,9 +327,11 @@ export interface OwnedCopy {
 }
 
 /**
- * Every copy of a card the user owns, across all collections and printings.
- * Keyed by oracle id so "2x Alpha, 1x Secret Lair, 4x M11" stays visible
- * rather than collapsing into a single number.
+ * Every copy of a card actually available, across ownable collections and every
+ * printing. Keyed by oracle id so "2x Alpha, 1x Secret Lair, 4x M11" stays
+ * visible rather than collapsing into a single number.
+ *
+ * Wishlist and loaned-out collections are excluded — see `OWNABLE_KINDS`.
  */
 export async function ownedCopies(oracleId: string): Promise<OwnedCopy[]> {
   const rows = await select<{
@@ -331,7 +351,7 @@ export async function ownedCopies(oracleId: string): Promise<OwnedCopy[]> {
        FROM collection_items ci
        JOIN cards c        ON c.id = ci.card_id
        JOIN collections col ON col.id = ci.collection_id
-      WHERE c.oracle_id = $1
+      WHERE c.oracle_id = $1 AND ${ownableClause("col")}
       GROUP BY ci.collection_id, col.name, c.set_code, c.set_name, ci.finish
       ORDER BY col.name, c.released_at DESC`,
     [oracleId],
