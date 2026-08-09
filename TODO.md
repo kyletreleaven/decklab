@@ -62,31 +62,53 @@ migration. See the reasoning in git history.
 
 ## Next up
 
-### Card panel layout — settled
+### Card panel layout
 
-The detail rail currently reads image → name → oracle → details → legality →
-owned → actions, which buries the two things deckbuilding actually needs behind
-two screenfuls of reference data. Settled order:
+The rail used to read image → name → oracle → details → legality → owned →
+actions, burying the two things deckbuilding needs behind two screenfuls of
+reference data.
 
-1. ⬜ **Ops** — add to deck / collection, plus a compact owned count.
-      At the top so it is reachable without scrolling.
-2. ⬜ **Picture** — the card itself.
-3. ⬜ **Oracle details** — kept as one block. It reads well whole and
-      fragmenting it to interleave actions would be worse.
-4. ⬜ **Printings carousel** — horizontal strip of every printing, each badged
-      with how many copies are held; click to switch the panel to that printing.
+**Done (bite 1):**
+1. ✅ **Ops** — add to deck / collection plus a compact owned count, *sticky* at
+      the top so it stays reachable however far you scroll.
+2. ✅ Owned count scoped to *ownable* kinds — `wishlist` and `loaned` excluded.
+      (Real answer is still selection-as-scope, below.)
 
-The carousel does three jobs at once: it replaces the single static "Set: X
-(CODE #123)" line, it subsumes the per-printing ownership breakdown that
-currently sits in its own block, and it closes the **printings picker** gap —
-search returns one printing per card (`unique=cards`), so there is currently no
-way to say *which* printing you own or want.
+**Next (bite 2): the printings carousel, and splitting details by grain.**
+
+The details block conflates two grains, which is why it wants splitting:
+
+| Oracle-level — stable across printings | Printing-level — varies |
+| --- | --- |
+| type line, mana cost, oracle text | set name + code, collector number |
+| mana value, P/T, loyalty | rarity |
+| colour identity | price (usd / foil) |
+| legality | artist, frame, promo type |
+| EDHREC rank | finish availability |
+
+**The carousel wraps the image rather than sitting beside it**, and drives the
+printing-level fields around it. So it is not a picker bolted on — it is the
+panel's mode control.
+
+- ⬜ Prev/next around the image; the image *is* the carousel viewport
+- ⬜ A combo box to jump straight to a printing, as an alternative to stepping
+- ⬜ A toggle for **owned printings only** vs **all printings**
+- ⬜ A **clear** control returning to the *printless / oracle* state
+- ⬜ Printing-level fields update with the selection, and read as blank or
+      "various" when cleared
+- ⬜ Per-printing owned badges, which subsume the standalone copies block
+
+**Why "clear" matters beyond tidiness.** The printless state *is* oracle grain
+made operable, and it should drive what the ops row does: with a printing
+selected, "add to deck" pins that printing; cleared, it adds oracle-grained —
+any printing. That is exactly the choice migration 003 makes storable, so the
+two pieces should land close together.
 
 Notes:
-- ⬜ Load from the local cache first so it draws instantly, then refresh from
-      Scryfall in the background.
-- ⬜ The owned count needs a defined scope. Interim: count only *ownable* kinds
-      (exclude `wishlist` and `loaned`). Real answer: selection-as-scope, below.
+- ⬜ Load printings from the local cache first so it draws instantly, then
+      refresh from Scryfall behind it.
+- ⬜ The cleared state still has to show *an* image. Use the newest cached
+      printing, and label it so it is not mistaken for a selection.
 
 ### Mixed-grain storage — migration 003
 
