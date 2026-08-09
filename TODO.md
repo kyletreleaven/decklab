@@ -93,16 +93,15 @@ panel's mode control.
 - ⬜ Prev/next around the image; the image *is* the carousel viewport
 - ⬜ A combo box to jump straight to a printing, as an alternative to stepping
 - ⬜ A toggle for **owned printings only** vs **all printings**
-- ⬜ A **clear** control returning to the *printless / oracle* state
-- ⬜ Printing-level fields update with the selection, and read as blank or
-      "various" when cleared
+- ⬜ Printing-level fields update with the selection
 - ⬜ Per-printing owned badges, which subsume the standalone copies block
 
-**Why "clear" matters beyond tidiness.** The printless state *is* oracle grain
-made operable, and it should drive what the ops row does: with a printing
-selected, "add to deck" pins that printing; cleared, it adds oracle-grained —
-any printing. That is exactly the choice migration 003 makes storable, so the
-two pieces should land close together.
+**The printless state waits for migration 003.** A "clear" control returning to
+oracle grain is the right idea, but its whole point is to change what the ops row
+*writes* — cleared means "add any printing" — and storage cannot represent that
+until 003. Shipping it earlier would put a button on screen that changes only
+which fields you are reading, which is worse than not having it. So: carousel
+now, printless state with 003.
 
 Notes:
 - ⬜ Load printings from the local cache first so it draws instantly, then
