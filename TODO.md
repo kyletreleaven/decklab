@@ -329,11 +329,45 @@ one that gets used most.
 
 **Cross-panel wiring.** The hard part, and what makes it a workspace rather than
 just split views:
-- ⬜ Shared selection — clicking a card anywhere updates linked detail panels
-- ⬜ Per-panel "follow" toggle, so a panel can be pinned instead of following
 - ⬜ Drag payloads that work across panels (cards, and later whole lists)
 - ⬜ Panel parameterisation — a pool panel scoped *by* a deck panel is the
       mechanism behind the colour-identity filter above
+
+#### Selection as shared context ⭐
+
+Borrowed from Maya, where selection is global and every viewport respects it.
+This is the single mechanism behind "what is in scope", and it replaces the
+ad-hoc scoping each view currently invents for itself.
+
+- ⬜ **One ordered selection**, with the last-selected being *active* — Maya's
+      model, and it cleanly separates the two roles: the **set** defines scope,
+      the **active** member is what the main panel opens.
+- ⬜ **Heterogeneous.** Cards, decks and collections live in one list; each
+      consumer filters by the type it cares about. "Ownership uses the
+      collections in the selection" is then a rule statable in one sentence.
+- ⬜ **Less ephemeral than Maya's.** Maya evicts on every click because a scene
+      holds thousands of objects. Our views show one or a few at a time, so
+      selection is better treated as a *working set* — built up deliberately,
+      cleared explicitly, and not thrown away merely because focus moved. That
+      alone defuses the obvious failure mode, where a count silently changes
+      because you clicked elsewhere.
+      Whether it also survives restarts is open: plausible, and it would sit
+      naturally alongside per-workspace layout persistence, but nothing else
+      here depends on it.
+- ⬜ **Scope is always shown in words** — `owned across: Paper, Cube` — so a
+      count is never mysterious.
+- ⬜ **Panels may pin instead of follow**, the same toggle as for card selection.
+- ⬜ Sidebar needs a selection affordance distinct from "open", plus an explicit
+      clear.
+
+**What it fixes immediately.** Ownership scope has three different answers today
+(see Known debt): everything, everything again, and hand-ticked chips. With a
+selection it has one — the union of the selected collections, or all *ownable*
+collections when none are selected.
+
+**How it meets the algebra.** `Owned` stops being a hardcoded query and becomes
+`Union(selected collections)` — the selection is literally an input to the
+expression graph, which is a good sign the two designs belong together.
 
 **Presets ("activities").** Named layouts to switch between:
 - ⬜ Brewing — deck + pool + stats
