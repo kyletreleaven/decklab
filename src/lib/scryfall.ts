@@ -214,8 +214,19 @@ export async function named(name: string, exact = true): Promise<Card> {
   return card;
 }
 
-/** Every printing of a card, used by the printings picker and ownership view. */
-export async function printings(oracleId: string): Promise<Card[]> {
+/**
+ * A card's print run barely changes — new sets arrive every few weeks and
+ * nothing else about an existing run moves — so this is memoised for a week.
+ *
+ * In memory only, for now; a persisted TTL arrives with migration 003. Even
+ * so, this is what stops the request queue filling with duplicate work as
+ * focus moves between cards.
+ */
+const PRINTINGS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const printingsMemo = new Map<string, { at: number; cards: Card[] }>();
+const printingsInflight = new Map<string, Promise<Card[]>>();
+
+async function fetchPrintings(oracleId: string): Promise<Card[]> {
   const params = new URLSearchParams({
     q: `oracleid:${oracleId}`,
     unique: "prints",
@@ -225,6 +236,29 @@ export async function printings(oracleId: string): Promise<Card[]> {
   const cards = list.data.map(normalize);
   await cacheCards(cards);
   return cards;
+}
+
+/** Every printing of a card, used by the printings carousel. */
+export async function printings(oracleId: string): Promise<Card[]> {
+  const hit = printingsMemo.get(oracleId);
+  if (hit && Date.now() - hit.at < PRINTINGS_TTL_MS) return hit.cards;
+
+  // Collapse concurrent asks for the same card into one request. Without this,
+  // moving focus back and forth re-enqueues work that is already in flight.
+  const pending = printingsInflight.get(oracleId);
+  if (pending) return pending;
+
+  const task = fetchPrintings(oracleId)
+    .then((cards) => {
+      printingsMemo.set(oracleId, { at: Date.now(), cards });
+      return cards;
+    })
+    .finally(() => {
+      printingsInflight.delete(oracleId);
+    });
+
+  printingsInflight.set(oracleId, task);
+  return task;
 }
 
 /** Identifier shapes accepted by Scryfall's /cards/collection endpoint. */

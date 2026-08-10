@@ -72,6 +72,7 @@ export function CardDetail({
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [ownedQty, setOwnedQty] = useState<Record<string, number>>({});
   const [ownedOnly, setOwnedOnly] = useState(false);
+  const [printingsError, setPrintingsError] = useState<string | null>(null);
 
   const oracleId = card?.oracleId ?? null;
 
@@ -80,23 +81,36 @@ export function CardDetail({
   useEffect(() => {
     if (!oracleId) {
       setPrintings([]);
+      setPrintingsError(null);
       return;
     }
 
     let active = true;
+    // Tracks whether the network result has landed, so the slower-but-staler
+    // cache read cannot clobber it if the two resolve out of order.
+    let networkWon = false;
+
     setPrintings(card ? [card] : []);
+    setPrintingsError(null);
 
     cachedPrintings(oracleId).then((rows) => {
-      if (active && rows.length) setPrintings(rows);
+      if (active && !networkWon && rows.length) setPrintings(rows);
     });
 
     scryfall
       .printings(oracleId)
       .then((rows) => {
-        if (active && rows.length) setPrintings(rows);
+        if (!active) return;
+        networkWon = true;
+        if (rows.length) setPrintings(rows);
       })
-      .catch(() => {
-        /* offline is fine; the cached list stands */
+      .catch((err) => {
+        // Never swallow this. Offline is a legitimate case, but so is a real
+        // failure, and silently showing a truncated print run looks identical
+        // to a card that genuinely has two printings.
+        if (active) {
+          setPrintingsError(err instanceof Error ? err.message : String(err));
+        }
       });
 
     return () => {
@@ -270,6 +284,12 @@ export function CardDetail({
             Owned only
           </label>
         </div>
+
+        {printingsError && (
+          <div className="status error" style={{ borderBottom: "none" }}>
+            Could not load printings: {printingsError}
+          </div>
+        )}
 
         <h2>{shown.name}</h2>
         <div className="type">{shown.typeLine}</div>
