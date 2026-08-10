@@ -80,6 +80,23 @@ Covers the decklist parser and serialisers, deck analysis (curve, pips, Commande
 rules), and the filter-to-query translation. Nothing covers the SQL layer or
 React components yet.
 
+### Scryfall contract tests
+
+```bash
+npm run test:contract
+```
+
+Executable documentation of the Scryfall behaviour this app depends on: that an
+empty search 404s rather than returning zero rows, that the printings prefix is
+`oracleid:` and not `oracle_id:`, that `/cards/collection` caps at 75
+identifiers and echoes misses in `not_found`, that double-faced cards carry
+images on their faces rather than the card, and that `format=csv` is ~20× smaller
+than JSON.
+
+They hit the live network, so they are **skipped in the normal run** and only
+execute under this script. When one fails, the fix is usually in our code rather
+than in the test.
+
 Typecheck without building:
 
 ```bash

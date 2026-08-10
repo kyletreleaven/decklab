@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:contract": "SCRYFALL_CONTRACT=1 vitest run src/lib/scryfall.contract.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {
