@@ -109,6 +109,69 @@ Notes:
 - ⬜ The cleared state still has to show *an* image. Use the newest cached
       printing, and label it so it is not mistaken for a selection.
 
+### Card data fetching — two tiers, one throttled queue
+
+The goal is **responsiveness**, which means minimising *round-trips* on the path
+the user is waiting on — not minimising bytes, and not pre-downloading
+everything.
+
+**Tier 1 — fast, on demand.** One request populates a card's whole carousel:
+
+```
+/cards/search?q=oracleid:X&unique=prints&format=csv
+```
+
+CSV rather than JSON: **34 KB for Sol Ring's 137 printings** (the worst case in
+Magic) versus 664 KB of JSON, and ~2–3 KB for an ordinary card. It carries
+`set`, `collector_number`, `rarity`, `name`, `image_uri`, `scryfall_id` — enough
+to render the carousel including thumbnails, from a single round-trip.
+
+- ⬜ Store as **compact printing rows**, not the raw payload. A card object is
+      ~5 KB of which only ~5% is card text and stats; the rest is affiliate
+      links, API self-references and eleven image URLs. Compact rows are
+      ~700 bytes.
+- ⬜ `set_name` is absent from CSV. `/sets` returns all 1,047 in one request.
+      Cache with a long TTL, but refresh on **evidence** rather than only on a
+      timer: meeting a set code we do not recognise is proof the list is stale,
+      which beats any interval. Guard it — a genuinely bogus code would
+      otherwise trigger a refetch every time it is seen, so remember codes that
+      a refresh failed to explain and stop asking.
+      That negative memory needs its own, shorter TTL: an unknown code may be a
+      spoiled or premature release that Scryfall simply has not published yet,
+      so "we could not explain this" must expire rather than becoming permanent.
+- ⬜ Per-oracle TTL (daily or weekly). New sets arrive every few weeks; nothing
+      else about a print run changes.
+
+**Tier 2 — robust, background.** Everything heavier, none of it blocking:
+
+- ⬜ Full JSON per printing, for variant traits (borderless, showcase, etched,
+      promo, single-finish) that CSV omits
+- ⬜ Image *downloads*, strictly for the printing on screen. Sol Ring's full
+      print run would be **11 MB of art** if fetched eagerly.
+- ⬜ Optional idle backfill scoped to cards in collections and decks
+
+**One queue, two priority lanes.** Scryfall's rate limit is per *client*, not per
+connection, so opening extra connections buys nothing and risks a 429. What is
+needed is preemption, not parallelism:
+
+- ⬜ A single queue holding the existing ~100 ms spacing
+- ⬜ **Interactive lane** — hover, click, search — jumps ahead of background work
+- ⬜ **Background lane** — backfill, enrichment, prefetch
+- ⬜ The UI renders whatever is cached *now* and never awaits the queue; rows
+      pop in as responses land
+
+**Batching is an optimisation, not the main path.** `(oracleid:A or oracleid:B …)`
+works and is useful for prefetching a page of results, but a page caps at **175
+rows**, and popular cards average ~19 printings each — so a batch of 12 silently
+returned only 9 of them in testing. Size batches against expected printings
+(~6–8 cards) or follow `has_more`.
+
+**Bulk data, deliberately not chosen.** `default_cards` is 74 MB compressed and
+would make everything offline and instant — but waiting on a 74 MB download
+before the first card renders is the opposite of responsive. Worth keeping as an
+opt-in "prefetch everything" action, not as the default path. Note that if it is
+ever adopted, the bulk-ingest argument for DuckDB comes back.
+
 ### Mixed-grain storage — migration 003
 
 Both `collection_items` and `deck_cards` require a printing
