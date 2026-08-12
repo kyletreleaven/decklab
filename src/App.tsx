@@ -26,17 +26,58 @@ type View =
   | { kind: "deck"; id: string }
   | { kind: "collection"; id: string };
 
-/** Where the search view's "+" button sends cards. */
-type Target =
-  | { kind: "deck"; id: string; name: string }
-  | { kind: "collection"; id: string; name: string }
-  | null;
+/**
+ * One entry per deck or collection you have touched, most recent first.
+ *
+ * A single ordered list rather than separate slots, because the question that
+ * matters is "the last deck *or* collection" — which a pair of slots cannot
+ * answer without an extra discriminator, and this answers by construction.
+ * Opening a deck therefore no longer evicts the active collection, which is
+ * what makes the carousel's +/- unambiguous while deckbuilding.
+ */
+interface Touched {
+  kind: "deck" | "collection";
+  id: string;
+  name: string;
+}
+
+/**
+ * Marks a sidebar entry as the active deck or collection, and marks the overall
+ * most-recent one more strongly.
+ *
+ * Two levels rather than one, because they answer different questions: the ring
+ * says "this is where deck/collection operations land", while the filled dot
+ * says "this is the one a bare + would use". They coincide most of the time and
+ * diverge exactly when it matters — with a deck open, the active collection is
+ * still marked even though it is not on screen.
+ */
+function SlotDot({
+  active,
+  target,
+  what,
+}: {
+  active: boolean;
+  target: boolean;
+  what: "deck" | "collection";
+}) {
+  if (!active) return null;
+  return (
+    <span
+      className={`slot-dot ${target ? "target" : ""}`}
+      title={
+        target
+          ? `Active ${what} — and the most recent, so a bare + lands here`
+          : `Active ${what}`
+      }
+    />
+  );
+}
 
 export default function App() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [view, setView] = useState<View>({ kind: "search" });
-  const [target, setTarget] = useState<Target>(null);
+  const [touched, setTouched] = useState<Touched[]>([]);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [entries, setEntries] = useState<DeckEntry[]>([]);
   const [dialog, setDialog] = useState<"deck" | "collection" | null>(null);
@@ -86,14 +127,31 @@ export default function App() {
     else setEntries([]);
   }, [currentDeck?.id, reloadEntries]);
 
+  /** Move an entry to the front, or add it. Also refreshes a renamed entry. */
+  const touch = useCallback((entry: Touched) => {
+    setTouched((prev) => [
+      entry,
+      ...prev.filter((t) => !(t.kind === entry.kind && t.id === entry.id)),
+    ]);
+  }, []);
+
+  const forget = useCallback((kind: Touched["kind"], id: string) => {
+    setTouched((prev) => prev.filter((t) => !(t.kind === kind && t.id === id)));
+  }, []);
+
+  // Everything is derived from the one ordered list.
+  const activeDeck = touched.find((t) => t.kind === "deck") ?? null;
+  const activeCollection = touched.find((t) => t.kind === "collection") ?? null;
+  const target = touched[0] ?? null;
+
   function openDeck(deck: Deck) {
     setView({ kind: "deck", id: deck.id });
-    setTarget({ kind: "deck", id: deck.id, name: deck.name });
+    touch({ kind: "deck", id: deck.id, name: deck.name });
   }
 
   function openCollection(collection: Collection) {
     setView({ kind: "collection", id: collection.id });
-    setTarget({ kind: "collection", id: collection.id, name: collection.name });
+    touch({ kind: "collection", id: collection.id, name: collection.name });
   }
 
   async function addToDeck(card: Card, deckId: string, asCommander: boolean) {
@@ -220,6 +278,11 @@ export default function App() {
               onClick={() => openDeck(deck)}
             >
               <span className="name">{deck.name}</span>
+              <SlotDot
+                active={activeDeck?.id === deck.id}
+                target={target?.kind === "deck" && target.id === deck.id}
+                what="deck"
+              />
             </button>
           ))}
         </div>
@@ -252,6 +315,13 @@ export default function App() {
             >
               <span className="name">{collection.name}</span>
               <span className="count">{collection.kind}</span>
+              <SlotDot
+                active={activeCollection?.id === collection.id}
+                target={
+                  target?.kind === "collection" && target.id === collection.id
+                }
+                what="collection"
+              />
             </button>
           ))}
         </div>
@@ -264,14 +334,11 @@ export default function App() {
           <>
             {target && (
               <div className="status">
-                Adding to <strong>{target.name}</strong>{" "}
-                <button
-                  className="ghost"
-                  style={{ padding: "1px 6px" }}
-                  onClick={() => setTarget(null)}
-                >
-                  clear
-                </button>
+                Adding to <strong>{target.name}</strong>
+                <span className="hint">
+                  {" "}
+                  — the last deck or collection you opened
+                </span>
               </div>
             )}
             <CardSearch
@@ -306,13 +373,13 @@ export default function App() {
             onRename={async (name) => {
               await decksApi.renameDeck(currentDeck.id, name);
               await reloadDecks();
-              setTarget({ kind: "deck", id: currentDeck.id, name });
+              touch({ kind: "deck", id: currentDeck.id, name });
             }}
             onDelete={async () => {
               await decksApi.deleteDeck(currentDeck.id);
               await reloadDecks();
               setView({ kind: "search" });
-              setTarget(null);
+              forget("deck", currentDeck.id);
             }}
             onAddCards={() => setView({ kind: "search" })}
             onReloadEntries={() => reloadEntries(currentDeck.id)}
@@ -352,13 +419,13 @@ export default function App() {
             onRename={async (name) => {
               await collectionsApi.renameCollection(currentCollection.id, name);
               await reloadCollections();
-              setTarget({ kind: "collection", id: currentCollection.id, name });
+              touch({ kind: "collection", id: currentCollection.id, name });
             }}
             onDelete={async () => {
               await collectionsApi.deleteCollection(currentCollection.id);
               await reloadCollections();
               setView({ kind: "search" });
-              setTarget(null);
+              forget("collection", currentCollection.id);
               bump();
             }}
             onAddCards={() => setView({ kind: "search" })}
@@ -391,6 +458,17 @@ export default function App() {
         collections={collections}
         onAddToDeck={addToDeck}
         onAddToCollection={addToCollection}
+        activeCollection={activeCollection}
+        onAdjustCollection={async (card, delta) => {
+          if (!activeCollection) return;
+          await collectionsApi.adjustCollectionQuantity(
+            activeCollection.id,
+            card,
+            delta,
+          );
+          await reloadCollections();
+          bump();
+        }}
         refreshKey={refreshKey}
       />
 

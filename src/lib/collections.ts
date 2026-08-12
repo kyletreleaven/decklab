@@ -254,6 +254,56 @@ export async function addCardToCollection(
   ]);
 }
 
+/**
+ * Move a printing's quantity in a collection by `delta`, returning the new
+ * count.
+ *
+ * The carousel needs this because it knows a *card*, not a collection-item id —
+ * and `addCardToCollection` can only ever add. Reaching zero deletes the row
+ * rather than leaving a 0× entry behind.
+ */
+export async function adjustCollectionQuantity(
+  collectionId: string,
+  card: Card,
+  delta: number,
+  finish = "nonfoil",
+  condition = "NM",
+): Promise<number> {
+  const existing = await select<{ id: string; quantity: number }>(
+    `SELECT id, quantity FROM collection_items
+      WHERE collection_id = $1 AND card_id = $2 AND finish = $3 AND condition = $4`,
+    [collectionId, card.id, finish, condition],
+  );
+
+  const current = existing[0]?.quantity ?? 0;
+  const next = Math.max(0, current + delta);
+
+  if (next === current) return current;
+
+  if (!existing.length) {
+    await execute(
+      `INSERT INTO collection_items
+         (id, collection_id, card_id, quantity, finish, condition, notes, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6, '', $7)`,
+      [newId(), collectionId, card.id, next, finish, condition, now()],
+    );
+  } else if (next === 0) {
+    await execute("DELETE FROM collection_items WHERE id = $1", [existing[0].id]);
+  } else {
+    await execute("UPDATE collection_items SET quantity = $1 WHERE id = $2", [
+      next,
+      existing[0].id,
+    ]);
+  }
+
+  await execute("UPDATE collections SET updated_at = $1 WHERE id = $2", [
+    now(),
+    collectionId,
+  ]);
+
+  return next;
+}
+
 export async function setCollectionItemQuantity(
   itemId: string,
   quantity: number,

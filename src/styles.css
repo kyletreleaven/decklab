@@ -177,6 +177,23 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* Active deck / collection marker. Hollow ring for "active", filled for the
+   most recently touched of either — the one a bare + would use. */
+.slot-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid var(--accent-dim);
+  background: transparent;
+}
+
+.slot-dot.target {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(216, 166, 87, 0.22);
+}
+
 .nav-empty {
   padding: 4px 8px 8px;
   font-size: 12px;
@@ -589,6 +606,33 @@ textarea:focus {
 .carousel-controls .hint {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+.printing-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.printing-qty button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+  font-size: 13px;
+}
+
+.printing-qty > span {
+  min-width: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.printing-qty > span.owned {
+  color: var(--ok);
 }
 
 .empty {

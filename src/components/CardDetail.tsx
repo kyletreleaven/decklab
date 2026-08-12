@@ -58,6 +58,8 @@ export function CardDetail({
   collections,
   onAddToDeck,
   onAddToCollection,
+  activeCollection,
+  onAdjustCollection,
   refreshKey,
 }: {
   card: Card | null;
@@ -65,6 +67,9 @@ export function CardDetail({
   collections: Collection[];
   onAddToDeck: (card: Card, deckId: string, asCommander: boolean) => void;
   onAddToCollection: (card: Card, collectionId: string) => void;
+  /** Most recently opened collection — where the carousel's +/- writes. */
+  activeCollection: { id: string; name: string } | null;
+  onAdjustCollection: (card: Card, delta: number) => void | Promise<void>;
   /** Bumped by the parent when collections change, to refetch owned copies. */
   refreshKey: number;
 }) {
@@ -134,9 +139,10 @@ export function CardDetail({
 
   // Follow the card selected elsewhere; the carousel then moves within its
   // printings without disturbing that selection.
+  // Only the selected printing is object-bound. `ownedOnly` is a *preference* —
+  // resetting it here silently switched it off every time focus moved.
   useEffect(() => {
     setPrintingId(card?.id ?? null);
-    setOwnedOnly(false);
   }, [card?.id]);
 
   const visible = useMemo(
@@ -274,6 +280,31 @@ export function CardDetail({
               : ""}
           </span>
 
+          {/* Record copies of *this printing* into the collection you most
+              recently opened, without leaving the card you are looking at. */}
+          <span
+            className="printing-qty"
+            title={
+              activeCollection
+                ? `Copies of this printing in ${activeCollection.name}`
+                : "Open a collection first — this writes to the last one you opened"
+            }
+          >
+            <button
+              onClick={() => onAdjustCollection(shown, -1)}
+              disabled={!activeCollection || shownOwned === 0}
+            >
+              −
+            </button>
+            <span className={shownOwned ? "owned" : ""}>{shownOwned}</span>
+            <button
+              onClick={() => onAdjustCollection(shown, 1)}
+              disabled={!activeCollection}
+            >
+              +
+            </button>
+          </span>
+
           <label className="check" title="Show only printings you hold">
             <input
               type="checkbox"
@@ -284,6 +315,12 @@ export function CardDetail({
             Owned only
           </label>
         </div>
+
+        {activeCollection && (
+          <div className="hint" style={{ marginBottom: 10 }}>
+            ± writes to <strong>{activeCollection.name}</strong>
+          </div>
+        )}
 
         {printingsError && (
           <div className="status error" style={{ borderBottom: "none" }}>
