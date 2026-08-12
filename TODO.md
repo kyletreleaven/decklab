@@ -109,6 +109,106 @@ Notes:
 - ⬜ The cleared state still has to show *an* image. Use the newest cached
       printing, and label it so it is not mistaken for a selection.
 
+### Active slots and hover — selection, narrowed
+
+The smallest useful slice of *Selection as shared context* (below), and the piece
+that unblocks the carousel's `+/-`.
+
+**One ordered touch list, not separate slots.** Every deck or collection you
+click goes to the front of a single most-recent-first list. Everything else is
+derived:
+
+| Wanted | Derived as |
+| --- | --- |
+| active deck | first deck in the list |
+| active collection | first collection in the list |
+| target (where a bare `+` sends) | first entry, whichever kind |
+
+- ⬜ Ordering matters precisely because we need "last deck **or** collection
+      touched" — a pair of independent slots cannot answer that without an extra
+      discriminator, and the list answers it by construction.
+- ⬜ Deleting a deck or collection removes it from the list.
+- ⬜ Opening a deck must not evict the active collection, which is what the
+      current single `target` does — and browsing printings *while* building a
+      deck is exactly when recording ownership matters.
+- ⬜ `activeCard` too: last clicked, persists.
+
+**Hover overlays the active card:**
+
+```
+panel shows  =  hoveredCard ?? activeCard ?? empty
+```
+
+- ⬜ **The panel updates immediately.** The card object is already in hand from
+      the grid, so re-rendering image, text and details costs nothing. Moving
+      from one card to the next must feel instant — no debounce on this.
+- ⬜ **Only the expensive work is deferred** (~150ms): the ownership query and
+      the printings fetch, which pop in a moment later. A sweep across a grid
+      therefore costs no queries at all, while still responding the instant the
+      pointer lands somewhere.
+- ⬜ Cards already fetched are free regardless, since printings are memoised.
+- ⬜ Hover drives the **whole** panel, ops and carousel included. An earlier
+      worry that controls would shift under the cursor was unfounded: the cursor
+      can only be in one place, so reaching the rail ends the hover and reverts
+      to the active card before any click is possible.
+
+**Where state lives.** Three categories, and the category decides the home:
+
+| Kind | Lives in | Survives | Examples |
+| --- | --- | --- | --- |
+| **Preference** | durable app state | everything | wall/list, sort, pool source, list/piles, **owned-only** |
+| **Object-bound** | the component | nothing — resets with its object | selected printing, a collection's facet filters |
+| **Derived / expensive** | a cache keyed by its input | as long as the key is valid | search results, printings, ownership counts |
+
+The test for the first two: *if the object changes, does this setting still mean
+the same thing?* Wall-vs-list means the same for any collection; a selected
+printing is meaningless for a different card.
+
+The third row is not state at all, which is why lifting it would be the wrong
+shape. Search results should be cached **by query** — returning to a search then
+re-renders instantly from cache and can refresh behind you — following the
+pattern printings already use.
+
+The rule matters because it says *which* state needs rescuing. Two concrete jobs:
+
+- ⬜ **Move `ownedOnly` out of the per-card reset.** One line. It currently sits
+      in the same effect that resets the selected printing, so switching it on
+      and then changing card silently switches it off.
+- ⬜ **Panels are conditionally rendered, so navigating unmounts them and
+      destroys every preference.** Audited:
+
+  | Panel | Lost on navigation |
+  | --- | --- |
+  | CardSearch | **query and results** — search, go add something, come back to an empty box |
+  | PoolPanel | source, filters, deck-scope toggle |
+  | CollectionView | wall/list, sort, filters |
+  | DeckView | list/piles |
+
+  **Decided: lift preferences, cache derived, leave object-bound local.**
+  Each piece of the state above gets classified by the table and moved to its
+  home. CardSearch's `query` lifts as a preference; its *results* do not — they
+  become a cache keyed by query.
+
+  Rejected: keeping panels mounted and toggling visibility. It is nearly free and
+  would preserve scroll position too, but every hidden panel's effects keep
+  running — the pool would go on querying behind a deck view — and it preserves
+  state indiscriminately rather than forcing the classification, which is the
+  part that actually stops these bugs recurring.
+
+**Carousel `+/-`.** Adjust the quantity of the *shown printing* in the active
+collection, with the current count between the buttons.
+
+- ⬜ Needs a decrement path; `addCardToCollection` only adds, and removal
+      currently needs an item id the carousel does not have.
+- ⬜ Disabled with a hint when no collection has been touched yet.
+- ⬜ Does **not** need migration 003 — adding a specific printing is what the
+      current schema stores well. Only the printless case needs 003.
+
+**Panel state retention** — deck, collection and search panels keeping their
+internal state across navigation — is a larger, separable piece spread across
+four components. The carousel needs none of it: it is never navigated away from,
+so its state is purely object-bound.
+
 ### Card data fetching — two tiers, one throttled queue
 
 The goal is **responsiveness**, which means minimising *round-trips* on the path
@@ -154,11 +254,20 @@ to render the carousel including thumbnails, from a single round-trip.
 connection, so opening extra connections buys nothing and risks a 429. What is
 needed is preemption, not parallelism:
 
-- ⬜ A single queue holding the existing ~100 ms spacing
-- ⬜ **Interactive lane** — hover, click, search — jumps ahead of background work
-- ⬜ **Background lane** — backfill, enrichment, prefetch
-- ⬜ The UI renders whatever is cached *now* and never awaits the queue; rows
-      pop in as responses land
+- ⬜ A single scheduler holding the existing ~100 ms spacing
+- ⬜ **Interactive lane** — hover, click, search — preempts background work
+- ⬜ **The interactive lane is a stack, not a queue.** The newest request is by
+      definition the card on screen; FIFO would serve a run of abandoned hovers
+      before reaching it. LIFO serves the most recent first.
+- ⬜ Bound that stack and evict from the bottom. Entries that deep have been
+      abandoned and nothing is waiting on them, so dropping them is correct
+      rather than lossy — and it stops a fast sweep queueing unbounded work.
+      Depth is a tunable; **1 is defensible** — with a debounce in front, "one
+      in flight, one pending, newest replaces pending" may be all that is needed.
+- ⬜ **Background lane stays FIFO**, where fairness beats recency: a backfill
+      should finish, not restart at the newest item forever.
+- ⬜ The UI renders whatever is cached *now* and never awaits the scheduler;
+      rows pop in as responses land
 
 **Batching is an optimisation, not the main path.** `(oracleid:A or oracleid:B …)`
 works and is useful for prefetching a page of results, but a page caps at **175
