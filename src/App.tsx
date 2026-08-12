@@ -218,6 +218,61 @@ export default function App() {
     };
   }, [currentDeck, entries]);
 
+  /**
+   * How many of each printing of the selected card the current target holds.
+   * Fetched here rather than in the rail so the rail stays agnostic about
+   * whether its target is a deck or a collection.
+   */
+  const [targetQuantities, setTargetQuantities] = useState<Record<string, number>>(
+    {},
+  );
+
+  /** The same, for the active collection — what the panel states its counts in. */
+  const [collectionQuantities, setCollectionQuantities] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    const oracleId = selectedCard?.oracleId;
+    if (!activeCollection || !oracleId) {
+      setCollectionQuantities({});
+      return;
+    }
+
+    let active = true;
+    collectionsApi
+      .printingQuantitiesInCollection(activeCollection.id, oracleId)
+      .then((rows) => {
+        if (active) setCollectionQuantities(rows);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeCollection?.id, selectedCard?.oracleId, refreshKey]);
+
+  useEffect(() => {
+    const oracleId = selectedCard?.oracleId;
+    if (!target || !oracleId) {
+      setTargetQuantities({});
+      return;
+    }
+
+    let active = true;
+    const load =
+      target.kind === "collection"
+        ? collectionsApi.printingQuantitiesInCollection(target.id, oracleId)
+        : decksApi.printingQuantitiesInDeck(target.id, oracleId);
+
+    load.then((rows) => {
+      if (active) setTargetQuantities(rows);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [target?.kind, target?.id, selectedCard?.oracleId, refreshKey]);
+
   /** Put the candidate-card pool above a deck view when the pool is showing. */
   function withPool(node: ReactNode): ReactNode {
     if (!showPool || !currentDeck) return node;
@@ -458,15 +513,24 @@ export default function App() {
         collections={collections}
         onAddToDeck={addToDeck}
         onAddToCollection={addToCollection}
+        target={target}
+        targetQuantities={targetQuantities}
         activeCollection={activeCollection}
-        onAdjustCollection={async (card, delta) => {
-          if (!activeCollection) return;
-          await collectionsApi.adjustCollectionQuantity(
-            activeCollection.id,
-            card,
-            delta,
-          );
-          await reloadCollections();
+        collectionQuantities={collectionQuantities}
+        onAdjustTarget={async (card, delta) => {
+          if (!target) return;
+          if (target.kind === "collection") {
+            await collectionsApi.adjustCollectionQuantity(target.id, card, delta);
+            await reloadCollections();
+          } else {
+            // Maindeck is the default zone. Which zone the +/- writes to is a
+            // separate question, and it depends on how zones get modelled.
+            await decksApi.adjustDeckQuantity(target.id, card, delta, "main");
+            await reloadDecks();
+            if (view.kind === "deck" && view.id === target.id) {
+              await reloadEntries(target.id);
+            }
+          }
           bump();
         }}
         refreshKey={refreshKey}

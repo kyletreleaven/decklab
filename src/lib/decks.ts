@@ -140,6 +140,65 @@ export async function addCardToDeck(
   await touch(deckId);
 }
 
+/**
+ * Move a printing's quantity in a deck by `delta`, returning the new count.
+ *
+ * Mirrors `adjustCollectionQuantity`: the carousel knows a card, not an entry
+ * id, and reaching zero removes the row rather than leaving a 0× entry.
+ */
+export async function adjustDeckQuantity(
+  deckId: string,
+  card: Card,
+  delta: number,
+  zone: DeckZone = "main",
+): Promise<number> {
+  const existing = await select<{ id: string; quantity: number }>(
+    "SELECT id, quantity FROM deck_cards WHERE deck_id = $1 AND card_id = $2 AND zone = $3",
+    [deckId, card.id, zone],
+  );
+
+  const current = existing[0]?.quantity ?? 0;
+  const next = Math.max(0, current + delta);
+  if (next === current) return current;
+
+  if (!existing.length) {
+    await execute(
+      `INSERT INTO deck_cards (id, deck_id, card_id, quantity, zone, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [newId(), deckId, card.id, next, zone, now()],
+    );
+  } else if (next === 0) {
+    await execute("DELETE FROM deck_cards WHERE id = $1", [existing[0].id]);
+  } else {
+    await execute("UPDATE deck_cards SET quantity = $1 WHERE id = $2", [
+      next,
+      existing[0].id,
+    ]);
+  }
+
+  await touch(deckId);
+  return next;
+}
+
+/** Copies of each printing of a card held in one deck, keyed by printing id. */
+export async function printingQuantitiesInDeck(
+  deckId: string,
+  oracleId: string,
+): Promise<Record<string, number>> {
+  const rows = await select<{ card_id: string; quantity: number }>(
+    `SELECT dc.card_id, SUM(dc.quantity) AS quantity
+       FROM deck_cards dc
+       JOIN cards c ON c.id = dc.card_id
+      WHERE dc.deck_id = $1 AND c.oracle_id = $2
+      GROUP BY dc.card_id`,
+    [deckId, oracleId],
+  );
+
+  const byPrinting: Record<string, number> = {};
+  for (const row of rows) byPrinting[row.card_id] = row.quantity;
+  return byPrinting;
+}
+
 export async function setDeckCardQuantity(
   entryId: string,
   deckId: string,

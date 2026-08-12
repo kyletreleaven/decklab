@@ -531,6 +531,13 @@ textarea:focus {
   min-width: 0;
 }
 
+.owned-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .owned-badge {
   align-self: flex-start;
   padding: 2px 8px;

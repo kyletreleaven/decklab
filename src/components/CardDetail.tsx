@@ -58,8 +58,11 @@ export function CardDetail({
   collections,
   onAddToDeck,
   onAddToCollection,
+  target,
+  targetQuantities,
+  onAdjustTarget,
   activeCollection,
-  onAdjustCollection,
+  collectionQuantities,
   refreshKey,
 }: {
   card: Card | null;
@@ -67,9 +70,23 @@ export function CardDetail({
   collections: Collection[];
   onAddToDeck: (card: Card, deckId: string, asCommander: boolean) => void;
   onAddToCollection: (card: Card, collectionId: string) => void;
-  /** Most recently opened collection — where the carousel's +/- writes. */
+  /**
+   * The most recently opened deck or collection — where the carousel's +/-
+   * writes. For a deck this means its maindeck: the default zone, which is the
+   * one sensible answer that does not depend on how zones end up being modelled.
+   */
+  target: { kind: "deck" | "collection"; id: string; name: string } | null;
+  /** Per-printing counts held by the target, keyed by printing id. */
+  targetQuantities: Record<string, number>;
+  onAdjustTarget: (card: Card, delta: number) => void | Promise<void>;
+  /**
+   * The collection the panel's counts are stated against. Naming a specific
+   * collection beats a vague "owned" aggregate: it answers *which* collection,
+   * and it matches the sidebar ring so the scope is visible rather than implied.
+   */
   activeCollection: { id: string; name: string } | null;
-  onAdjustCollection: (card: Card, delta: number) => void | Promise<void>;
+  /** Per-printing counts in `activeCollection`, keyed by printing id. */
+  collectionQuantities: Record<string, number>;
   /** Bumped by the parent when collections change, to refetch owned copies. */
   refreshKey: number;
 }) {
@@ -145,12 +162,27 @@ export function CardDetail({
     setPrintingId(card?.id ?? null);
   }, [card?.id]);
 
+  /**
+   * Counts are stated against the active collection when there is one, falling
+   * back to every ownable collection otherwise. One scope for the whole panel,
+   * named wherever it appears.
+   */
+  const scopedQty = activeCollection ? collectionQuantities : ownedQty;
+  const scopeLabel = activeCollection ? `in ${activeCollection.name}` : "owned";
+
   const visible = useMemo(
-    () => (ownedOnly ? printings.filter((p) => ownedQty[p.id]) : printings),
-    [printings, ownedOnly, ownedQty],
+    () => (ownedOnly ? printings.filter((p) => scopedQty[p.id]) : printings),
+    [printings, ownedOnly, scopedQty],
   );
 
-  const ownedTotal = useMemo(
+  const scopedTotal = useMemo(
+    () => Object.values(scopedQty).reduce((sum, n) => sum + n, 0),
+    [scopedQty],
+  );
+
+  // Kept so a card held somewhere other than the active collection is not
+  // silently reported as absent.
+  const ownedEverywhere = useMemo(
     () => Object.values(ownedQty).reduce((sum, n) => sum + n, 0),
     [ownedQty],
   );
@@ -169,7 +201,8 @@ export function CardDetail({
   const index = visible.findIndex((p) => p.id === shown.id);
   const usd = money(shown.prices.usd);
   const usdFoil = money(shown.prices.usd_foil);
-  const shownOwned = ownedQty[shown.id] ?? 0;
+  const shownScoped = scopedQty[shown.id] ?? 0;
+  const inTarget = targetQuantities[shown.id] ?? 0;
 
   function step(delta: number) {
     if (visible.length < 2) return;
@@ -226,9 +259,20 @@ export function CardDetail({
             </select>
           </div>
 
-          {/* Any printing counts, so this is an oracle-level number. */}
-          <div className={`owned-badge ${ownedTotal ? "owned" : "missing"}`}>
-            {ownedTotal ? `${ownedTotal} owned` : "Not owned"}
+          {/* Any printing counts, so this is an oracle-level number. Stated
+              against the active collection, with the wider total alongside when
+              copies live somewhere else. */}
+          <div className="owned-line">
+            <span className={`owned-badge ${scopedTotal ? "owned" : "missing"}`}>
+              {scopedTotal
+                ? `${scopedTotal} ${scopeLabel}`
+                : activeCollection
+                  ? `None ${scopeLabel}`
+                  : "Not owned"}
+            </span>
+            {activeCollection && ownedEverywhere > scopedTotal && (
+              <span className="hint">{ownedEverywhere} owned in total</span>
+            )}
           </div>
         </div>
 
@@ -256,7 +300,6 @@ export function CardDetail({
             </>
           )}
 
-          {shownOwned > 0 && <span className="qty-badge">{shownOwned}×</span>}
         </div>
 
         <div className="carousel-controls">
@@ -269,7 +312,9 @@ export function CardDetail({
             {visible.map((printing) => (
               <option key={printing.id} value={printing.id}>
                 {printingLabel(printing)}
-                {ownedQty[printing.id] ? ` — ${ownedQty[printing.id]}× owned` : ""}
+                {scopedQty[printing.id]
+                  ? ` — ${scopedQty[printing.id]}× ${scopeLabel}`
+                  : ""}
               </option>
             ))}
           </select>
@@ -280,45 +325,43 @@ export function CardDetail({
               : ""}
           </span>
 
-          {/* Record copies of *this printing* into the collection you most
-              recently opened, without leaving the card you are looking at. */}
+          {/* Record copies of *this printing* into whichever deck or collection
+              you most recently opened, without leaving the card. */}
           <span
             className="printing-qty"
             title={
-              activeCollection
-                ? `Copies of this printing in ${activeCollection.name}`
-                : "Open a collection first — this writes to the last one you opened"
+              target
+                ? `Copies of this printing in ${target.name}`
+                : "Open a deck or collection first — this writes to the last one"
             }
           >
             <button
-              onClick={() => onAdjustCollection(shown, -1)}
-              disabled={!activeCollection || shownOwned === 0}
+              onClick={() => onAdjustTarget(shown, -1)}
+              disabled={!target || inTarget === 0}
             >
               −
             </button>
-            <span className={shownOwned ? "owned" : ""}>{shownOwned}</span>
-            <button
-              onClick={() => onAdjustCollection(shown, 1)}
-              disabled={!activeCollection}
-            >
+            <span className={inTarget ? "owned" : ""}>{inTarget}</span>
+            <button onClick={() => onAdjustTarget(shown, 1)} disabled={!target}>
               +
             </button>
           </span>
 
-          <label className="check" title="Show only printings you hold">
+          <label className="check" title={`Show only printings ${scopeLabel}`}>
             <input
               type="checkbox"
               checked={ownedOnly}
               onChange={(e) => setOwnedOnly(e.target.checked)}
-              disabled={ownedTotal === 0}
+              disabled={scopedTotal === 0}
             />
-            Owned only
+            Only {scopeLabel}
           </label>
         </div>
 
-        {activeCollection && (
+        {target && (
           <div className="hint" style={{ marginBottom: 10 }}>
-            ± writes to <strong>{activeCollection.name}</strong>
+            ± writes to <strong>{target.name}</strong>
+            {target.kind === "deck" ? " (maindeck)" : ""}
           </div>
         )}
 
@@ -429,9 +472,11 @@ export function CardDetail({
             </>
           )}
 
-          <dt>Owned</dt>
-          <dd className={shownOwned ? "owned" : "missing"}>
-            {shownOwned ? `${shownOwned} of this printing` : "None of this printing"}
+          <dt style={{ textTransform: "capitalize" }}>{scopeLabel}</dt>
+          <dd className={shownScoped ? "owned" : "missing"}>
+            {shownScoped
+              ? `${shownScoped} of this printing`
+              : "None of this printing"}
           </dd>
         </dl>
       </div>

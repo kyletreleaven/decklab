@@ -326,6 +326,54 @@ place, so this is a create-copy-drop-rename rebuild of both tables rather than a
 `ALTER`. `oracle_id` backfills from `cards` through the existing `card_id`, so no
 data is lost.
 
+**A deck's zones *are* collections — one primitive, not two.** `deck_cards` and
+`collection_items` are both "container holds N of card X", and the duplication
+has already produced four pairs of near-identical functions (`addCardTo…`,
+`adjust…Quantity`, `printingQuantitiesIn…`, plus the row types). The unification
+is structural rather than cosmetic:
+
+| Layer | What it is |
+| --- | --- |
+| **Container** | the primitive — `card → quantity`. A collection's contents; a deck's commander zone; a deck's maindeck |
+| **Entity** | owns containers. A `Collection` owns one (plus `unsorted`, below); a `Deck` owns several named zones, one of them default |
+
+**Two ways to express that, both worth considering. Undecided.**
+
+**A — zones *are* containers.** A deck owns several named containers, one
+default. `zone` stops being a column and becomes a container's identity.
+- One items table keyed by `container_id`, plus a `containers` table naming them
+  and pointing at a parent entity
+- Containers are addressable: a panel or a set operation can point at "the
+  sideboard" as a first-class thing
+- Piles may fall out of the same model — they partition a zone the way zones
+  partition a deck
+- Costs indirection: "the whole deck" becomes a join across its containers, and
+  creating a deck creates four rows before it holds anything
+
+**B — a deck *is* a collection, and rows carry annotations.** Closer to what
+exists now, since `deck_cards.zone` is already exactly that.
+- One container per entity; `zone` sits beside `finish` and `condition` as an
+  annotation on the entry
+- Annotations generalise for free — tags, acquisition price, "loaned to Dave",
+  and arguably the known/unknown printing distinction from 003 are all the same
+  shape
+- Costs addressability: a zone is not a thing you can point at, only a value you
+  filter by
+
+**Possible synthesis:** store as **B**, address as **A**. A zone is then
+`Filter(container, zone = main)` — which the card-set algebra already gives us,
+since a filter over a spec is itself a spec. The touch list would hold *specs*
+rather than containers, and "the sideboard" is addressable without existing as a
+row. Worth checking whether that collapses the trade-off or just moves it.
+
+Open either way: which discriminators are universal. `finish` plausibly matters
+in a deck (you want your foil copy sleeved); `condition` almost certainly does
+not.
+
+**Note:** the deck-vs-collection dispatch being written for the carousel `±`
+right now is a **stopgap** this model deletes. Behaviour is identical either way,
+so it is safe to build now and collapse later.
+
 **Code that follows:**
 - ⬜ **Import stops fabricating printings.** A bare `4 Lightning Bolt` currently
       resolves to whichever printing Scryfall returns first and records *that* as
