@@ -124,14 +124,18 @@ derived:
 | active collection | first collection in the list |
 | target (where a bare `+` sends) | first entry, whichever kind |
 
-- ⬜ Ordering matters precisely because we need "last deck **or** collection
+- ✅ Ordering matters precisely because we need "last deck **or** collection
       touched" — a pair of independent slots cannot answer that without an extra
       discriminator, and the list answers it by construction.
-- ⬜ Deleting a deck or collection removes it from the list.
-- ⬜ Opening a deck must not evict the active collection, which is what the
-      current single `target` does — and browsing printings *while* building a
-      deck is exactly when recording ownership matters.
-- ⬜ `activeCard` too: last clicked, persists.
+- ✅ Deleting a deck or collection removes it from the list.
+- ✅ Opening a deck no longer evicts the active collection, which the single
+      `target` used to do — and browsing printings *while* building a deck is
+      exactly when recording ownership matters.
+- ✅ Sidebar shows both levels: a ring for active-of-its-kind, a filled dot for
+      the overall most recent (where a bare `+` lands).
+- ⬜ `activeCard` as a durable slot of its own. Hover currently overlays the
+      *selected* card, which is the same thing in practice; a separate slot only
+      matters once selection grows to hold cards alongside decks and collections.
 
 **Hover overlays the active card:**
 
@@ -139,18 +143,25 @@ derived:
 panel shows  =  hoveredCard ?? activeCard ?? empty
 ```
 
-- ⬜ **The panel updates immediately.** The card object is already in hand from
-      the grid, so re-rendering image, text and details costs nothing. Moving
-      from one card to the next must feel instant — no debounce on this.
-- ⬜ **Only the expensive work is deferred** (~150ms): the ownership query and
-      the printings fetch, which pop in a moment later. A sweep across a grid
-      therefore costs no queries at all, while still responding the instant the
-      pointer lands somewhere.
-- ⬜ Cards already fetched are free regardless, since printings are memoised.
-- ⬜ Hover drives the **whole** panel, ops and carousel included. An earlier
+- ✅ **The panel updates immediately.** The card object is already in hand from
+      the grid, so re-rendering costs nothing and card-to-card feels instant.
+- ✅ **No debounce.** The eviction scheduler below made it unnecessary — and
+      better, since eviction adds no latency where a debounce would delay even a
+      cached card. Wired at all six render sites: search grid, pool, collection
+      wall and list, deck rows, piles.
+- ✅ Clearing hover is deferred ~80ms. Moving between adjacent cards fires
+      leave-then-enter as two separate events, which React does not batch, so an
+      immediate clear flashed the selected card in between.
+- ✅ Cards already fetched are free regardless, since printings are memoised.
+- ✅ Hover drives the **whole** panel, ops and carousel included. An earlier
       worry that controls would shift under the cursor was unfounded: the cursor
       can only be in one place, so reaching the rail ends the hover and reverts
       to the active card before any click is possible.
+- ✅ **Hover is non-destructive.** The chosen printing is remembered per oracle
+      id, so sweeping across a grid and back does not discard a printing you
+      picked. Without this, hover silently undid a deliberate choice.
+- ⬜ Verify the 80ms grace period feels seamless in practice. If a flicker of the
+      selected card shows while sweeping, that is the dial.
 
 **Where state lives.** Three categories, and the category decides the home:
 
@@ -171,9 +182,9 @@ pattern printings already use.
 
 The rule matters because it says *which* state needs rescuing. Two concrete jobs:
 
-- ⬜ **Move `ownedOnly` out of the per-card reset.** One line. It currently sits
-      in the same effect that resets the selected printing, so switching it on
-      and then changing card silently switches it off.
+- ✅ **Moved `ownedOnly` out of the per-card reset.** It sat in the same effect
+      that resets the selected printing, so switching it on and then changing
+      card silently switched it off.
 - ⬜ **Panels are conditionally rendered, so navigating unmounts them and
       destroys every preference.** Audited:
 
@@ -195,19 +206,63 @@ The rule matters because it says *which* state needs rescuing. Two concrete jobs
   state indiscriminately rather than forcing the classification, which is the
   part that actually stops these bugs recurring.
 
-**Carousel `+/-`.** Adjust the quantity of the *shown printing* in the active
-collection, with the current count between the buttons.
+**Carousel `+/-`.** ✅ Adjusts the quantity of the *shown printing* in the
+current target, with the count between the buttons.
 
-- ⬜ Needs a decrement path; `addCardToCollection` only adds, and removal
-      currently needs an item id the carousel does not have.
-- ⬜ Disabled with a hint when no collection has been touched yet.
-- ⬜ Does **not** need migration 003 — adding a specific printing is what the
+- ✅ Targets whichever deck **or** collection was touched most recently, not just
+      collections. For a deck this means the maindeck — the default zone, which
+      is the one answer that does not depend on how zones get modelled, so it
+      does not prejudge the container question below.
+- ✅ `adjustCollectionQuantity` / `adjustDeckQuantity`: fold into an existing row,
+      delete at zero, return the new count. Needed because the add-only paths
+      required an item id the carousel does not have.
+- ✅ Disabled with a hint when nothing has been touched yet.
+- ✅ Did **not** need migration 003 — adding a specific printing is what the
       current schema stores well. Only the printless case needs 003.
+- ✅ **Counts are stated against one named scope.** `2 in Paper` rather than a
+      vague `7 owned`, falling back to all ownable collections when none is
+      active, with the wider total shown alongside when copies live elsewhere.
+      Also dropped the unlabelled `3×` badge on the artwork: it sat inches from
+      the stepper meaning something different.
+- ⬜ Choosing *which* zone the `±` writes to. Needs zones to be addressable,
+      which is exactly the open container question.
 
 **Panel state retention** — deck, collection and search panels keeping their
 internal state across navigation — is a larger, separable piece spread across
 four components. The carousel needs none of it: it is never navigated away from,
 so its state is purely object-bound.
+
+### Persist the printings TTL — migration 004 ⭐ next
+
+Small, self-contained, and independent of 003. The one piece of the fetching
+design that is currently memory-only.
+
+**The gap.** Card rows *do* persist — `fetchPrintings` writes every printing
+through `cacheCards`, and the database already holds ~5,800 printings. What does
+not persist is the knowledge that a print run is **complete**. `printingsMemo`
+lives in memory, so after a restart we cannot tell "3 printings cached because
+that is all there are" from "3 printings cached because that is all we happened
+to see" — and refetch to be safe.
+
+```sql
+CREATE TABLE oracle_fetches (
+  oracle_id            TEXT PRIMARY KEY,
+  printings_fetched_at TEXT NOT NULL
+);
+```
+
+- ⬜ Stamp on a successful full fetch; read before deciding to go to network
+- ⬜ TTL of a week. New sets arrive every few weeks and nothing else about an
+      existing print run moves, so this is generous rather than aggressive.
+- ⬜ Keep the in-memory memo in front of it — it saves the SQLite round trip
+      within a session; the table is what survives restarts.
+- ⬜ Same treatment for `/sets` (see below), which has the same shape: a long
+      TTL plus refresh-on-evidence when an unrecognised set code shows up.
+
+**Impact is smaller than it sounds, which is why it is not urgent-urgent.**
+`CardDetail` reads from disk first, so a restarted app still draws the full
+carousel instantly. The cost is one redundant request per card per session. With
+the table it becomes zero — permanently, not just after the first look.
 
 ### Card data fetching — two tiers, one throttled queue
 
@@ -239,8 +294,8 @@ to render the carousel including thumbnails, from a single round-trip.
       That negative memory needs its own, shorter TTL: an unknown code may be a
       spoiled or premature release that Scryfall simply has not published yet,
       so "we could not explain this" must expire rather than becoming permanent.
-- ⬜ Per-oracle TTL (daily or weekly). New sets arrive every few weeks; nothing
-      else about a print run changes.
+- ⬜ Per-oracle TTL, persisted. Spec'd as migration 004 above; currently
+      in-memory only, so it resets every restart.
 
 **Tier 2 — robust, background.** Everything heavier, none of it blocking:
 
@@ -250,20 +305,29 @@ to render the carousel including thumbnails, from a single round-trip.
       print run would be **11 MB of art** if fetched eagerly.
 - ⬜ Optional idle backfill scoped to cards in collections and decks
 
-**One queue, two priority lanes.** Scryfall's rate limit is per *client*, not per
-connection, so opening extra connections buys nothing and risks a 429. What is
-needed is preemption, not parallelism:
+**One queue, two priority lanes.** ✅ Built — `src/lib/scheduler.ts`. Scryfall's
+rate limit is per *client*, not per connection, so extra connections buy nothing
+and risk a 429. What is needed is preemption, not parallelism:
 
-- ⬜ A single scheduler holding the existing ~100 ms spacing
-- ⬜ **Interactive lane** — hover, click, search — preempts background work
-- ⬜ **The interactive lane is a stack, not a queue.** The newest request is by
-      definition the card on screen; FIFO would serve a run of abandoned hovers
-      before reaching it. LIFO serves the most recent first.
-- ⬜ Bound that stack and evict from the bottom. Entries that deep have been
-      abandoned and nothing is waiting on them, so dropping them is correct
-      rather than lossy — and it stops a fast sweep queueing unbounded work.
-      Depth is a tunable; **1 is defensible** — with a debounce in front, "one
-      in flight, one pending, newest replaces pending" may be all that is needed.
+- ✅ A single scheduler holding the ~100 ms spacing, measured from the last
+      request *start* so a slow response does not add its own latency to the gap
+- ✅ **Interactive lane** — hover, click, search — preempts background work
+- ✅ **Interactive is LIFO and evicting.** Depth 1, so a stream of hovers
+      collapses to the newest; the abandoned ones never run.
+- ✅ **Eviction is keyed, per kind of request.** This was the one real
+      correction to the spec: depth-1 across *all* interactive work would have a
+      search and a printings lookup silently kill each other. Each kind gets its
+      own slot.
+- ✅ **Background lane stays FIFO and is never evicted.** Import batches live
+      here — each 75-card chunk carries distinct cards, so dropping one loses
+      data outright.
+- ✅ Superseded requests reject with a distinct error that every call site
+      ignores, rather than surfacing as a failure.
+- ✅ **No debounce needed.** Eviction subsumes it and is better: it adds no
+      latency, where a debounce would delay even an already-cached card.
+- ✅ 9 tests covering the parts that fail silently — that an evicted job really
+      does not run, that different keys coexist, that interactive preempts
+      background, that background work is never dropped, and that spacing holds.
 - ⬜ **Background lane stays FIFO**, where fairness beats recency: a backfill
       should finish, not restart at the newest item forever.
 - ⬜ The UI renders whatever is cached *now* and never awaits the scheduler;
@@ -865,14 +929,16 @@ Statistical, not necessarily AI.
 
 Small, known, and cheap to fix — listed so they don't get rediscovered.
 
-- **Ownership scope is wrong, and inconsistent between views.** `ownedCopies()`
-  and `ownedOracleIds()` both sum across *every* collection with no filter, so a
-  **wishlist** card reads as owned and playable, a **loaned out** card reads as
-  available, and Arena/MTGO copies count toward a paper deck. Meanwhile
-  `deckOwnership()` makes you tick collections by hand — a third answer to the
-  same question. Selection-as-shared-context is the real fix; the cheap interim
-  one is to exclude the `wishlist` and `loaned` kinds, which removes the two
-  answers that are simply wrong without foreclosing anything.
+- **Ownership scope is still inconsistent between views** — though no longer
+  *wrong*. `OWNABLE_KINDS` now excludes `wishlist` and `loaned`, so a wishlist
+  card no longer reads as owned and a loaned card no longer reads as available.
+  What remains: the card panel scopes to the active collection, `deckOwnership()`
+  makes you tick collections by hand, and the pool dims against all ownable
+  collections. Three scopes for one question. Selection-as-shared-context is the
+  real fix.
+- **Digital and paper still mix.** Arena and MTGO copies count toward a paper
+  deck, because separating them needs a notion of a deck's *game* that does not
+  exist yet.
 - **`card_tags` table is dead.** Left over from a query language that was cut.
   Nothing reads or writes it. Either wire up user tags or drop it in a migration.
 - **CSP is `null`.** Fine for local dev; tighten before shipping signed builds.
