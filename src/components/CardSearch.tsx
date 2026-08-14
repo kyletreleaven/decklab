@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
 import type { Card } from "../lib/types";
 import { CardImage } from "./CardImage";
@@ -10,11 +11,14 @@ import { CardImage } from "./CardImage";
  */
 export function CardSearch({
   onSelect,
+  onHoverCard,
   onAdd,
   addLabel,
   selectedId,
 }: {
   onSelect: (card: Card) => void;
+  /** Previews a card in the detail panel without changing the selection. */
+  onHoverCard?: (card: Card | null) => void;
   onAdd?: (card: Card) => void;
   addLabel?: string;
   selectedId?: string | null;
@@ -55,6 +59,8 @@ export function CardSearch({
         setCards([]);
         setTotal(0);
         setNextPage(null);
+        // A superseded request was replaced by a newer one; nothing failed.
+        if (isSuperseded(err)) return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (requestId.current === id) setLoading(false);
@@ -72,6 +78,8 @@ export function CardSearch({
       setCards((prev) => [...prev, ...page.cards]);
       setNextPage(page.nextPage);
     } catch (err) {
+      // A superseded request was replaced by a newer one; nothing failed.
+      if (isSuperseded(err)) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
@@ -112,6 +120,8 @@ export function CardSearch({
               key={card.id}
               className={`card-tile ${selectedId === card.id ? "selected" : ""}`}
               onClick={() => onSelect(card)}
+              onMouseEnter={() => onHoverCard?.(card)}
+              onMouseLeave={() => onHoverCard?.(null)}
               onDoubleClick={() => onAdd?.(card)}
               title={card.name}
             >

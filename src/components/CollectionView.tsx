@@ -17,6 +17,7 @@ export function CollectionView({
   collection,
   selectedCardId,
   onSelectCard,
+  onHoverCard,
   onChangeQuantity,
   onRemove,
   onRename,
@@ -29,6 +30,8 @@ export function CollectionView({
   collection: Collection;
   selectedCardId: string | null;
   onSelectCard: (card: Card) => void;
+  /** Previews a card in the detail panel without changing the selection. */
+  onHoverCard?: (card: Card | null) => void;
   onChangeQuantity: (item: CollectionItem, quantity: number) => void;
   onRemove: (item: CollectionItem) => void;
   onRename: (name: string) => void;
@@ -222,6 +225,8 @@ export function CollectionView({
                   selectedCardId === item.card.id ? "selected" : ""
                 }`}
                 onClick={() => onSelectCard(item.card)}
+                onMouseEnter={() => onHoverCard?.(item.card)}
+                onMouseLeave={() => onHoverCard?.(null)}
                 title={`${item.quantity}× ${item.card.name}`}
               >
                 <CardImage card={item.card} size="small" />
@@ -255,6 +260,8 @@ export function CollectionView({
               key={item.id}
               className={`row ${selectedCardId === item.card.id ? "selected" : ""}`}
               onClick={() => onSelectCard(item.card)}
+              onMouseEnter={() => onHoverCard?.(item.card)}
+              onMouseLeave={() => onHoverCard?.(null)}
             >
               <span className="qty">{item.quantity}×</span>
               <span className="name">{item.card.name}</span>

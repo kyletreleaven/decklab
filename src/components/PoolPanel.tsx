@@ -7,6 +7,7 @@ import {
   toScryfallQuery,
   type CardFilter,
 } from "../lib/filters";
+import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
 import type { Card, Collection } from "../lib/types";
 import { CardFilters } from "./CardFilters";
@@ -26,12 +27,15 @@ export function PoolPanel({
   collections,
   selectedId,
   onSelect,
+  onHoverCard,
   onAdd,
   scope,
 }: {
   collections: Collection[];
   selectedId: string | null;
   onSelect: (card: Card) => void;
+  /** Previews a card in the detail panel without changing the selection. */
+  onHoverCard?: (card: Card | null) => void;
   onAdd: (card: Card) => void;
   /** Extra constraints from the deck, e.g. commander identity + format. */
   scope?: { label: string; filter: CardFilter };
@@ -95,6 +99,8 @@ export function PoolPanel({
         setCards([]);
         setTotal(0);
         setNextPage(null);
+        // A superseded request was replaced by a newer one; nothing failed.
+        if (isSuperseded(err)) return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (requestId.current === id) setLoading(false);
@@ -113,6 +119,8 @@ export function PoolPanel({
       setCards((prev) => [...prev, ...page.cards]);
       setNextPage(page.nextPage);
     } catch (err) {
+      // A superseded request was replaced by a newer one; nothing failed.
+      if (isSuperseded(err)) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
@@ -213,6 +221,8 @@ export function PoolPanel({
                   .filter(Boolean)
                   .join(" ")}
                 onClick={() => onSelect(card)}
+                onMouseEnter={() => onHoverCard?.(card)}
+                onMouseLeave={() => onHoverCard?.(null)}
                 onDoubleClick={() => onAdd(card)}
                 title={`${card.name}${isOwned ? "" : " — not collected"}`}
               >

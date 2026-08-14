@@ -17,6 +17,7 @@ export function PilesView({
   piles,
   selectedCardId,
   onSelectCard,
+  onHoverCard,
   onMoveEntry,
   onCreatePile,
   onRenamePile,
@@ -27,6 +28,8 @@ export function PilesView({
   piles: DeckPile[];
   selectedCardId: string | null;
   onSelectCard: (entry: DeckEntry) => void;
+  /** Previews a card in the detail panel without changing the selection. */
+  onHoverCard?: (card: DeckEntry["card"] | null) => void;
   onMoveEntry: (entryId: string, pileId: string | null) => void;
   onCreatePile: () => void;
   onRenamePile: (pileId: string, name: string) => void;
@@ -105,6 +108,8 @@ export function PilesView({
           setDragOver(null);
         }}
         onClick={() => onSelectCard(entry)}
+        onMouseEnter={() => onHoverCard?.(entry.card)}
+        onMouseLeave={() => onHoverCard?.(null)}
         title={`${entry.quantity}× ${entry.card.name}`}
       >
         <CardImage card={entry.card} size="small" />

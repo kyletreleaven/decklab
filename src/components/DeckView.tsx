@@ -32,6 +32,7 @@ export function DeckView({
   collections,
   selectedCardId,
   onSelectCard,
+  onHoverCard,
   onChangeQuantity,
   onRemove,
   onSetZone,
@@ -50,6 +51,8 @@ export function DeckView({
   collections: Collection[];
   selectedCardId: string | null;
   onSelectCard: (card: Card) => void;
+  /** Previews a card in the detail panel without changing the selection. */
+  onHoverCard?: (card: Card | null) => void;
   onChangeQuantity: (entry: DeckEntry, quantity: number) => void;
   onRemove: (entry: DeckEntry) => void;
   onSetZone: (entry: DeckEntry, zone: DeckEntry["zone"]) => void;
@@ -162,6 +165,8 @@ export function DeckView({
         key={entry.id}
         className={`row ${selectedCardId === entry.card.id ? "selected" : ""}`}
         onClick={() => onSelectCard(entry.card)}
+        onMouseEnter={() => onHoverCard?.(entry.card)}
+        onMouseLeave={() => onHoverCard?.(null)}
       >
         <span className="qty">{entry.quantity}×</span>
         <span className="name">{entry.card.name}</span>
@@ -376,6 +381,7 @@ export function DeckView({
           piles={piles}
           selectedCardId={selectedCardId}
           onSelectCard={(entry) => onSelectCard(entry.card)}
+          onHoverCard={onHoverCard}
           onChangeQuantity={onChangeQuantity}
           onMoveEntry={async (entryId, pileId) => {
             await setEntryPile(entryId, deck.id, pileId);

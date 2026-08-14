@@ -2,30 +2,16 @@ import { fetch } from "@tauri-apps/plugin-http";
 import type { Card } from "./types";
 import { canonicalColors } from "./types";
 import { cacheCards } from "./cards";
+import { schedule, type Lane } from "./scheduler";
 
 const API = "https://api.scryfall.com";
 
 /**
  * Scryfall asks for 50-100ms between requests and a descriptive User-Agent.
  * Requests go through the Tauri HTTP plugin rather than the webview's `fetch`
- * so we can actually set that header, and every call is threaded through one
- * promise chain to keep the spacing honest under concurrent callers.
+ * so we can actually set that header, and through the scheduler so the spacing
+ * holds and interactive work can preempt background work.
  */
-const MIN_INTERVAL_MS = 100;
-let chain: Promise<unknown> = Promise.resolve();
-
-function throttle<T>(task: () => Promise<T>): Promise<T> {
-  const result = chain.then(task, task);
-  chain = result.then(
-    () => sleep(MIN_INTERVAL_MS),
-    () => sleep(MIN_INTERVAL_MS),
-  );
-  return result;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export class ScryfallError extends Error {
   constructor(
@@ -37,29 +23,39 @@ export class ScryfallError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  return throttle(async () => {
-    const response = await fetch(`${API}${path}`, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "DeckLab/0.1.0 (desktop)",
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...init?.headers,
-      },
-    });
+interface RequestOptions extends RequestInit {
+  /** Scopes eviction in the interactive lane. Per *kind*, not per argument. */
+  key?: string;
+  lane?: Lane;
+}
 
-    const body = await response.json().catch(() => null);
+async function request<T>(path: string, init?: RequestOptions): Promise<T> {
+  const { key, lane, ...fetchInit } = init ?? {};
+  return schedule<T>(
+    async () => {
+      const response = await fetch(`${API}${path}`, {
+        ...fetchInit,
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "DeckLab/0.1.0 (desktop)",
+          ...(fetchInit.body ? { "Content-Type": "application/json" } : {}),
+          ...fetchInit.headers,
+        },
+      });
 
-    if (!response.ok) {
-      const detail =
-        (body as { details?: string } | null)?.details ??
-        `Scryfall returned ${response.status}`;
-      throw new ScryfallError(detail, response.status);
-    }
+      const body = await response.json().catch(() => null);
 
-    return body as T;
-  });
+      if (!response.ok) {
+        const detail =
+          (body as { details?: string } | null)?.details ??
+          `Scryfall returned ${response.status}`;
+        throw new ScryfallError(detail, response.status);
+      }
+
+      return body as T;
+    },
+    { lane, key },
+  );
 }
 
 /** Raw Scryfall card JSON. Only the fields we denormalise are typed. */
@@ -180,7 +176,9 @@ export async function search(query: string, page = 1): Promise<SearchPage> {
 
   let list: ScryfallList;
   try {
-    list = await request<ScryfallList>(`/cards/search?${params}`);
+    list = await request<ScryfallList>(`/cards/search?${params}`, {
+      key: "search",
+    });
   } catch (error) {
     // Scryfall 404s an empty result set rather than returning zero rows.
     if (error instanceof ScryfallError && error.status === 404) {
@@ -203,13 +201,18 @@ export async function search(query: string, page = 1): Promise<SearchPage> {
 export async function autocomplete(partial: string): Promise<string[]> {
   if (partial.trim().length < 2) return [];
   const params = new URLSearchParams({ q: partial });
-  const body = await request<{ data: string[] }>(`/cards/autocomplete?${params}`);
+  const body = await request<{ data: string[] }>(
+    `/cards/autocomplete?${params}`,
+    { key: "autocomplete" },
+  );
   return body.data ?? [];
 }
 
 export async function named(name: string, exact = true): Promise<Card> {
   const params = new URLSearchParams(exact ? { exact: name } : { fuzzy: name });
-  const card = normalize(await request<ScryfallCard>(`/cards/named?${params}`));
+  const card = normalize(
+    await request<ScryfallCard>(`/cards/named?${params}`, { key: "named" }),
+  );
   await cacheCards([card]);
   return card;
 }
@@ -232,7 +235,9 @@ async function fetchPrintings(oracleId: string): Promise<Card[]> {
     unique: "prints",
     order: "released",
   });
-  const list = await request<ScryfallList>(`/cards/search?${params}`);
+  const list = await request<ScryfallList>(`/cards/search?${params}`, {
+    key: "printings",
+  });
   const cards = list.data.map(normalize);
   await cacheCards(cards);
   return cards;
@@ -291,6 +296,10 @@ export async function resolveIdentifiers(
     }>("/cards/collection", {
       method: "POST",
       body: JSON.stringify({ identifiers: chunk }),
+      // Background lane: every chunk carries distinct cards, so these must
+      // queue rather than evict one another, and they should yield to whatever
+      // the user is doing.
+      lane: "background",
     });
 
     found.push(...(body.data ?? []).map(normalize));
@@ -323,6 +332,7 @@ export async function resolveNames(names: string[]): Promise<ResolveResult> {
     }>("/cards/collection", {
       method: "POST",
       body: JSON.stringify({ identifiers: chunk.map((name) => ({ name })) }),
+      lane: "background",
     });
 
     found.push(...(body.data ?? []).map(normalize));

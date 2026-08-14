@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ownedByPrinting } from "../lib/collections";
 import { cachedPrintings } from "../lib/cards";
+import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
 import type { Card, Collection, Deck } from "../lib/types";
 import { CardImage } from "./CardImage";
@@ -127,12 +128,13 @@ export function CardDetail({
         if (rows.length) setPrintings(rows);
       })
       .catch((err) => {
-        // Never swallow this. Offline is a legitimate case, but so is a real
-        // failure, and silently showing a truncated print run looks identical
-        // to a card that genuinely has two printings.
-        if (active) {
-          setPrintingsError(err instanceof Error ? err.message : String(err));
-        }
+        if (!active) return;
+        // Superseded means the pointer moved on before this ran — expected, and
+        // not a failure. Anything else is: offline is legitimate, but so is a
+        // real error, and a silently truncated print run looks identical to a
+        // card that genuinely has two printings.
+        if (isSuperseded(err)) return;
+        setPrintingsError(err instanceof Error ? err.message : String(err));
       });
 
     return () => {
@@ -154,13 +156,32 @@ export function CardDetail({
     };
   }, [oracleId, refreshKey]);
 
-  // Follow the card selected elsewhere; the carousel then moves within its
-  // printings without disturbing that selection.
-  // Only the selected printing is object-bound. `ownedOnly` is a *preference* —
-  // resetting it here silently switched it off every time focus moved.
+  /**
+   * The printing chosen per card, so hover stays non-destructive: sweeping the
+   * pointer across a grid and back must not discard a printing you picked.
+   * Keyed by oracle id, since that is the grain a print run belongs to.
+   *
+   * (`ownedOnly` deliberately lives outside this reset — it is a preference, and
+   * clearing it whenever focus moved silently switched it off.)
+   */
+  const chosenPrinting = useRef(new Map<string, string>());
+
   useEffect(() => {
-    setPrintingId(card?.id ?? null);
-  }, [card?.id]);
+    if (!card) {
+      setPrintingId(null);
+      return;
+    }
+    setPrintingId(chosenPrinting.current.get(card.oracleId) ?? card.id);
+  }, [card?.id, card?.oracleId]);
+
+  /** Select a printing and remember it for this card. */
+  const choosePrinting = useCallback(
+    (printing: Card) => {
+      setPrintingId(printing.id);
+      chosenPrinting.current.set(printing.oracleId, printing.id);
+    },
+    [],
+  );
 
   /**
    * Counts are stated against the active collection when there is one, falling
@@ -209,7 +230,7 @@ export function CardDetail({
     // Wrap, so paging through a long print run never dead-ends.
     const from = index === -1 ? 0 : index;
     const next = (from + delta + visible.length) % visible.length;
-    setPrintingId(visible[next].id);
+    choosePrinting(visible[next]);
   }
 
   return (
@@ -305,7 +326,10 @@ export function CardDetail({
         <div className="carousel-controls">
           <select
             value={shown.id}
-            onChange={(e) => setPrintingId(e.target.value)}
+            onChange={(e) => {
+              const picked = visible.find((p) => p.id === e.target.value);
+              if (picked) choosePrinting(picked);
+            }}
             disabled={visible.length === 0}
             title="Jump to a printing"
           >

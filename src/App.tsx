@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { CardDetail } from "./components/CardDetail";
 import { CardSearch } from "./components/CardSearch";
 import { CollectionView } from "./components/CollectionView";
@@ -79,6 +86,8 @@ export default function App() {
   const [view, setView] = useState<View>({ kind: "search" });
   const [touched, setTouched] = useState<Touched[]>([]);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
+  const [hoveredCard, setHoveredCard] = useState<Card | null>(null);
+  const hoverClear = useRef<number | null>(null);
   const [entries, setEntries] = useState<DeckEntry[]>([]);
   const [dialog, setDialog] = useState<"deck" | "collection" | null>(null);
   const [draftName, setDraftName] = useState("");
@@ -126,6 +135,42 @@ export default function App() {
     if (currentDeck) reloadEntries(currentDeck.id);
     else setEntries([]);
   }, [currentDeck?.id, reloadEntries]);
+
+  /**
+   * Hover previews a card without disturbing the selection:
+   *
+   *     shown = hovered ?? selected ?? empty
+   *
+   * The panel re-renders immediately, since the card object is already in hand
+   * from the grid. Only the queries and fetches keyed off it cost anything, and
+   * the scheduler collapses those — a sweep across a grid leaves one request
+   * standing rather than one per card.
+   */
+  const hoverCard = useCallback((card: Card | null) => {
+    if (hoverClear.current !== null) {
+      clearTimeout(hoverClear.current);
+      hoverClear.current = null;
+    }
+
+    if (card) {
+      setHoveredCard(card);
+      return;
+    }
+
+    // Moving between adjacent cards fires leave-then-enter as two separate
+    // events, which React does not batch — clearing immediately would flash the
+    // selected card in between. A short grace period makes the handover seamless.
+    hoverClear.current = window.setTimeout(() => setHoveredCard(null), 80);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (hoverClear.current !== null) clearTimeout(hoverClear.current);
+    };
+  }, []);
+
+  /** What the card panel describes: the hovered card, else the selected one. */
+  const shownCard = hoveredCard ?? selectedCard;
 
   /** Move an entry to the front, or add it. Also refreshes a renamed entry. */
   const touch = useCallback((entry: Touched) => {
@@ -233,7 +278,7 @@ export default function App() {
   >({});
 
   useEffect(() => {
-    const oracleId = selectedCard?.oracleId;
+    const oracleId = shownCard?.oracleId;
     if (!activeCollection || !oracleId) {
       setCollectionQuantities({});
       return;
@@ -249,10 +294,10 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [activeCollection?.id, selectedCard?.oracleId, refreshKey]);
+  }, [activeCollection?.id, shownCard?.oracleId, refreshKey]);
 
   useEffect(() => {
-    const oracleId = selectedCard?.oracleId;
+    const oracleId = shownCard?.oracleId;
     if (!target || !oracleId) {
       setTargetQuantities({});
       return;
@@ -271,7 +316,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [target?.kind, target?.id, selectedCard?.oracleId, refreshKey]);
+  }, [target?.kind, target?.id, shownCard?.oracleId, refreshKey]);
 
   /** Put the candidate-card pool above a deck view when the pool is showing. */
   function withPool(node: ReactNode): ReactNode {
@@ -285,6 +330,7 @@ export default function App() {
             collections={collections}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
+            onHoverCard={hoverCard}
             onAdd={(card) => addToDeck(card, currentDeck.id, false)}
             scope={deckScope}
           />
@@ -399,6 +445,7 @@ export default function App() {
             <CardSearch
               selectedId={selectedCard?.id ?? null}
               onSelect={setSelectedCard}
+              onHoverCard={hoverCard}
               onAdd={target ? addToTarget : undefined}
               addLabel={target ? `Add to ${target.name}` : undefined}
             />
@@ -412,6 +459,7 @@ export default function App() {
             collections={collections}
             selectedCardId={selectedCard?.id ?? null}
             onSelectCard={setSelectedCard}
+            onHoverCard={hoverCard}
             refreshKey={refreshKey}
             onChangeQuantity={async (entry, quantity) => {
               await decksApi.setDeckCardQuantity(entry.id, currentDeck.id, quantity);
@@ -462,6 +510,7 @@ export default function App() {
             collection={currentCollection}
             selectedCardId={selectedCard?.id ?? null}
             onSelectCard={setSelectedCard}
+            onHoverCard={hoverCard}
             refreshKey={refreshKey}
             onChangeQuantity={async (item: CollectionItem, quantity: number) => {
               await collectionsApi.setCollectionItemQuantity(item.id, quantity);
@@ -508,7 +557,7 @@ export default function App() {
       </main>
 
       <CardDetail
-        card={selectedCard}
+        card={shownCard}
         decks={decks}
         collections={collections}
         onAddToDeck={addToDeck}
