@@ -233,6 +233,144 @@ internal state across navigation — is a larger, separable piece spread across
 four components. The carousel needs none of it: it is never navigated away from,
 so its state is purely object-bound.
 
+### Universe as a collection — merge card search into collections ⭐
+
+Make **All Magic** a first-class card source, opening the ordinary collection
+view backed by Scryfall instead of SQLite. `CardSearch` then has no reason to
+exist.
+
+**Universe stays inside the collections model**, which is what the algebra says
+anyway: a collection's contents and `Universe` are both `card → quantity` specs,
+differing in value (a finite map versus the constant ∞), not in type. Carving it
+out would contradict the model for a presentational reason. Placement in the
+sidebar is then display — pinned first, since it is what everything else is drawn
+from.
+
+**But `kind` is the wrong hook, because `kind` is doing two jobs.**
+
+Today `kind` is both a user-facing label *and* the thing behaviour is derived
+from — `OWNABLE_KINDS` excludes `wishlist` and `loaned`. That conflation cannot
+express cases that obviously exist:
+
+- Two paper collections, one of them cards you are **selling** — same kind, but
+  the sale binder should not count as playable
+- A friend's binder imported for **trade reference** — no kind fits; it is not
+  yours at all
+- **Loaned out** — you *do* own them, you just cannot sleeve them tonight.
+  Whether they count is the user's call, not ours
+- **Cube** — we guessed it counts as owned. Plausible, but a guess made on the
+  user's behalf
+
+**Only `writable` is first-class. Everything else is metadata.**
+
+The test: *does violating it produce nonsense, or just a number you disagree
+with?*
+
+- Writing to Universe → **nonsense**. There is nowhere to put the card; no
+  coherent behaviour exists. The app must enforce this.
+- "Arena counts toward my paper deck" → a number you would disagree with, fixed
+  by changing your mind. The app should not be deciding it.
+
+Three categories, which is one more than "structural vs metadata" — card
+attributes are neither:
+
+| Category | Example | Editable |
+| --- | --- | --- |
+| **Reference data** | card name, set symbol, oracle text, legality | no — cached from Scryfall, not ours |
+| **Structural fields** | `collection.name`, `deck.format`, **`writable`** | yes, but required and app-meaningful |
+| **User metadata** | tags, notes, colour swatch, counts-as-owned, game | yes, optional, arbitrary |
+
+So on a collection specifically:
+
+| Axis | Status | Notes |
+| --- | --- | --- |
+| **writable** | structural, enforced | the only *behavioural* fact the app decides |
+| `name` | structural | required; it is how you identify the thing |
+| counts as owned | metadata | with UI support; ultimately the user's call |
+| game (paper / Arena / MTGO) | metadata | with UI support — filters, soft warnings |
+| colour / icon | metadata | decoration only |
+
+Note `writable` is *not* simply "is it computed". A **stored** collection can
+want it too: locking an imported reference binder — a friend's list, a
+tournament decklist — against accidental edits is the same flag.
+
+- ⬜ `writable` becomes a real column, defaulted true; Universe is the first
+      `false`
+- ⬜ Everything else stays user metadata with good affordances rather than
+      app-enforced semantics. Resist adding a `game` enum the app reasons about;
+      a deck warning is friendlier than a hard rule, and cheaper to be wrong.
+- ⬜ **`OWNABLE_KINDS` does not get replaced by a smarter inference — it gets
+      deleted.** Ownership scope becomes the user picking which collections
+      count, which is exactly selection-as-shared-context. The current
+      wishlist/loaned exclusion is a stopgap standing in for that choice.
+
+**Arbitrary user metadata on decks and collections.** Once everything but
+`writable` is metadata, enumerating the keys stops being worthwhile — so allow
+any. Well-known keys simply get affordances:
+
+| Key | Affordance |
+| --- | --- |
+| `game` | filter, and a soft warning when a paper deck draws on Arena cards |
+| `counts_as_owned` | checkbox; feeds ownership scope |
+| `colour`, `icon` | sidebar styling |
+| anything else | shown and editable, no special behaviour |
+
+This dissolves the structured-versus-freeform choice rather than settling it:
+structured keys are conventions with UI, not a separate mechanism.
+
+- ⬜ Storage: either a `(entity_type, entity_id, key, value)` table, or a JSON
+      column per entity. The table is filterable — "every collection where
+      game=paper" — which matters if collections themselves become selectable
+      inputs to the algebra. JSON is simpler and fine at tens of entities. Not
+      decided.
+- ⬜ Same shape as **`card_tags`**, which already exists and is dead code left
+      over from the cut query language. Either fold it into one metadata
+      mechanism or drop it — having both would be the worst outcome.
+- ⬜ Subsumes several backlog items that are each "metadata on a thing": deck
+      notes, tags, favourites, archived/competitive status.
+
+**Not speculative — `PoolPanel` already does this.** It has a source dropdown
+offering "All of Magic (Scryfall)" alongside every collection, with one
+`CardFilter` driving both (compiled to a Scryfall query string on one branch, a
+SQL predicate on the other). This proposal is to promote that pattern from one
+panel to the whole app.
+
+**It is also the algebra arriving early, and usefully.** `Universe` is already a
+node in the card-set model — the constant `∞` at a given grain. Making it a
+sidebar entry means the first algebra concept lands as a concrete simplification
+rather than as scaffolding.
+
+**What it buys:**
+- ⬜ Deletes `CardSearch.tsx` — one card list view instead of two
+- ⬜ Uniform navigation: every card source is a sidebar entry
+- ⬜ Facet filters, wall/list layout and sort come free in search, since they
+      already exist in the collection view
+- ⬜ The search view's bespoke "Adding to X" bar goes away; the ordinary target
+      mechanism already covers it
+
+**Universe is a variant, not an identical twin.** These differences want to be
+*capabilities* on a source rather than `if (source === SCRYFALL)` branches:
+
+| Capability | Collection | Universe |
+| --- | --- | --- |
+| `writable` — can hold cards | yes | **no** — nothing can be added to it |
+| `bounded` — listable without a filter | yes | **no** — an empty filter must say "search", not list 500k cards |
+| `paged` | no, returns everything | yes, 175 per page |
+| `ownershipOverlay` — dim uncollected | no, everything is owned by definition | yes, Arena-style |
+| sort vocabulary | SQL columns | Scryfall's own `order=` |
+
+**Consequence for target semantics.** Clicking All Magic touches it, but it
+cannot receive cards — so `target` becomes *the most recent **writable** entry*
+rather than simply the first. That is arguably a better definition anyway:
+"target" means the last thing you touched that can hold cards.
+
+- ⬜ Virtual, not a stored row — a sentinel id, since a `collections` row that
+      can never hold items would be a lie. Revisit if the container model lands,
+      where Universe would be a container of kind `universe` whose contents are
+      computed rather than stored.
+- ⬜ Ownership overlay in Universe needs a scope, which is the same
+      selection-as-scope question as everywhere else.
+
 ### Persist the printings TTL — migration 003 ✅
 
 **The gap it closed.** Card rows always persisted — `fetchPrintings` writes every
