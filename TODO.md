@@ -72,34 +72,24 @@ The rule matters because it says *which* state needs rescuing. Two concrete jobs
       card silently switched it off.
 ### Panel state retention ⬜
 
-**Panels are conditionally rendered, so navigating unmounts them and destroys
-everything they hold.** The sharpest case: search for something, click a deck to
-add a card, come back — your query and results are gone.
+Panels are conditionally rendered, so navigating unmounts them and loses
+everything. Sharpest case: search, click a deck to add a card, come back to an
+empty box.
 
-Re-audited against the current components, classified by the table above:
-
-| Panel | **Preference** — lift | **Derived** — cache | **Object-bound** — leave |
+| Panel | **Lift** (preference) | **Cache** (derived) | **Leave** (object-bound) |
 | --- | --- | --- | --- |
-| `PoolPanel` | `filter` (incl. the query), `showFilters`, `scopeOn`, `showUnowned` | `ownedCards`, `universeCards`, `owned`, `total`, `nextPage` | `shown`, `loading`, `error` |
+| `PoolPanel` | `filter`, `showFilters`, `scopeOn`, `showUnowned` | `ownedCards`, `universeCards`, `owned`, `total`, `nextPage` | `shown`, `loading`, `error` |
 | `CollectionView` | `layout`, `sort`, `filter`, `showFilters` | `items` | `editingName`, `draftName`, `queryError` |
 | `DeckView` | `layout`, `against` | `ownership`, `piles` | `editingName`, `draftName` |
 
-**Decided: lift preferences, cache derived, leave object-bound local.** The query
-lifts as a preference; results do not — they become a cache keyed by query, the
-same shape the printings memo already uses.
+Rejected: keeping panels mounted and toggling visibility. Nearly free, but hidden
+panels keep querying, and it preserves state indiscriminately rather than forcing
+the classification — which is what stops these bugs recurring.
 
-Rejected: keeping panels mounted and toggling visibility. Nearly free, and it
-would preserve scroll position too, but every hidden panel's effects keep running
-— the pool would go on querying behind a deck view — and it preserves state
-indiscriminately rather than forcing the classification, which is the part that
-actually stops these bugs recurring.
-
-- ⬜ Worth doing **after** slices 2 and 3. Merging `CollectionView` into
-      `PoolPanel` deletes one of the three columns above, so lifting first would
-      mean lifting state that is about to be consolidated anyway.
-- ⬜ `DeckView.against` — which collections a deck checks ownership against — is
-      a preference today, but selection-as-scope may absorb it entirely. Do not
-      lift it without checking whether it should simply disappear.
+- ⬜ Do this **after** slices 2 and 3; merging `CollectionView` into `PoolPanel`
+      deletes a column.
+- ⬜ `DeckView.against` may be absorbed by selection-as-scope entirely — check
+      before lifting it.
 
 **Carousel `+/-`.** ✅ Adjusts the quantity of the *shown printing* in the
 current target, with the count between the buttons.
@@ -282,23 +272,13 @@ rather than as scaffolding.
       toggle, and the add-button label derives from `target` rather than being
       passed separately.
 - ⬜ **Remove the "skip the network when the collection fills a page"
-      shortcut.** `PoolPanel` currently avoids the remote query when the local
-      side already has `PAGE` rows. That is a false economy: **the background
-      set is the source of truth for ordering**, so results silently change
-      shape depending on whether a threshold was crossed. A collection with 200
-      matches would order by SQL, one with 100 by Scryfall's `order=` — same
-      query, different sequence, for a reason invisible to the user.
-      Always run both and merge.
-
-- ⬜ **Generalise the merge, because the background will not always be All
-      Magic.** It could be another collection, a saved `ScryfallSearch`, or any
-      spec once the algebra lands. So the union wants to be a reusable
-      *synchronisation* between a foreground set and a background set —
-      dedupe key, ordering authority, paging, and which side is complete versus
-      streamed — rather than logic baked into `PoolPanel` against Scryfall
-      specifically.
-      Ordering authority is the interesting parameter: the background decides
-      sequence, the foreground decides membership and is never truncated.
+      shortcut.** The background set owns *ordering*, so skipping it makes
+      results sort by SQL above 175 rows and by Scryfall's `order=` below —
+      same query, different sequence, invisible threshold. Always merge both.
+- ⬜ *Later:* generalise the merge into a reusable foreground/background
+      synchronisation (dedupe key, ordering authority, which side is complete).
+      Deferred — one background exists today, so it would be an abstraction
+      designed against a single caller.
 
 - ⬜ **Slice 2 — grow `PoolPanel`** with the collection view's features behind
       capability flags: wall/list, sort, quantities (∞ or blank for the
@@ -538,45 +518,21 @@ juxtaposition-as-AND, explicit `and`/`or`, `-` negation and nested parens.
       is the change that stops `t:creature` silently returning nothing against a
       local collection.
 - ⬜ Surface parse errors and unsupported terms in the filter UI.
-- ⬜ **Make "Deck-legal" work outside the deck view.** It disappears the moment
-      you navigate away — exactly when you want it, browsing All Magic for cards
-      to add.
+- ⬜ **Make "Deck-legal" work outside the deck view** — it vanishes on
+      navigation, exactly when you want it. `activeDeck` is *not* the problem;
+      it persists correctly. Two other things are: `deckScope` reads
+      `currentDeck` rather than `activeDeck` (and needs that deck's commander
+      zone, since `entries` only holds the viewed deck), and `scope` is only
+      passed to `PoolPanel` in the deck view. Fixing either alone changes nothing.
 
-      To be clear about where the fault is: **`activeDeck` does not vanish.** The
-      touch list keeps it correctly across navigation. Two *other* things are
-      wrong, and both need fixing:
-
-      1. `deckScope` derives from `currentDeck` (null unless the deck is on
-         screen) rather than `activeDeck`. It also needs that deck's commander
-         zone loaded, since `entries` only ever holds the *viewed* deck's cards —
-         that is the one small query.
-      2. `scope` is only passed to `PoolPanel` inside the deck view. The search
-         view renders `PoolPanel` too and gets nothing.
-
-      Fixing either alone changes nothing.
-
-- ⬜ **Split the bundled scope into independent contextual facets.** `deckScope`
-      currently fuses two constraints — format legality *and* commander colour
-      identity — behind one toggle, so they cannot be used separately. Wanting
-      format-legal cards *outside* your identity is a real case: checking what a
-      splash would buy you, or what exists before deciding on colours.
-
-      The tell is already in the code: the button relabels itself "Deck-legal"
-      versus "Format-legal" depending on whether a commander is set. One control
-      trying to say which of two constraints is live means it should be two.
-
-      So `scope?: { label, filter }` becomes `scopes: Scope[]` — a list of
-      independently toggleable facets, each shown only when it means something:
-
-      | Facet | Appears when |
-      | --- | --- |
-      | Legal in *format* | there is an active deck |
-      | Within *colours* | the active deck is Commander with a commander set |
-      | Not already in *deck* | there is an active deck |
-      | In *collection* | there is an active collection |
-
-      They AND together like every other facet, so this needs no new mechanism —
-      just a list instead of a single optional prop.
+- ⬜ **Split the bundled scope into contextual facets.** `deckScope` fuses format
+      legality and commander identity behind one toggle, so you cannot ask for
+      format-legal cards *outside* your identity — a real case when weighing a
+      splash. The tell: the button relabels itself "Deck-legal" vs
+      "Format-legal" depending on whether a commander is set.
+      `scope?: {label, filter}` becomes `scopes: Scope[]`, each shown only when
+      meaningful: legal in *format*, within *colours*, not already in *deck*, in
+      *collection*. They AND like every other facet, so no new mechanism.
 
 ### Persist the printings TTL — migration 003 ✅
 
