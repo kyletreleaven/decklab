@@ -6,7 +6,9 @@ not Commander-only.
 Tauri 2 · React 19 + TypeScript · SQLite · card data from
 [Scryfall](https://scryfall.com).
 
-Roadmap and design notes live in [`TODO.md`](TODO.md).
+- **[`FEATURES.md`](FEATURES.md)** — what the app does today
+- **[`TODO.md`](TODO.md)** — roadmap and design notes
+- **[`docs/`](docs/)** — procedures and implementation plans too long for either
 
 ---
 

@@ -14,92 +14,18 @@ migration. See the reasoning in git history.
 
 ## Shipped
 
-### Deck builder
-- ✅ Card search against Scryfall (full Scryfall syntax passes straight through)
-- ✅ Visual card grid with locally cached images
-- ✅ Click to inspect, double-click / `+` to add
-- ✅ Card detail rail: oracle text, legality, prices, colour identity, owned copies
-- ✅ Decks: create / rename / delete, commander + 99, quantities, zones
-      (commander / main / side / maybe)
-- ✅ Grouped list view by card type
-- ✅ **Piles view** with drag-and-drop between columns, persisted per deck;
-      auto-arrange by type or mana value
-- ✅ Deck stats bar: card count, average MV, curve, colour identity, estimated value
-- ✅ Commander rules checks (singleton, colour identity, banned, 100 cards) —
-      advisory only, never blocks an edit
-- ✅ Autosave (every edit writes through to SQLite immediately)
-
-### Collections
-- ✅ Multiple collections with kinds (paper / Arena / MTGO / cube / loaned / wishlist)
-- ✅ **Card wall** and list views
-- ✅ Facet filtering: colour, type, rarity, mana value range, name — all pushed
-      into SQL, so it scales past tens of thousands of rows
-- ✅ Sort by name / MV / quantity / price
-- ✅ Smart ownership: deck-vs-collections with exact-printing *and* playable
-      (any-printing) counts, plus per-printing breakdown
-- ✅ Missing-card summary per deck
-
-### Import / export
-- ✅ Import from paste, file, or URL — all through one parser
-- ✅ Formats: Arena, MTGO, Moxfield, Archidekt, plain lists, CSV
-      (Moxfield / ManaBox / Deckbox / Archidekt header dialects)
-- ✅ Preview with matched / unmatched counts before committing
-- ✅ Two-pass resolution: exact printing first (Scryfall id, or set + collector
-      number), then name fallback
-- ✅ URL import: Archidekt via their API
-- ✅ Export: plain text, Arena, CSV — copy to clipboard or save to file
-- ✅ Moxfield binder workaround (`scripts/moxfield_binder_to_csv.py` +
-      `docs/importing-moxfield.md`) — Moxfield blocks automated fetching
-
-### Infrastructure
-- ✅ Incremental card cache — anything seen is searchable offline afterwards
-- ✅ Image cache on disk via Rust, served through Tauri's asset protocol
-- ✅ Versioned migrations (001 schema, 002 piles, 003 oracle fetch stamps)
-- ✅ Test suite — 48 tests over the parser, serialisers and deck analysis
-- ✅ `npm run tauri build` produces a 7.5MB DMG
+Moved to **[`FEATURES.md`](FEATURES.md)** — a current description of what the
+app does, kept out of here so this file stays about what is left.
 
 ---
 
 ## Next up
 
-### Card panel layout
+### Card panel layout — mostly done
 
-The rail used to read image → name → oracle → details → legality → owned →
-actions, burying the two things deckbuilding needs behind two screenfuls of
-reference data.
-
-**Done (bite 1):**
-1. ✅ **Ops** — add to deck / collection plus a compact owned count, *sticky* at
-      the top so it stays reachable however far you scroll.
-2. ✅ Owned count scoped to *ownable* kinds — `wishlist` and `loaned` excluded.
-      (Real answer is still selection-as-scope, below.)
-
-**Done (bite 2): the printings carousel, and details split by grain.** ✅
-
-The details block conflates two grains, which is why it wants splitting:
-
-| Oracle-level — stable across printings | Printing-level — varies |
-| --- | --- |
-| type line, mana cost, oracle text | set name + code, collector number |
-| mana value, P/T, loyalty | rarity |
-| colour identity | price (usd / foil) |
-| legality | artist, frame, promo type |
-| EDHREC rank | finish availability |
-
-**The carousel wraps the image rather than sitting beside it**, and drives the
-printing-level fields around it. So it is not a picker bolted on — it is the
-panel's mode control.
-
-- ✅ Prev/next around the image; the image *is* the carousel viewport
-- ✅ A combo box to jump straight to a printing, as an alternative to stepping
-- ✅ A toggle for **owned printings only** vs **all printings**
-- ✅ Printing-level fields update with the selection
-- ✅ Per-printing counts, which subsume the standalone copies block
-- ✅ Labels carry the collector number and variant traits. Set name alone was not
-      enough: Sol Ring has 30 Secret Lair printings, so without it the list
-      looked like it was repeating itself.
-- ✅ Loads from the local cache first so it draws instantly, then refreshes from
-      Scryfall behind it.
+Ops sticky at the top, then the picture, then details **split by grain** —
+oracle-level facts stay put while printing-level ones follow the carousel. See
+[`FEATURES.md`](FEATURES.md).
 
 **The printless state waits for the mixed-grain migration.** A "clear" control
 returning to oracle grain is the right idea, but its whole point is to change
@@ -110,58 +36,16 @@ only which fields you are reading, which is worse than not having it.
 - ⬜ The cleared state still has to show *an* image. Use the newest cached
       printing, and label it so it is not mistaken for a selection.
 
-### Active slots and hover — selection, narrowed
+### Active slots and hover — mostly done
 
-The smallest useful slice of *Selection as shared context* (below), and the piece
-that unblocks the carousel's `+/-`.
+One ordered most-recent-first list of touched decks and collections; active deck,
+active collection and target all derived from it. Hover previews any card without
+disturbing the selection. See [`FEATURES.md`](FEATURES.md).
 
-**One ordered touch list, not separate slots.** Every deck or collection you
-click goes to the front of a single most-recent-first list. Everything else is
-derived:
-
-| Wanted | Derived as |
-| --- | --- |
-| active deck | first deck in the list |
-| active collection | first collection in the list |
-| target (where a bare `+` sends) | first entry, whichever kind |
-
-- ✅ Ordering matters precisely because we need "last deck **or** collection
-      touched" — a pair of independent slots cannot answer that without an extra
-      discriminator, and the list answers it by construction.
-- ✅ Deleting a deck or collection removes it from the list.
-- ✅ Opening a deck no longer evicts the active collection, which the single
-      `target` used to do — and browsing printings *while* building a deck is
-      exactly when recording ownership matters.
-- ✅ Sidebar shows both levels: a ring for active-of-its-kind, a filled dot for
-      the overall most recent (where a bare `+` lands).
 - ⬜ `activeCard` as a durable slot of its own. Hover currently overlays the
       *selected* card, which is the same thing in practice; a separate slot only
       matters once selection grows to hold cards alongside decks and collections.
-
-**Hover overlays the active card:**
-
-```
-panel shows  =  hoveredCard ?? activeCard ?? empty
-```
-
-- ✅ **The panel updates immediately.** The card object is already in hand from
-      the grid, so re-rendering costs nothing and card-to-card feels instant.
-- ✅ **No debounce.** The eviction scheduler below made it unnecessary — and
-      better, since eviction adds no latency where a debounce would delay even a
-      cached card. Wired at all six render sites: search grid, pool, collection
-      wall and list, deck rows, piles.
-- ✅ Clearing hover is deferred ~80ms. Moving between adjacent cards fires
-      leave-then-enter as two separate events, which React does not batch, so an
-      immediate clear flashed the selected card in between.
-- ✅ Cards already fetched are free regardless, since printings are memoised.
-- ✅ Hover drives the **whole** panel, ops and carousel included. An earlier
-      worry that controls would shift under the cursor was unfounded: the cursor
-      can only be in one place, so reaching the rail ends the hover and reverts
-      to the active card before any click is possible.
-- ✅ **Hover is non-destructive.** The chosen printing is remembered per oracle
-      id, so sweeping across a grid and back does not discard a printing you
-      picked. Without this, hover silently undid a deliberate choice.
-- ⬜ Verify the 80ms grace period feels seamless in practice. If a flicker of the
+- ⬜ Verify the 80ms hover-clear grace period feels seamless. If a flicker of the
       selected card shows while sweeping, that is the dial.
 
 **Where state lives.** Three categories, and the category decides the home:
