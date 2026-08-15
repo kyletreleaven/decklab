@@ -469,8 +469,8 @@ path: search → save as live collection → flatten when you want it to stop mo
 - ⬜ Show which a collection is, and make flattening explicit.
 
 - ⬜ A lexer/parser for the local subset was written and deleted early on, when
-      scope was cut back to "manage collections and decks". Recover it from git
-      history rather than rewriting.
+      scope was cut back to "manage collections and decks". **Not recoverable** —
+      it was never committed, so this is a rewrite. See the plan below.
 - ⬜ Interim, if the merge lands before the parser: keep free text as a name
       match locally, but **detect syntax-looking input** (`foo:bar`, comparison
       operators) and say so, rather than returning zero results as though
