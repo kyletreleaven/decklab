@@ -1,7 +1,12 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import type { Card } from "./types";
 import { canonicalColors } from "./types";
-import { cacheCards } from "./cards";
+import {
+  cachedPrintings,
+  cacheCards,
+  markPrintingsFetched,
+  printingsFetchedAt,
+} from "./cards";
 import { schedule, type Lane } from "./scheduler";
 
 const API = "https://api.scryfall.com";
@@ -219,11 +224,15 @@ export async function named(name: string, exact = true): Promise<Card> {
 
 /**
  * A card's print run barely changes — new sets arrive every few weeks and
- * nothing else about an existing run moves — so this is memoised for a week.
+ * nothing else about an existing run moves — so it is cached for a week at two
+ * levels:
  *
- * In memory only, for now; a persisted TTL arrives with migration 003. Even
- * so, this is what stops the request queue filling with duplicate work as
- * focus moves between cards.
+ *   1. an in-memory memo, which saves even the database round trip in-session
+ *   2. `oracle_fetches` on disk, which survives restarts
+ *
+ * The second matters because the printings themselves were always persisted;
+ * what was not was the knowledge that we had them *all*, so every restart
+ * refetched print runs it already held.
  */
 const PRINTINGS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const printingsMemo = new Map<string, { at: number; cards: Card[] }>();
@@ -240,7 +249,19 @@ async function fetchPrintings(oracleId: string): Promise<Card[]> {
   });
   const cards = list.data.map(normalize);
   await cacheCards(cards);
+  // Stamp only after a successful write, so a failure part-way leaves the run
+  // marked incomplete and it gets refetched.
+  await markPrintingsFetched(oracleId);
   return cards;
+}
+
+/** Serve a complete print run from disk when the stamp is still fresh. */
+async function printingsFromDisk(oracleId: string): Promise<Card[] | null> {
+  const fetchedAt = await printingsFetchedAt(oracleId);
+  if (fetchedAt === null || Date.now() - fetchedAt >= PRINTINGS_TTL_MS) return null;
+
+  const rows = await cachedPrintings(oracleId);
+  return rows.length ? rows : null;
 }
 
 /** Every printing of a card, used by the printings carousel. */
@@ -253,7 +274,12 @@ export async function printings(oracleId: string): Promise<Card[]> {
   const pending = printingsInflight.get(oracleId);
   if (pending) return pending;
 
-  const task = fetchPrintings(oracleId)
+  const task = (async () => {
+    // Disk before network: a print run fetched within the TTL is already
+    // complete on disk, so going to Scryfall would be pure waste.
+    const stored = await printingsFromDisk(oracleId);
+    return stored ?? fetchPrintings(oracleId);
+  })()
     .then((cards) => {
       printingsMemo.set(oracleId, { at: Date.now(), cards });
       return cards;

@@ -108,6 +108,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/002_piles.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "oracle fetch stamps",
+            sql: include_str!("../migrations/003_oracle_fetches.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

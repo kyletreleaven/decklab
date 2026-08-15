@@ -125,6 +125,33 @@ export async function cachedPrintings(oracleId: string): Promise<Card[]> {
   return rows.map(rowToCard);
 }
 
+/**
+ * When a card's *complete* print run was last fetched, or null if never.
+ *
+ * `cards` holds every printing we have seen, but not the knowledge that we have
+ * seen them all — so without this we cannot tell "three printings because that
+ * is all there are" from "three because that is all we happened to meet".
+ */
+export async function printingsFetchedAt(oracleId: string): Promise<number | null> {
+  const rows = await select<{ printings_fetched_at: string }>(
+    "SELECT printings_fetched_at FROM oracle_fetches WHERE oracle_id = $1",
+    [oracleId],
+  );
+  if (!rows.length) return null;
+
+  const at = Date.parse(rows[0].printings_fetched_at);
+  return Number.isFinite(at) ? at : null;
+}
+
+export async function markPrintingsFetched(oracleId: string): Promise<void> {
+  await execute(
+    `INSERT INTO oracle_fetches (oracle_id, printings_fetched_at)
+     VALUES ($1, $2)
+     ON CONFLICT (oracle_id) DO UPDATE SET printings_fetched_at = excluded.printings_fetched_at`,
+    [oracleId, new Date().toISOString()],
+  );
+}
+
 export async function cacheSize(): Promise<number> {
   const rows = await select<{ n: number }>("SELECT COUNT(*) AS n FROM cards");
   return rows[0]?.n ?? 0;
