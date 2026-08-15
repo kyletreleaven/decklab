@@ -259,10 +259,13 @@ CREATE TABLE oracle_fetches (
 - ✅ Numbered 003, not 004: sqlx applies migrations in version order, so adding a
       lower-numbered one afterwards invites trouble. Mixed-grain storage moved
       to 004 since it ships second.
-- ⬜ Same treatment for `/sets`, which has the same shape: a long TTL plus
-      refresh-on-evidence when an unrecognised set code shows up.
-- ⬜ Prices ride on the same card rows but move daily, unlike print runs. They
-      want their own short TTL rather than inheriting the week.
+- ⬜ Prices ride on the same card rows but move daily, unlike print runs, so they
+      want their own short TTL rather than inheriting the week. **Deferred** —
+      stale prices are a cosmetic problem, not a correctness one.
+
+**Not a gap today: `/sets`.** `set_name` comes free on every card object, so
+nothing fetches `/sets` at all. It only becomes necessary alongside the CSV path,
+which is deferred to the backlog — see *Compact printing rows and the CSV path*.
 
 **Not verified:** the actual absence of network calls, which needs the devtools
 Network tab. What is verified is that the migration applied, stamps are being
@@ -274,37 +277,24 @@ The goal is **responsiveness**, which means minimising *round-trips* on the path
 the user is waiting on — not minimising bytes, and not pre-downloading
 everything.
 
-**Tier 1 — fast, on demand.** One request populates a card's whole carousel:
+**Tier 1 — fast, on demand.** ✅ One JSON request populates a card's whole
+carousel, cached for a week.
 
 ```
-/cards/search?q=oracleid:X&unique=prints&format=csv
+/cards/search?q=oracleid:X&unique=prints
 ```
 
-CSV rather than JSON: **34 KB for Sol Ring's 137 printings** (the worst case in
-Magic) versus 664 KB of JSON, and ~2–3 KB for an ordinary card. It carries
-`set`, `collector_number`, `rarity`, `name`, `image_uri`, `scryfall_id` — enough
-to render the carousel including thumbnails, from a single round-trip.
-
-- ⬜ Store as **compact printing rows**, not the raw payload. A card object is
-      ~5 KB of which only ~5% is card text and stats; the rest is affiliate
-      links, API self-references and eleven image URLs. Compact rows are
-      ~700 bytes.
-- ⬜ `set_name` is absent from CSV. `/sets` returns all 1,047 in one request.
-      Cache with a long TTL, but refresh on **evidence** rather than only on a
-      timer: meeting a set code we do not recognise is proof the list is stale,
-      which beats any interval. Guard it — a genuinely bogus code would
-      otherwise trigger a refetch every time it is seen, so remember codes that
-      a refresh failed to explain and stop asking.
-      That negative memory needs its own, shorter TTL: an unknown code may be a
-      spoiled or premature release that Scryfall simply has not published yet,
-      so "we could not explain this" must expire rather than becoming permanent.
 - ✅ Per-oracle TTL, persisted — migration 003 above. Lookup is memo → disk →
       network, so a print run seen last week costs no request today.
+- ⬜ Store as **compact printing rows** rather than the raw payload. A card
+      object is ~5 KB of which only ~5% is card text and stats; the rest is
+      affiliate links, API self-references and eleven image URLs. Compact rows
+      are ~700 bytes. Currently ~5,800 printings × 5 KB ≈ 27 MB on disk.
+      See the CSV section below — the two are the same piece of work.
 
 **Tier 2 — robust, background.** Everything heavier, none of it blocking:
 
-- ⬜ Full JSON per printing, for variant traits (borderless, showcase, etched,
-      promo, single-finish) that CSV omits
+- ⬜ Image *downloads*, strictly for the printing on screen. Sol Ring's full
 - ⬜ Image *downloads*, strictly for the printing on screen. Sol Ring's full
       print run would be **11 MB of art** if fetched eagerly.
 - ⬜ Optional idle backfill scoped to cards in collections and decks
@@ -863,7 +853,45 @@ Subsumed by the card-set algebra above; what remains here is the UI over it.
 
 ## Backlog
 
-Original vision, preserved and annotated.
+### Compact printing rows and the CSV path — deferred
+
+A storage-and-bandwidth optimisation, not a correctness fix. Recorded because the
+measurements were expensive to gather and the trade-offs are not obvious.
+
+**The measurements.** Scryfall serves the same query as CSV for a twentieth of
+the bytes:
+
+```
+oracleid:X&unique=prints             664 KB   (Sol Ring, 137 printings)
+oracleid:X&unique=prints&format=csv   34 KB
+```
+
+And a card object is mostly not card data — 24% image URLs, 20% affiliate and
+purchase links, 12% API self-references, against **4.7%** actual text and stats.
+We store the raw payload in `cards.data`, so ~5,800 printings is ~27 MB where
+compact rows would be ~4 MB.
+
+**Why it was deferred.** Migration 003 undercut the bandwidth argument: a print
+run is now fetched once per card per week, so twenty-times-less of an already
+rare request buys little. And CSV cannot populate `cards` as it stands — it
+carries no `oracle_text`, `legalities`, `colors`, `color_identity` or `keywords`.
+Those are not cosmetic: `color_identity` drives the pool's identity filter and
+`legalities` drives format scoping, so a CSV-sourced row would **silently break
+filtering**. It also drops `border_color`, `frame_effects` and `finishes`, which
+is what stops Sol Ring's 30 Secret Lairs rendering as identical duplicates.
+
+**So it is one piece of work, not two.** CSV only makes sense alongside a
+separate lightweight printings table — promoting the columns we query, keeping
+`data` nullable for rows we have only indexed. Doing either alone is worse than
+doing neither.
+
+- ⬜ Promote queried fields to real columns, `data` nullable, index-only rows
+- ⬜ CSV as the fetch format once rows no longer need the full payload
+- ⬜ `/sets` for `set_name`, which CSV omits — one request, all 1,047 sets,
+      long TTL plus refresh-on-evidence
+- ⬜ Where CSV still clearly wins regardless: **bulk prefetch** of a whole
+      collection's print runs, where a cheap index over thousands of cards is
+      exactly what is wanted and full detail is not.
 
 ### 3. Deck database
 One local library. ⬜
