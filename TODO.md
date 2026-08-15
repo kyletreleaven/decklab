@@ -557,6 +557,24 @@ rather than simply the first. That is arguably a better definition anyway:
 - ⬜ Ownership overlay in Universe needs a scope, which is the same
       selection-as-scope question as everywhere else.
 
+### Local query parser ⭐ next
+
+Needed so `t:creature` means the same thing against a collection as against All
+Magic. Pure logic — no UI, no schema — so it is independently testable and
+shippable, and it unblocks the Universe merge above.
+
+**Full plan: [`docs/query-language.md`](docs/query-language.md)** — grammar,
+field-to-column mapping, colour operator semantics, testing strategy, and what is
+deliberately out of scope.
+
+- ⬜ `src/lib/query/` — lex, parse, compile to a parameterised WHERE fragment
+- ⬜ `is:` unsupported in v1, reporting rather than silently matching nothing
+- ⬜ Deck scope derives from `currentDeck` today, so the "Deck-legal" toggle
+      disappears the moment you leave the deck view — exactly when you want it,
+      browsing All Magic for cards to add. Base it on **`activeDeck`** instead,
+      consistent with `±` and the ownership counts. Costs one small query, since
+      `entries` is only loaded for the viewed deck.
+
 ### Persist the printings TTL — migration 003 ✅
 
 **The gap it closed.** Card rows always persisted — `fetchPrintings` writes every
