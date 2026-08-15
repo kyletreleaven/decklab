@@ -5,8 +5,9 @@ passed straight through to Scryfall, who parse their own language better than we
 ever will. Against a **local collection** we have to interpret it ourselves —
 that is what this document plans.
 
-Status: not started. Pure logic, no UI and no schema change, so it is
-independently testable and independently shippable.
+**Status: built, not yet wired in.** `src/lib/query/` implements lex → parse →
+compile behind `compileQuery()`, with 115 unit tests and 10 SQL integration
+tests. What remains is calling it from `collectionItems()` — see TODO.md.
 
 > A version of this was written and deleted early on, when scope was cut back to
 > "manage collections and decks". It was never committed, so this is a rewrite,
@@ -69,7 +70,7 @@ src/lib/query/
   lex.ts        string  → tokens      quoted phrases, operators, parens, '-'
   parse.ts      tokens  → AST
   compile.ts    AST     → { sql, params }   a WHERE fragment
-  index.ts      public surface: parse, compileToSql, error types
+  index.ts      public surface: compileQuery(), plus the stage APIs
 ```
 
 Split three ways because each stage is independently testable, and because
@@ -96,24 +97,32 @@ Every field in v1 hits a column that already exists on `cards`.
 | `s:` `set:` `e:` | `set_code` | equality, lowercase |
 | `f:` | `legalities` | `json_extract(legalities, '$.' \|\| ?) IN ('legal','restricted')` — already done for pool scoping |
 | `kw:` | `keywords` | JSON array |
+| `layout:` | `layout` | equality |
+| `a:` `ft:` | raw payload | `json_extract(data, '$.artist')` etc. |
 | `is:` | — | **unsupported in v1**; structured error naming the term |
 
 ### Colour operators
 
-The subtle part. Colours are stored as canonical WUBRG strings (`"RW"`), and
-Scryfall's operators genuinely differ:
+The subtle part, since Scryfall's operators genuinely differ from one another:
 
 | Query | Means | Compiles to |
 | --- | --- | --- |
-| `c:rw` | *at least* R and W | contains R AND contains W |
-| `c=rw` | exactly | `colors = 'RW'` — canonicalise the value first |
+| `c:rw` `c>=rw` | *at least* R and W | contains R AND contains W |
+| `c=rw` | exactly | contains R, contains W, **and** `LENGTH(colors) = 2` |
 | `c<=rw` | at most — the Commander identity rule | no letter outside the set |
-| `c>rw` | strict superset | contains both, and not equal |
+| `c>rw` | strict superset | contains both, and not exactly two |
+| `c:c` / `c:m` | colourless / multicolour | `LENGTH = 0` / `LENGTH > 1` |
 
-`c<=` already exists as `withinIdentity` in `filters.ts` and can be lifted.
+**Nothing depends on stored colour order.** Colours happen to be stored
+WUBRG-canonical (`"WR"`, not `"RW"`), but expressing equality as *contains each,
+and has exactly N* keeps the SQL correct regardless — one fewer invariant the
+compiler relies on. Verified: both forms return the same 79 cards.
 
-Accept letters (`rw`), `c` for colourless, and full names (`red`). Guild and
-shard names (`azorius`, `bant`) are out of scope for v1.
+Values are deduped **before** the count is taken, so `c=rr` is mono-red
+(`LENGTH = 1`) rather than a two-colour set containing red.
+
+Accept letters (`rw`), `c` for colourless, `m` for multicolour, and full names
+(`red`). Guild and shard names (`azorius`, `bant`) are out of scope for v1.
 
 ### Gotcha: power and toughness are TEXT
 
@@ -131,6 +140,8 @@ map, so they never come from user input either.
 ---
 
 ## Testing
+
+All of the below are implemented and passing.
 
 | Stage | Cases |
 | --- | --- |

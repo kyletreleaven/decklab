@@ -441,18 +441,40 @@ rather than simply the first. That is arguably a better definition anyway:
 - ⬜ Ownership overlay in Universe needs a scope, which is the same
       selection-as-scope question as everywhere else.
 
-### Local query parser ⭐ next
+### Local query parser ✅ — not yet wired in
 
-Needed so `t:creature` means the same thing against a collection as against All
-Magic. Pure logic — no UI, no schema — so it is independently testable and
-shippable, and it unblocks the Universe merge above.
+`src/lib/query/` — lex → parse → compile, behind `compileQuery()`. Supports
+`t: o: name: c: id: mv: pow: tou: loy: r: set: f: kw: layout: a:` plus
+juxtaposition-as-AND, explicit `and`/`or`, `-` negation and nested parens.
 
-**Full plan: [`docs/query-language.md`](docs/query-language.md)** — grammar,
-field-to-column mapping, colour operator semantics, testing strategy, and what is
-deliberately out of scope.
+**Plan and grammar: [`docs/query-language.md`](docs/query-language.md).**
 
-- ⬜ `src/lib/query/` — lex, parse, compile to a parameterised WHERE fragment
-- ⬜ `is:` unsupported in v1, reporting rather than silently matching nothing
+- ✅ Parameterised throughout; field names come from a fixed map, so nothing
+      user-supplied reaches the SQL text
+- ✅ `is:` and unknown fields report rather than silently matching nothing;
+      `unsupportedTerms()` lists them without throwing
+- ✅ `compileQuery()` returns errors instead of throwing — search runs per
+      keystroke, so half-typed input is the normal case. A test walks every
+      prefix of a realistic query to prove none of it explodes
+- ✅ Colour comparisons are **independent of stored order**: "exactly RW" is
+      *contains both, and has two colours*, not `colors = 'WR'`. Nothing depends
+      on the WUBRG canonicalisation holding
+- ✅ `power`/`toughness`/`loyalty` guard against `CAST('*' AS INTEGER)` being 0,
+      which would otherwise make `pow<=1` match every `*` creature — 703 rows
+      instead of 665 on the current cache
+- ✅ Rarity comparisons rank rather than compare strings, so `r>=rare` includes
+      mythics (alphabetically `mythic` < `rare`)
+- ✅ 115 unit tests, plus 10 **SQL integration tests** (`npm run test:sql`) that
+      execute generated SQL against the real database. Those are the ones that
+      matter: unit tests only prove we emit the string we intended
+
+**Remaining — wiring:**
+
+- ⬜ `collectionItems()` still builds its own WHERE from `CardFilter`. Give it a
+      query string compiled through `compileQuery`, AND-ed with the facets. This
+      is the change that stops `t:creature` silently returning nothing against a
+      local collection.
+- ⬜ Surface parse errors and unsupported terms in the filter UI.
 - ⬜ Deck scope derives from `currentDeck` today, so the "Deck-legal" toggle
       disappears the moment you leave the deck view — exactly when you want it,
       browsing All Magic for cards to add. Base it on **`activeDeck`** instead,
