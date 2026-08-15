@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:contract": "SCRYFALL_CONTRACT=1 vitest run src/lib/scryfall.contract.test.ts",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:sql": "QUERY_SQL=1 vitest run src/lib/query/compile.integration.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",

@@ -13,10 +13,6 @@ import { describe, expect, it } from "vitest";
  * the fix is usually in our code, not in the test.
  */
 
-// Declared locally rather than pulling in @types/node, which would add Node
-// globals to every file in a browser-targeted project for the sake of one flag.
-declare const process: { env: Record<string, string | undefined> };
-
 const ENABLED = !!process.env.SCRYFALL_CONTRACT;
 
 const API = "https://api.scryfall.com";
