@@ -96,6 +96,52 @@ describe.runIf(ENABLED)("scryfall contract", () => {
     });
   });
 
+  describe("query grammar", () => {
+    /**
+     * The grammar a local parser has to match if collection search is to mean
+     * the same thing as All Magic search. Each is asserted by *relationship*
+     * rather than absolute count, so these do not fail every time a set is
+     * released.
+     */
+    const count = async (q: string): Promise<number> => {
+      const res = await get(`/cards/search?q=${encodeURIComponent(q)}`);
+      if (res.status === 404) return 0;
+      const body = await res.json();
+      return body.total_cards ?? 0;
+    };
+
+    it("treats juxtaposition as AND", async () => {
+      const both = await count("c:r t:creature");
+      const justRed = await count("c:r");
+      expect(both).toBeGreaterThan(0);
+      expect(both).toBeLessThan(justRed);
+    });
+
+    it("supports parentheses and `or`, and the grouping really binds", async () => {
+      const anded = await count("c:r t:creature");
+      const ored = await count("(c:r or c:w) t:creature");
+      // If the parens were ignored this would not be strictly larger.
+      expect(ored).toBeGreaterThan(anded);
+    });
+
+    it("supports an explicit `and` keyword", async () => {
+      const n = await count("t:land and mv>3");
+      expect(n).toBeGreaterThan(0);
+      expect(n).toBe(await count("t:land mv>3"));
+    });
+
+    it("supports nested groups mixing and/or", async () => {
+      expect(await count("t:creature (c:r or (c:w and mv<=2))")).toBeGreaterThan(0);
+    });
+
+    it("supports `-` negation", async () => {
+      const red = await count("c:r");
+      const redNonCreature = await count("-t:creature c:r");
+      expect(redNonCreature).toBeGreaterThan(0);
+      expect(redNonCreature).toBeLessThan(red);
+    });
+  });
+
   describe("batching printings", () => {
     it("accepts several oracleid terms joined by or", async () => {
       // The basis for fetching print runs for a page of results in one request

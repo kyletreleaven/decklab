@@ -381,6 +381,11 @@ Options:
 | Scryfall syntax everywhere | Needs a local parser and SQL compiler. **This is the deferred query language returning** |
 | Asymmetric, as today | The same box means different things by source. Already a silent-failure bug |
 
+**The grammar is confirmed** (contract tests, verified live): juxtaposition means
+AND, `and`/`or` work as keywords, `-` negates, and parentheses nest and really
+bind — `(c:r or c:w) t:creature` returns strictly more than `c:r t:creature`.
+That is what a local parser has to match.
+
 **A useful subset is very achievable**, because most predicates map to columns
 that already exist: `t:` → `type_line`, `c:`/`id:` → the canonical colour
 strings, `o:` → `oracle_text`, `mv`/`pow`/`tou` → numeric compares, `r:` →
@@ -470,6 +475,64 @@ path: search → save as live collection → flatten when you want it to stop mo
       match locally, but **detect syntax-looking input** (`foo:bar`, comparison
       operators) and say so, rather than returning zero results as though
       nothing matched.
+
+**The rest is mostly presentational.** The query language above is the real work.
+
+**Quantity: Universe holds ∞ of everything, not nothing.** The model stays
+uniform — every source is `card → quantity`, and Universe is the constant ∞,
+exactly as the algebra already requires (it must be ∞ rather than 1, or
+`Min(deck, Universe)` would cap every entry at a single copy). So there is no
+set-versus-multiset split to reconcile; only rendering differs.
+
+- ⬜ Show ∞ or show nothing. Steppers, totals and the quantity sort omit or grey
+      out, since incrementing ∞ is not a thing.
+
+**Presentational, resolved by omission or greying:**
+
+- ⬜ **Sort** compiles to Scryfall's `order=` for remote sources and `ORDER BY`
+      locally, exactly as filters already do. Worth doing rather than skipping:
+      sorting a *paged* remote result locally would silently sort only the loaded
+      page. `quantity` sort hides for Universe.
+- ⬜ **Stats bar** — "Cards / Unique / Est. value" is computed from loaded rows,
+      which for a search is a lie (175 of 30,000) or absurd (the value of all
+      Magic). Use `total_cards` as a match count; hide est. value.
+- ⬜ **Toolbar** — rename, delete, import have no meaning for Universe; export
+      arguably does. Affordances derive from `writable` plus source.
+- ⬜ **Loading and error states** — `CollectionView` has neither today, because
+      local queries never fail visibly. `PoolPanel` already has both; use it as
+      the reference.
+- ⬜ **Paging benefits local collections too** — a 50k-card binder wants
+      virtualisation regardless of source, so this is not purely a Universe
+      concern.
+
+**Facets and query text are independent filters, AND-ed together ⭐.**
+
+```
+effective = parse(queryText)  AND  facetPredicate
+```
+
+Facets keep their own state; the query keeps its own; neither tries to represent
+the other. Considered and rejected: making the query the single source of truth
+with facets editing terms *in place*. That requires matching a facet to a term
+inside an arbitrary boolean expression, which is ambiguous the moment structure
+appears — is Red "on" when the query says `(c:r or c:w)`? What about `-c:r`? —
+and editing in place is harder still.
+
+**This is already what the code does.** `toScryfallQuery` pushes free text as one
+clause and each facet as another, then joins with a space, which is Scryfall's
+implicit AND. The change is only that free text becomes a *full query* rather
+than a name match, which for local sources is what the parser is for.
+
+Costs, both minor and both about visibility rather than correctness:
+
+- ⬜ Redundancy is possible — typing `c:r` while Red is ticked yields `c:r c:r`.
+      Harmless, just untidy.
+- ⬜ Contradiction is possible — typing `c:r` with only White ticked asks for
+      cards that are red *and* white. Honest AND semantics, but surprising if the
+      facets are scrolled out of view.
+- ⬜ So the active-facet count must stay visible whenever a query is present.
+      The existing `Filters (3)` badge already does this; keep it prominent
+      rather than tucked behind a toggle.
 
 **Universe is a variant, not an identical twin.** These differences want to be
 *capabilities* on a source rather than `if (source === SCRYFALL)` branches:
