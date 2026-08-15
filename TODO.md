@@ -323,9 +323,27 @@ structured keys are conventions with UI, not a separate mechanism.
       game=paper" — which matters if collections themselves become selectable
       inputs to the algebra. JSON is simpler and fine at tens of entities. Not
       decided.
-- ⬜ Same shape as **`card_tags`**, which already exists and is dead code left
-      over from the cut query language. Either fold it into one metadata
-      mechanism or drop it — having both would be the worst outcome.
+**Card annotations are a separate problem — deliberately not folded in here.**
+Tagging Sol Ring as `ramp` is legitimate (reference data is not editable, but
+your annotations on it are yours), and the dead `card_tags` table was exactly
+that. But it should *not* reuse the entity-metadata mechanism, for four reasons:
+
+- **Scale.** Tens of decks and collections versus ~110k oracle cards and ~500k
+  printings. Different storage and indexing problem entirely.
+- **It is a query input, not display.** Card tags feed predicates — `tag:ramp` —
+  so they must be indexed and joinable. Entity metadata is mostly shown, not
+  filtered on.
+- **Grain, again.** `ramp` is oracle-level, `signed by the artist` is
+  printing-level, and *this particular sleeved copy* is a third grain we do not
+  model at all.
+- **Mixed provenance.** Scryfall publishes an `oracle_tags` bulk file, so card
+  tags would be part imported reference data, part user data — a lifecycle
+  entity metadata never has.
+
+- ⬜ Deferred. Leave `card_tags` in place rather than half-reviving it — the
+      query language it was built for was postponed, not cancelled, and the
+      algebra is that idea in stronger form. Decide its shape when one of them
+      actually needs it.
 - ⬜ Subsumes several backlog items that are each "metadata on a thing": deck
       notes, tags, favourites, archived/competitive status.
 
@@ -1109,8 +1127,17 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
 - **Digital and paper still mix.** Arena and MTGO copies count toward a paper
   deck, because separating them needs a notion of a deck's *game* that does not
   exist yet.
-- **`card_tags` table is dead.** Left over from a query language that was cut.
-  Nothing reads or writes it. Either wire up user tags or drop it in a migration.
+- **`card_tags` is unused — table *and* code — but not abandoned.** Built for the
+  query language, where `tag:ramp` was to be a predicate. The table and its index
+  exist with 0 rows, and `src/lib/cards.ts` exports four functions against it —
+  `allTags`, `addTag`, `removeTag`, `tagsFor` — with zero call sites; no
+  component imports them.
+  **Leave it.** The query language was deferred, not cancelled, and the card-set
+  algebra is that idea in a more principled form — `tag:ramp` becomes a binary
+  spec. So this is a stub ahead of a planned feature rather than debt behind a
+  dropped one. Revisit its *shape* when the algebra lands (see *Card
+  annotations*, which argues card tags want different storage from entity
+  metadata), not before.
 - **CSP is `null`.** Fine for local dev; tighten before shipping signed builds.
 - **Bundle identifier ends in `.app`.** `com.decklab.app` triggers a build warning
   and conflicts with the macOS bundle extension. Changing it moves the database
