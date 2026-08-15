@@ -54,7 +54,7 @@ migration. See the reasoning in git history.
 ### Infrastructure
 - ✅ Incremental card cache — anything seen is searchable offline afterwards
 - ✅ Image cache on disk via Rust, served through Tauri's asset protocol
-- ✅ Versioned migrations (001 schema, 002 piles)
+- ✅ Versioned migrations (001 schema, 002 piles, 003 oracle fetch stamps)
 - ✅ Test suite — 48 tests over the parser, serialisers and deck analysis
 - ✅ `npm run tauri build` produces a 7.5MB DMG
 
@@ -74,7 +74,7 @@ reference data.
 2. ✅ Owned count scoped to *ownable* kinds — `wishlist` and `loaned` excluded.
       (Real answer is still selection-as-scope, below.)
 
-**Next (bite 2): the printings carousel, and splitting details by grain.**
+**Done (bite 2): the printings carousel, and details split by grain.** ✅
 
 The details block conflates two grains, which is why it wants splitting:
 
@@ -90,22 +90,23 @@ The details block conflates two grains, which is why it wants splitting:
 printing-level fields around it. So it is not a picker bolted on — it is the
 panel's mode control.
 
-- ⬜ Prev/next around the image; the image *is* the carousel viewport
-- ⬜ A combo box to jump straight to a printing, as an alternative to stepping
-- ⬜ A toggle for **owned printings only** vs **all printings**
-- ⬜ Printing-level fields update with the selection
-- ⬜ Per-printing owned badges, which subsume the standalone copies block
+- ✅ Prev/next around the image; the image *is* the carousel viewport
+- ✅ A combo box to jump straight to a printing, as an alternative to stepping
+- ✅ A toggle for **owned printings only** vs **all printings**
+- ✅ Printing-level fields update with the selection
+- ✅ Per-printing counts, which subsume the standalone copies block
+- ✅ Labels carry the collector number and variant traits. Set name alone was not
+      enough: Sol Ring has 30 Secret Lair printings, so without it the list
+      looked like it was repeating itself.
+- ✅ Loads from the local cache first so it draws instantly, then refreshes from
+      Scryfall behind it.
 
-**The printless state waits for migration 003.** A "clear" control returning to
-oracle grain is the right idea, but its whole point is to change what the ops row
-*writes* — cleared means "add any printing" — and storage cannot represent that
-until 003. Shipping it earlier would put a button on screen that changes only
-which fields you are reading, which is worse than not having it. So: carousel
-now, printless state with 003.
+**The printless state waits for the mixed-grain migration.** A "clear" control
+returning to oracle grain is the right idea, but its whole point is to change
+what the ops row *writes* — cleared means "add any printing" — and storage cannot
+represent that yet. Shipping it earlier would put a button on screen that changes
+only which fields you are reading, which is worse than not having it.
 
-Notes:
-- ⬜ Load printings from the local cache first so it draws instantly, then
-      refresh from Scryfall behind it.
 - ⬜ The cleared state still has to show *an* image. Use the newest cached
       printing, and label it so it is not mistaken for a selection.
 
@@ -217,8 +218,8 @@ current target, with the count between the buttons.
       delete at zero, return the new count. Needed because the add-only paths
       required an item id the carousel does not have.
 - ✅ Disabled with a hint when nothing has been touched yet.
-- ✅ Did **not** need migration 003 — adding a specific printing is what the
-      current schema stores well. Only the printless case needs 003.
+- ✅ Did **not** need the mixed-grain migration — adding a specific printing is what the
+      current schema stores well. Only the printless case needs the mixed-grain migration.
 - ✅ **Counts are stated against one named scope.** `2 in Paper` rather than a
       vague `7 owned`, falling back to all ownable collections when none is
       active, with the wider total shown alongside when copies live elsewhere.
@@ -232,17 +233,13 @@ internal state across navigation — is a larger, separable piece spread across
 four components. The carousel needs none of it: it is never navigated away from,
 so its state is purely object-bound.
 
-### Persist the printings TTL — migration 004 ⭐ next
+### Persist the printings TTL — migration 003 ✅
 
-Small, self-contained, and independent of 003. The one piece of the fetching
-design that is currently memory-only.
-
-**The gap.** Card rows *do* persist — `fetchPrintings` writes every printing
-through `cacheCards`, and the database already holds ~5,800 printings. What does
-not persist is the knowledge that a print run is **complete**. `printingsMemo`
-lives in memory, so after a restart we cannot tell "3 printings cached because
-that is all there are" from "3 printings cached because that is all we happened
-to see" — and refetch to be safe.
+**The gap it closed.** Card rows always persisted — `fetchPrintings` writes every
+printing through `cacheCards`. What did not was the knowledge that a print run is
+**complete**, so after a restart we could not tell "3 printings cached because
+that is all there are" from "3 because that is all we happened to meet", and
+refetched to be safe.
 
 ```sql
 CREATE TABLE oracle_fetches (
@@ -251,18 +248,25 @@ CREATE TABLE oracle_fetches (
 );
 ```
 
-- ⬜ Stamp on a successful full fetch; read before deciding to go to network
-- ⬜ TTL of a week. New sets arrive every few weeks and nothing else about an
+- ✅ Stamped on a successful full fetch, and read before going to network.
+      Lookup order is now memo → disk → network.
+- ✅ Stamp written *after* `cacheCards` succeeds, so a part-way failure leaves
+      the run marked incomplete and it gets refetched rather than trusted.
+- ✅ TTL of a week. New sets arrive every few weeks and nothing else about an
       existing print run moves, so this is generous rather than aggressive.
-- ⬜ Keep the in-memory memo in front of it — it saves the SQLite round trip
+- ✅ The in-memory memo stays in front — it saves even the SQLite round trip
       within a session; the table is what survives restarts.
-- ⬜ Same treatment for `/sets` (see below), which has the same shape: a long
-      TTL plus refresh-on-evidence when an unrecognised set code shows up.
+- ✅ Numbered 003, not 004: sqlx applies migrations in version order, so adding a
+      lower-numbered one afterwards invites trouble. Mixed-grain storage moved
+      to 004 since it ships second.
+- ⬜ Same treatment for `/sets`, which has the same shape: a long TTL plus
+      refresh-on-evidence when an unrecognised set code shows up.
+- ⬜ Prices ride on the same card rows but move daily, unlike print runs. They
+      want their own short TTL rather than inheriting the week.
 
-**Impact is smaller than it sounds, which is why it is not urgent-urgent.**
-`CardDetail` reads from disk first, so a restarted app still draws the full
-carousel instantly. The cost is one redundant request per card per session. With
-the table it becomes zero — permanently, not just after the first look.
+**Not verified:** the actual absence of network calls, which needs the devtools
+Network tab. What is verified is that the migration applied, stamps are being
+written, and the disk-first branch exists.
 
 ### Card data fetching — two tiers, one throttled queue
 
@@ -294,8 +298,8 @@ to render the carousel including thumbnails, from a single round-trip.
       That negative memory needs its own, shorter TTL: an unknown code may be a
       spoiled or premature release that Scryfall simply has not published yet,
       so "we could not explain this" must expire rather than becoming permanent.
-- ⬜ Per-oracle TTL, persisted. Spec'd as migration 004 above; currently
-      in-memory only, so it resets every restart.
+- ✅ Per-oracle TTL, persisted — migration 003 above. Lookup is memo → disk →
+      network, so a print run seen last week costs no request today.
 
 **Tier 2 — robust, background.** Everything heavier, none of it blocking:
 
@@ -345,7 +349,7 @@ before the first card renders is the opposite of responsive. Worth keeping as an
 opt-in "prefetch everything" action, not as the default path. Note that if it is
 ever adopted, the bulk-ingest argument for DuckDB comes back.
 
-### Mixed-grain storage — migration 003
+### Mixed-grain storage — migration 004
 
 Both `collection_items` and `deck_cards` require a printing
 (`card_id NOT NULL REFERENCES cards(id)`), so neither *"two more copies, printing
@@ -419,7 +423,7 @@ exists now, since `deck_cards.zone` is already exactly that.
 - One container per entity; `zone` sits beside `finish` and `condition` as an
   annotation on the entry
 - Annotations generalise for free — tags, acquisition price, "loaned to Dave",
-  and arguably the known/unknown printing distinction from 003 are all the same
+  and arguably the known/unknown printing distinction from mixed-grain storage are all the same
   shape
 - Costs addressability: a zone is not a thing you can point at, only a value you
   filter by
