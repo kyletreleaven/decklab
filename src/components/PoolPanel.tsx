@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collectionItems, ownedOracleIds } from "../lib/collections";
+import { collectionItems, ownedOracleIds, QueryError } from "../lib/collections";
 import {
   countActiveFilters,
   hasSearchableTerms,
@@ -96,11 +96,18 @@ export function PoolPanel({
         }
       } catch (err) {
         if (requestId.current !== id) return;
-        setCards([]);
-        setTotal(0);
-        setNextPage(null);
+
         // A superseded request was replaced by a newer one; nothing failed.
         if (isSuperseded(err)) return;
+
+        // A half-typed query is the normal case, not a failure, so keep the
+        // previous results on screen rather than blanking the grid — which
+        // would be indistinguishable from "nothing matched".
+        if (!(err instanceof QueryError)) {
+          setCards([]);
+          setTotal(0);
+          setNextPage(null);
+        }
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (requestId.current === id) setLoading(false);
@@ -157,13 +164,11 @@ export function PoolPanel({
 
         <input
           className="search-input"
-          placeholder={
-            source === SCRYFALL
-              ? "Search — plain text or Scryfall syntax"
-              : "Filter this collection by name…"
-          }
-          value={filter.name ?? ""}
-          onChange={(e) => setFilter({ ...filter, name: e.target.value })}
+          // The same syntax either way now: passed to Scryfall for the
+          // universe, compiled to SQL for a collection.
+          placeholder={"Search — t:creature c:r mv<=3"}
+          value={filter.query ?? ""}
+          onChange={(e) => setFilter({ ...filter, query: e.target.value })}
         />
 
         {scope && (
@@ -179,8 +184,9 @@ export function PoolPanel({
         <button
           className={showFilters || activeFilters ? "primary" : ""}
           onClick={() => setShowFilters((v) => !v)}
+          title="Extra constraints, combined with whatever you have searched for"
         >
-          Filters{activeFilters ? ` (${activeFilters})` : ""}
+          More filters{activeFilters ? ` (${activeFilters})` : ""}
         </button>
 
         <span className="hint">

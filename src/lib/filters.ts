@@ -22,8 +22,11 @@ export const FILTER_RARITIES = ["common", "uncommon", "rare", "mythic"] as const
 export const COLOR_KEYS = ["W", "U", "B", "R", "G", "C"] as const;
 
 export interface CardFilter {
-  /** Substring of the card name, or free text passed through to Scryfall. */
-  name?: string;
+  /**
+   * The free-text query. Full search syntax either way: passed through to
+   * Scryfall for remote sources, compiled to SQL for local ones.
+   */
+  query?: string;
   /** Colour letters; "C" means colourless. Matches ANY selected. */
   colors?: string[];
   types?: string[];
@@ -71,7 +74,6 @@ export function isFilterEmpty(filter: CardFilter): boolean {
 
 export function countActiveFilters(filter: CardFilter): number {
   return (
-    (filter.name?.trim() ? 1 : 0) +
     (filter.colors?.length ?? 0) +
     (filter.types?.length ?? 0) +
     (filter.rarities?.length ?? 0) +
@@ -95,8 +97,8 @@ function quote(value: string): string {
 export function toScryfallQuery(filter: CardFilter): string {
   const clauses: string[] = [];
 
-  const name = filter.name?.trim();
-  if (name) clauses.push(name);
+  const query = filter.query?.trim();
+  if (query) clauses.push(query);
 
   if (filter.colors?.length) {
     // "C" is colourless, which Scryfall spells as c:c rather than a letter.

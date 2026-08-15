@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { collectionItems, type CollectionSort } from "../lib/collections";
+import {
+  collectionItems,
+  QueryError,
+  type CollectionSort,
+} from "../lib/collections";
 import { countActiveFilters, type CardFilter } from "../lib/filters";
 import type { Card, Collection, CollectionItem } from "../lib/types";
 import { CardFilters } from "./CardFilters";
@@ -44,6 +48,7 @@ export function CollectionView({
   const [items, setItems] = useState<CollectionItem[]>([]);
   const [layout, setLayout] = useState<"list" | "wall">("wall");
   const [showFilters, setShowFilters] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
 
   const [filter, setFilter] = useState<CardFilter>({});
   const [sort, setSort] = useState<CollectionSort>("name");
@@ -69,11 +74,23 @@ export function CollectionView({
     let active = true;
     const timer = setTimeout(
       () => {
-        collectionItems(collection.id, filter, sort).then((rows) => {
-          if (active) setItems(rows);
-        });
+        collectionItems(collection.id, filter, sort)
+          .then((rows) => {
+            if (!active) return;
+            setItems(rows);
+            setQueryError(null);
+          })
+          .catch((err) => {
+            if (!active) return;
+            // Keep the previous results on screen. A half-typed query is the
+            // normal case, not a failure, and blanking the list would make it
+            // look like nothing matched.
+            setQueryError(
+              err instanceof QueryError ? err.message : String(err?.message ?? err),
+            );
+          });
       },
-      filter.name ? 150 : 0,
+      filter.query ? 150 : 0,
     );
 
     return () => {
@@ -183,10 +200,10 @@ export function CollectionView({
         <span style={{ flex: 1 }} />
 
         <input
-          placeholder="Filter by name…"
-          value={filter.name ?? ""}
-          onChange={(e) => setFilter({ ...filter, name: e.target.value })}
-          style={{ width: 190 }}
+          placeholder={"Search — t:creature c:r mv<=3"}
+          value={filter.query ?? ""}
+          onChange={(e) => setFilter({ ...filter, query: e.target.value })}
+          style={{ width: 260 }}
         />
         <select
           value={sort}
@@ -202,18 +219,21 @@ export function CollectionView({
         <button
           className={showFilters || activeFilters ? "primary" : ""}
           onClick={() => setShowFilters((v) => !v)}
+          title="Extra constraints, combined with whatever you have searched for"
         >
-          Filters{activeFilters ? ` (${activeFilters})` : ""}
+          More filters{activeFilters ? ` (${activeFilters})` : ""}
         </button>
       </div>
 
       {showFilters && <CardFilters filter={filter} onChange={setFilter} />}
 
+      {queryError && <div className="status error">{queryError}</div>}
+
       <div className="scroll">
         {items.length === 0 ? (
           <div className="empty">
-            {activeFilters
-              ? "Nothing in this collection matches those filters."
+            {activeFilters || filter.query
+              ? "Nothing in this collection matches."
               : "This collection is empty. Use “Add cards” to search Scryfall."}
           </div>
         ) : layout === "wall" ? (

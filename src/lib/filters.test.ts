@@ -13,7 +13,7 @@ describe("toScryfallQuery", () => {
   });
 
   it("passes free text through untouched so Scryfall syntax still works", () => {
-    expect(toScryfallQuery({ name: "o:draw a card" })).toBe("o:draw a card");
+    expect(toScryfallQuery({ query: "o:draw a card" })).toBe("o:draw a card");
   });
 
   it("emits a single colour clause without parentheses", () => {
@@ -67,7 +67,7 @@ describe("toScryfallQuery", () => {
   it("joins several facets with spaces, i.e. AND", () => {
     expect(
       toScryfallQuery({
-        name: "bolt",
+        query: "bolt",
         colors: ["R"],
         types: ["Instant"],
         mvMax: 1,
@@ -118,6 +118,6 @@ describe("countActiveFilters", () => {
   });
 
   it("ignores whitespace-only names", () => {
-    expect(countActiveFilters({ name: "   " })).toBe(0);
+    expect(countActiveFilters({ query: "   " })).toBe(0);
   });
 });

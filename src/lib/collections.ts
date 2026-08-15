@@ -1,5 +1,23 @@
 import { CardRow, execute, newId, now, rowToCard, select } from "./db";
 import type { CardFilter } from "./filters";
+import { compileQuery } from "./query";
+
+/**
+ * A free-text query that could not be compiled — a syntax error, or a term we
+ * do not support locally such as `is:`.
+ *
+ * Thrown rather than returned empty so a caller can keep the previous results
+ * on screen and show a hint, instead of appearing to match nothing.
+ */
+export class QueryError extends Error {
+  constructor(
+    message: string,
+    readonly at: number,
+  ) {
+    super(message);
+    this.name = "QueryError";
+  }
+}
 import type {
   Card,
   Collection,
@@ -128,11 +146,19 @@ export async function collectionItems(
   const clauses: string[] = [];
   const hole = () => `$${params.length}`;
 
-  const name = filter.name?.trim();
-  if (name) {
-    // Escape LIKE wildcards so a literal % or _ in a card name behaves.
-    params.push(`%${name.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
-    clauses.push(`c.name LIKE ${hole()} ESCAPE '\\'`);
+  // Free text is a full query, not a name match — the same syntax that works
+  // against All Magic. Compiled here rather than passed through, since Scryfall
+  // is not involved for a local collection.
+  const query = filter.query?.trim();
+  if (query) {
+    const compiled = compileQuery(query, { alias: "c", paramOffset: params.length });
+    if (compiled.error) {
+      throw new QueryError(compiled.error.message, compiled.error.at);
+    }
+    if (compiled.sql) {
+      params.push(...compiled.params);
+      clauses.push(compiled.sql);
+    }
   }
 
   if (filter.colors?.length) {
