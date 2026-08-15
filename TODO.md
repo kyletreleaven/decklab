@@ -70,26 +70,36 @@ The rule matters because it says *which* state needs rescuing. Two concrete jobs
 - ✅ **Moved `ownedOnly` out of the per-card reset.** It sat in the same effect
       that resets the selected printing, so switching it on and then changing
       card silently switched it off.
-- ⬜ **Panels are conditionally rendered, so navigating unmounts them and
-      destroys every preference.** Audited:
+### Panel state retention ⬜
 
-  | Panel | Lost on navigation |
-  | --- | --- |
-  | CardSearch | **query and results** — search, go add something, come back to an empty box |
-  | PoolPanel | source, filters, deck-scope toggle |
-  | CollectionView | wall/list, sort, filters |
-  | DeckView | list/piles |
+**Panels are conditionally rendered, so navigating unmounts them and destroys
+everything they hold.** The sharpest case: search for something, click a deck to
+add a card, come back — your query and results are gone.
 
-  **Decided: lift preferences, cache derived, leave object-bound local.**
-  Each piece of the state above gets classified by the table and moved to its
-  home. CardSearch's `query` lifts as a preference; its *results* do not — they
-  become a cache keyed by query.
+Re-audited against the current components, classified by the table above:
 
-  Rejected: keeping panels mounted and toggling visibility. It is nearly free and
-  would preserve scroll position too, but every hidden panel's effects keep
-  running — the pool would go on querying behind a deck view — and it preserves
-  state indiscriminately rather than forcing the classification, which is the
-  part that actually stops these bugs recurring.
+| Panel | **Preference** — lift | **Derived** — cache | **Object-bound** — leave |
+| --- | --- | --- | --- |
+| `PoolPanel` | `filter` (incl. the query), `showFilters`, `scopeOn`, `showUnowned` | `ownedCards`, `universeCards`, `owned`, `total`, `nextPage` | `shown`, `loading`, `error` |
+| `CollectionView` | `layout`, `sort`, `filter`, `showFilters` | `items` | `editingName`, `draftName`, `queryError` |
+| `DeckView` | `layout`, `against` | `ownership`, `piles` | `editingName`, `draftName` |
+
+**Decided: lift preferences, cache derived, leave object-bound local.** The query
+lifts as a preference; results do not — they become a cache keyed by query, the
+same shape the printings memo already uses.
+
+Rejected: keeping panels mounted and toggling visibility. Nearly free, and it
+would preserve scroll position too, but every hidden panel's effects keep running
+— the pool would go on querying behind a deck view — and it preserves state
+indiscriminately rather than forcing the classification, which is the part that
+actually stops these bugs recurring.
+
+- ⬜ Worth doing **after** slices 2 and 3. Merging `CollectionView` into
+      `PoolPanel` deletes one of the three columns above, so lifting first would
+      mean lifting state that is about to be consolidated anyway.
+- ⬜ `DeckView.against` — which collections a deck checks ownership against — is
+      a preference today, but selection-as-scope may absorb it entirely. Do not
+      lift it without checking whether it should simply disappear.
 
 **Carousel `+/-`.** ✅ Adjusts the quantity of the *shown printing* in the
 current target, with the count between the buttons.
@@ -178,6 +188,29 @@ Note `writable` is *not* simply "is it computed". A **stored** collection can
 want it too: locking an imported reference binder — a friend's list, a
 tournament decklist — against accidental edits is the same flag.
 
+**But All Magic needs a second, stronger property: it is not a *holding*.**
+Unwritable is not enough to describe it. A locked reference binder is unwritable
+yet still a set of specific cards, so it can meaningfully be a *scope* — "what is
+in Dave's binder that I do not have". The universe cannot: scoping ownership to
+it says everything is owned, which is vacuous, and its quantities are ∞ rather
+than counts.
+
+| | writable | usable as a scope |
+| --- | --- | --- |
+| Paper, Cube | ✓ | ✓ |
+| Locked reference binder | ✗ | ✓ |
+| **All Magic** | ✗ | **✗** |
+
+- ⬜ So the touch list needs to exclude it from *both* derivations, not just the
+      write one:
+      `activeCollection = first collection that is a holding`,
+      `target = first entry that is writable`.
+      Clicking All Magic then views it without moving the sidebar dot off Paper,
+      or repointing the card panel's `±`.
+- ⬜ Whether that is a general flag or simply "the universe is the one
+      non-holding" is open. A flag keeps the model uniform; it may only ever
+      have one instance.
+
 - ⬜ `writable` becomes a real column, defaulted true; Universe is the first
       `false`
 - ⬜ Everything else stays user metadata with good affordances rather than
@@ -243,7 +276,37 @@ sidebar entry means the first algebra concept lands as a concrete simplification
 rather than as scaffolding.
 
 **What it buys:**
-- ⬜ Deletes `CardSearch.tsx` — one card list view instead of two
+- ✅ **Slice 1 done.** `CardSearch.tsx` deleted; the search view is now
+      `PoolPanel`. Its `collections` array prop was replaced by the active
+      collection from the selection, the source combo box became an inclusion
+      toggle, and the add-button label derives from `target` rather than being
+      passed separately.
+- ⬜ **Remove the "skip the network when the collection fills a page"
+      shortcut.** `PoolPanel` currently avoids the remote query when the local
+      side already has `PAGE` rows. That is a false economy: **the background
+      set is the source of truth for ordering**, so results silently change
+      shape depending on whether a threshold was crossed. A collection with 200
+      matches would order by SQL, one with 100 by Scryfall's `order=` — same
+      query, different sequence, for a reason invisible to the user.
+      Always run both and merge.
+
+- ⬜ **Generalise the merge, because the background will not always be All
+      Magic.** It could be another collection, a saved `ScryfallSearch`, or any
+      spec once the algebra lands. So the union wants to be a reusable
+      *synchronisation* between a foreground set and a background set —
+      dedupe key, ordering authority, paging, and which side is complete versus
+      streamed — rather than logic baked into `PoolPanel` against Scryfall
+      specifically.
+      Ordering authority is the interesting parameter: the background decides
+      sequence, the foreground decides membership and is never truncated.
+
+- ⬜ **Slice 2 — grow `PoolPanel`** with the collection view's features behind
+      capability flags: wall/list, sort, quantities (∞ or blank for the
+      universe), stats, toolbar. Needed *before* All Magic becomes a sidebar
+      entry, or clicking it would render a visibly different UI from clicking
+      Paper.
+- ⬜ **Slice 3** — point the collection view at it, delete `CollectionView`, add
+      All Magic to the sidebar.
 - ⬜ Uniform navigation: every card source is a sidebar entry
 - ⬜ Facet filters, wall/list layout and sort come free in search, since they
       already exist in the collection view
@@ -475,11 +538,45 @@ juxtaposition-as-AND, explicit `and`/`or`, `-` negation and nested parens.
       is the change that stops `t:creature` silently returning nothing against a
       local collection.
 - ⬜ Surface parse errors and unsupported terms in the filter UI.
-- ⬜ Deck scope derives from `currentDeck` today, so the "Deck-legal" toggle
-      disappears the moment you leave the deck view — exactly when you want it,
-      browsing All Magic for cards to add. Base it on **`activeDeck`** instead,
-      consistent with `±` and the ownership counts. Costs one small query, since
-      `entries` is only loaded for the viewed deck.
+- ⬜ **Make "Deck-legal" work outside the deck view.** It disappears the moment
+      you navigate away — exactly when you want it, browsing All Magic for cards
+      to add.
+
+      To be clear about where the fault is: **`activeDeck` does not vanish.** The
+      touch list keeps it correctly across navigation. Two *other* things are
+      wrong, and both need fixing:
+
+      1. `deckScope` derives from `currentDeck` (null unless the deck is on
+         screen) rather than `activeDeck`. It also needs that deck's commander
+         zone loaded, since `entries` only ever holds the *viewed* deck's cards —
+         that is the one small query.
+      2. `scope` is only passed to `PoolPanel` inside the deck view. The search
+         view renders `PoolPanel` too and gets nothing.
+
+      Fixing either alone changes nothing.
+
+- ⬜ **Split the bundled scope into independent contextual facets.** `deckScope`
+      currently fuses two constraints — format legality *and* commander colour
+      identity — behind one toggle, so they cannot be used separately. Wanting
+      format-legal cards *outside* your identity is a real case: checking what a
+      splash would buy you, or what exists before deciding on colours.
+
+      The tell is already in the code: the button relabels itself "Deck-legal"
+      versus "Format-legal" depending on whether a commander is set. One control
+      trying to say which of two constraints is live means it should be two.
+
+      So `scope?: { label, filter }` becomes `scopes: Scope[]` — a list of
+      independently toggleable facets, each shown only when it means something:
+
+      | Facet | Appears when |
+      | --- | --- |
+      | Legal in *format* | there is an active deck |
+      | Within *colours* | the active deck is Commander with a commander set |
+      | Not already in *deck* | there is an active deck |
+      | In *collection* | there is an active collection |
+
+      They AND together like every other facet, so this needs no new mechanism —
+      just a list instead of a single optional prop.
 
 ### Persist the printings TTL — migration 003 ✅
 
