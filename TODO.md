@@ -366,6 +366,111 @@ rather than as scaffolding.
 - ⬜ The search view's bespoke "Adding to X" bar goes away; the ordinary target
       mechanism already covers it
 
+**The hard part: one input box needs one language.** This is the real blocker,
+and the asymmetry already exists — `PoolPanel` today sends free text straight to
+Scryfall for the Universe source, but compiles it to `c.name LIKE '%…%'` for a
+collection. So typing `t:creature` into a collection filter silently returns
+nothing. It is papered over with different placeholder text; merging the views
+makes it the centrepiece instead of a corner.
+
+Options:
+
+| | Cost |
+| --- | --- |
+| Facets only | Loses full Scryfall syntax in search — `o:"draw a card"`, `is:commander`. A real regression |
+| Scryfall syntax everywhere | Needs a local parser and SQL compiler. **This is the deferred query language returning** |
+| Asymmetric, as today | The same box means different things by source. Already a silent-failure bug |
+
+**A useful subset is very achievable**, because most predicates map to columns
+that already exist: `t:` → `type_line`, `c:`/`id:` → the canonical colour
+strings, `o:` → `oracle_text`, `mv`/`pow`/`tou` → numeric compares, `r:` →
+`rarity`, `set:` → `set_code`, `f:` → `json_extract(legalities, …)` (already done
+for the pool's format scoping), `kw:` → the keywords JSON. Plus AND/OR/NOT and
+parentheses, which is a small parser.
+
+**Most of `is:` is achievable too** — it is Scryfall's catch-all for boolean card
+properties, and we already hold what most of them need:
+
+| Predicate | From |
+| --- | --- |
+| `is:reserved`, `is:digital` | dedicated columns |
+| `is:split`, `is:transform`, `is:mdfc` | `layout` column |
+| `is:permanent`, `is:spell`, `is:vanilla` | derivable from `type_line` / `oracle_text` |
+| `is:borderless`, `is:showcase`, `is:extendedart`, `is:promo` | raw JSON — `variantTraits()` already reads these |
+| `is:foil`, `is:etched` | `finishes` in raw JSON |
+| `is:commander` | legendary creature or "can be your commander" — `commanderIssues()` already computes it |
+
+The genuinely hard remainder is narrow:
+
+- **Curated cycle lists** — `is:fetchland`, `is:shockland`, `is:dual`,
+  `is:triome`. No card property says "I am a fetchland"; these are editorial
+  lists Scryfall maintains by hand. Local support means shipping our own list and
+  keeping it current.
+- **Regex terms** (`o:/…/`) — SQLite has no `REGEXP` operator without
+  registering a function in Rust. Post-filtering in JS would work on a bounded
+  result set.
+- Anything needing data we do not cache.
+
+**Resolution: local language for local sources, passthrough for Universe.**
+Implement a good subset locally, and when the source *is* Scryfall, send the raw
+string straight through — they parse their own language better than we ever
+will, and there is nothing to gain by intercepting it. Local parity is only
+needed for what people actually filter collections by, which is a much smaller
+set than everything Scryfall accepts.
+
+**`is:` — unsupported locally to start.** Deliberately out of the first cut. It
+still works in All Magic, where the string passes straight through to Scryfall;
+against a local collection it should simply report *"`is:` is not supported here
+yet"* rather than silently matching nothing.
+
+The design when it does arrive — **cached hidden collections** — is worth
+keeping, because it dissolves the curated-cycle problem rather than working
+around it: resolve `is:fetchland` by asking Scryfall *once*, cache the resulting
+card set, and thereafter treat it as a local membership test. That generalises to
+**any** predicate we cannot compute locally: "we cannot compute this" becomes "we
+can look it up and keep it", which is a far easier problem. It also makes `is:`
+just another `ScryfallSearch` collection, per below.
+
+Reasons to defer rather than build now:
+
+- ⬜ Needs a TTL and an invalidation story — new fetchlands get printed
+- ⬜ First use is a network round trip, so the predicate is **async on cold
+      cache**, which no other local predicate is. That asymmetry is the real
+      cost, and it is better paid once the rest of the language is settled.
+
+**`ScryfallSearch(query)` as a collection class ⭐.** A collection whose contents
+are *defined by a query* rather than enumerated — saveable from any All Magic
+search ("save as collection"), and flattenable into a concrete list.
+
+This is the algebra arriving through the front door: `ScryfallSearch(q)` is
+`Filter(Universe, q)`, and flatten is the *bake* operation — applying a modifier,
+in Blender terms. Several things then stop being special cases:
+
+| Was | Becomes |
+| --- | --- |
+| Universe | `ScryfallSearch("")` — the unfiltered case, not a separate kind |
+| `is:fetchland` cache (later) | an implicit `ScryfallSearch("is:fetchland")` |
+| "saved search" | a collection you can point any panel at |
+
+And `writable` falls out rather than being declared: a query-backed collection
+cannot accept cards, because there is nowhere to put them. **Flattening is
+exactly the operation that makes it writable** — freeze the query result into
+rows, and now it is an ordinary collection. That also gives a natural upgrade
+path: search → save as live collection → flatten when you want it to stop moving.
+
+- ⬜ Live versus frozen is a real user-facing distinction, not an implementation
+      detail. "All fetchlands" should stay live; "my cube" should not silently
+      gain cards when Wizards prints one.
+- ⬜ Show which a collection is, and make flattening explicit.
+
+- ⬜ A lexer/parser for the local subset was written and deleted early on, when
+      scope was cut back to "manage collections and decks". Recover it from git
+      history rather than rewriting.
+- ⬜ Interim, if the merge lands before the parser: keep free text as a name
+      match locally, but **detect syntax-looking input** (`foo:bar`, comparison
+      operators) and say so, rather than returning zero results as though
+      nothing matched.
+
 **Universe is a variant, not an identical twin.** These differences want to be
 *capabilities* on a source rather than `if (source === SCRYFALL)` branches:
 
