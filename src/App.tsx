@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import { CardDetail } from "./components/CardDetail";
-import { CardSearch } from "./components/CardSearch";
 import { CollectionView } from "./components/CollectionView";
 import { DeckView } from "./components/DeckView";
 import { ExportDialog } from "./components/ExportDialog";
@@ -327,11 +326,12 @@ export default function App() {
         defaultRatio={0.5}
         top={
           <PoolPanel
-            collections={collections}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
             onAdd={(card) => addToDeck(card, currentDeck.id, false)}
+            target={{ name: currentDeck.name }}
+            activeCollection={activeCollection}
             scope={deckScope}
           />
         }
@@ -442,12 +442,13 @@ export default function App() {
                 </span>
               </div>
             )}
-            <CardSearch
+            <PoolPanel
               selectedId={selectedCard?.id ?? null}
               onSelect={setSelectedCard}
               onHoverCard={hoverCard}
               onAdd={target ? addToTarget : undefined}
-              addLabel={target ? `Add to ${target.name}` : undefined}
+              target={target}
+              activeCollection={activeCollection}
             />
           </>
         )}
