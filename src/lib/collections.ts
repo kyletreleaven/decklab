@@ -46,6 +46,14 @@ function rowToCollection(row: CollectionRow): Collection {
   };
 }
 
+/**
+ * All Magic — every card that exists, backed by Scryfall rather than a row in
+ * `collections`. Its id is a constant because it is synthetic: nothing creates
+ * or deletes it, and it must be recognisable wherever a collection id is passed
+ * around. Namespaced so it can never collide with a generated one.
+ */
+export const UNIVERSE_ID = "decklab:universe";
+
 export const COLLECTION_KINDS: { value: CollectionKind; label: string }[] = [
   { value: "paper", label: "Paper" },
   { value: "arena", label: "Arena" },

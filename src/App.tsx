@@ -15,6 +15,7 @@ import { ManaCost } from "./components/ManaCost";
 import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import * as collectionsApi from "./lib/collections";
+import { UNIVERSE_ID } from "./lib/collections";
 import { COLLECTION_KINDS } from "./lib/collections";
 import { commanderIdentityOf } from "./lib/deckstats";
 import { exportCollection, exportDeck, type ExportFormat } from "./lib/decklist";
@@ -46,6 +47,27 @@ interface Touched {
   kind: "deck" | "collection";
   id: string;
   name: string;
+}
+
+/**
+ * Whether cards can be put into an entry.
+ *
+ * Derived rather than stored: every deck and every stored collection is
+ * writable, and the only thing that is not is All Magic, which is a synthetic
+ * source rather than a `collections` row. This becomes a real field when a
+ * *stored* collection wants locking — an imported reference binder — which is a
+ * separate feature.
+ *
+ * Named now because `target` has to ask a question rather than take `touched[0]`
+ * on faith: aiming a bare `+` at the universe has no coherent behaviour, since
+ * there is nowhere to put the card.
+ */
+function isWritable(entry: Touched): boolean {
+  return !isUniverse(entry);
+}
+
+function isUniverse(entry: Touched): boolean {
+  return entry.kind === "collection" && entry.id === UNIVERSE_ID;
 }
 
 /**
@@ -222,8 +244,12 @@ export default function App() {
 
   // Everything is derived from the one ordered list.
   const activeDeck = touched.find((t) => t.kind === "deck") ?? null;
+  // The set the pool dims against. Any card set will do — dimming is a set
+  // difference, not a claim about ownership — so this needs no predicate.
   const activeCollection = touched.find((t) => t.kind === "collection") ?? null;
-  const target = touched[0] ?? null;
+  // Most recently touched thing you can actually add to — so viewing a
+  // read-only source leaves + pointed where it was, rather than at nothing.
+  const target = touched.find(isWritable) ?? null;
 
   function openDeck(deck: Deck, event?: React.MouseEvent) {
     if (!event || !navigatesOnly(event)) {
