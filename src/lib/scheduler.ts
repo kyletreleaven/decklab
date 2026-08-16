@@ -14,6 +14,34 @@
 
 const MIN_INTERVAL_MS = 100;
 
+/**
+ * How long the pipe stays shut after a 429.
+ *
+ * Scryfall is a free service that asks for 50-100ms spacing. If we are ever
+ * told we have exceeded that, the correct response is to stop entirely for a
+ * while — not to retry, and certainly not to keep the queue draining at the
+ * usual rate. Overridden by `Retry-After` when the server sends one.
+ */
+const RATE_LIMIT_BACKOFF_MS = 60_000;
+
+/** When set, nothing runs until this timestamp. */
+let pausedUntil = 0;
+
+/** Shut the pipe. Private: only `scheduleFetch` decides when we have overrun. */
+function pauseFor(ms: number): void {
+  pausedUntil = Math.max(pausedUntil, Date.now() + ms);
+}
+
+/** Remaining pause in ms, 0 when running normally. */
+export function pausedRemaining(): number {
+  return Math.max(0, pausedUntil - Date.now());
+}
+
+/** Test hook — the pause is module state and would leak between cases. */
+export function resetRateLimit(): void {
+  pausedUntil = 0;
+}
+
 export type Lane = "interactive" | "background";
 
 /**
@@ -76,6 +104,10 @@ async function pump(): Promise<void> {
 
   inFlight = true;
   try {
+    // A 429 shuts everything, not just the request that drew it.
+    const paused = pausedRemaining();
+    if (paused > 0) await sleep(paused);
+
     // Space requests from the last *start*, so a slow response does not add
     // its own latency to the gap.
     const wait = MIN_INTERVAL_MS - (Date.now() - lastStartedAt);
@@ -136,4 +168,48 @@ export function schedule<T>(
 /** Pending counts, for tests and diagnostics. */
 export function pendingCounts(): { interactive: number; background: number } {
   return { interactive: interactive.size, background: background.length };
+}
+
+/** Whatever `fetch` the caller runs on — Tauri's in the app, the global in Node. */
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Bind a fetch implementation to the shared queue. The result is the only
+ * sanctioned way to make an HTTP request.
+ *
+ * Spacing and backoff are one concern, so they live in one place. An earlier
+ * version exported `pauseFor` and had each caller notice its own 429, which is
+ * a convention rather than a mechanism: the contract-test suite bypassed it
+ * simply by calling `schedule(() => fetch(...))` and went on draining its
+ * backlog into a limit that had already told us to stop. Going through here,
+ * that is not expressible.
+ *
+ * The implementation is a parameter rather than an import because the app runs
+ * on `@tauri-apps/plugin-http` (which is what gets past the webview's CORS) and
+ * the tests run on Node's global. The *queue* is module state, so every binding
+ * shares one pipe — which is the whole point, since the limit is per client.
+ */
+export function scheduledFetch(fetchImpl: FetchLike) {
+  return async (
+    url: string,
+    init?: RequestInit,
+    options: { lane?: Lane; key?: string } = {},
+  ): Promise<Response> =>
+    schedule(async () => {
+      const response = await fetchImpl(url, init);
+
+      if (response.status === 429) {
+        // `Retry-After` is seconds when numeric. Anything unparseable falls
+        // back to the fixed backoff rather than to zero — never treat a
+        // rate-limit response as permission to continue.
+        const retryAfter = Number(response.headers.get("Retry-After"));
+        pauseFor(
+          Number.isFinite(retryAfter) && retryAfter > 0
+            ? retryAfter * 1000
+            : RATE_LIMIT_BACKOFF_MS,
+        );
+      }
+
+      return response;
+    }, options);
 }

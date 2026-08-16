@@ -1,5 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
-import { isSuperseded, pendingCounts, schedule, Superseded } from "./scheduler";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  isSuperseded,
+  pausedRemaining,
+  pendingCounts,
+  resetRateLimit,
+  schedule,
+  scheduledFetch,
+  Superseded,
+} from "./scheduler";
 
 /** Resolves after `n` turns of the microtask queue plus any pending timers. */
 async function settle(): Promise<void> {
@@ -236,3 +244,56 @@ describe("scheduler", () => {
     expect(isSuperseded(null)).toBe(false);
   });
 });
+
+describe("rate limiting", () => {
+  const reply = (status: number, headers: Record<string, string> = {}) =>
+    new Response(null, { status, headers });
+
+  beforeEach(() => resetRateLimit());
+  afterEach(() => resetRateLimit());
+
+  it("shuts the pipe on a 429, honouring Retry-After", async () => {
+    const send = scheduledFetch(async () => reply(429, { "Retry-After": "30" }));
+    await send("https://example.test/a");
+
+    // Seconds, not milliseconds — reading it as ms would back off for 30ms and
+    // carry straight on.
+    expect(pausedRemaining()).toBeGreaterThan(25_000);
+    expect(pausedRemaining()).toBeLessThanOrEqual(30_000);
+  });
+
+  it("falls back to a fixed backoff when Retry-After is missing or junk", async () => {
+    const cases: Record<string, string>[] = [
+      {},
+      { "Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT" },
+    ];
+    for (const headers of cases) {
+      resetRateLimit();
+      const send = scheduledFetch(async () => reply(429, headers));
+      await send("https://example.test/a");
+      // Never zero: an unparseable header is not permission to continue.
+      expect(pausedRemaining()).toBeGreaterThan(1_000);
+    }
+  });
+
+  it("pauses the whole client, not just the binding that drew the 429", async () => {
+    // Two bindings — the app's Tauri fetch and the tests' Node fetch are
+    // exactly this shape — must share one pause, since the limit is per client.
+    const limited = scheduledFetch(async () => reply(429));
+    scheduledFetch(async () => reply(200));
+
+    await limited("https://example.test/a");
+
+    // The pause is module state, so it is not the caller's to opt out of.
+    // Deliberately no second request here: it would correctly park the pipe for
+    // the whole backoff and starve everything queued behind it.
+    expect(pausedRemaining()).toBeGreaterThan(1_000);
+  });
+
+  it("leaves the pipe open on an ordinary response", async () => {
+    const send = scheduledFetch(async () => reply(200));
+    await send("https://example.test/a");
+    expect(pausedRemaining()).toBe(0);
+  });
+});
+

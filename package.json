@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:contract": "SCRYFALL_CONTRACT=1 vitest run src/lib/scryfall.contract.test.ts",
+    "test:contract": "SCRYFALL_CONTRACT=1 vitest run --testTimeout=60000 src/lib/scryfall.contract.test.ts",
     "tauri": "tauri",
     "test:sql": "QUERY_SQL=1 vitest run src/lib/query/compile.integration.test.ts"
   },

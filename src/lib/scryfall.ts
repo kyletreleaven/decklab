@@ -7,7 +7,10 @@ import {
   markPrintingsFetched,
   printingsFetchedAt,
 } from "./cards";
-import { schedule, type Lane } from "./scheduler";
+import { scheduledFetch, type Lane } from "./scheduler";
+
+/** Tauri's HTTP plugin, on the shared queue. */
+const request_ = scheduledFetch(fetch);
 
 const API = "https://api.scryfall.com";
 
@@ -36,31 +39,30 @@ interface RequestOptions extends RequestInit {
 
 async function request<T>(path: string, init?: RequestOptions): Promise<T> {
   const { key, lane, ...fetchInit } = init ?? {};
-  return schedule<T>(
-    async () => {
-      const response = await fetch(`${API}${path}`, {
-        ...fetchInit,
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "DeckLab/0.1.0 (desktop)",
-          ...(fetchInit.body ? { "Content-Type": "application/json" } : {}),
-          ...fetchInit.headers,
-        },
-      });
-
-      const body = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        const detail =
-          (body as { details?: string } | null)?.details ??
-          `Scryfall returned ${response.status}`;
-        throw new ScryfallError(detail, response.status);
-      }
-
-      return body as T;
+  const response = await request_(
+    `${API}${path}`,
+    {
+      ...fetchInit,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "DeckLab/0.1.0 (desktop)",
+        ...(fetchInit.body ? { "Content-Type": "application/json" } : {}),
+        ...fetchInit.headers,
+      },
     },
     { lane, key },
   );
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const detail =
+      (body as { details?: string } | null)?.details ??
+      `Scryfall returned ${response.status}`;
+    throw new ScryfallError(detail, response.status);
+  }
+
+  return body as T;
 }
 
 /** Raw Scryfall card JSON. Only the fields we denormalise are typed. */
