@@ -90,27 +90,29 @@ function SlotDot({
       title={
         target
           ? `Active ${what} — and the most recent, so a bare + lands here`
-          : active
-            ? `Active ${what}`
-            : `Make this the active ${what} without opening it`
+          : `Make this the active ${what} without opening it`
       }
     />
   );
 }
 
-const RETARGET_KEY = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌥" : "Alt";
+const PEEK_KEY = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌥" : "Alt";
 
 /**
- * Alt-click retargets *without* navigating, so `±` and the pool's scopes can be
- * pointed at another deck while you stay on the card you are reading.
+ * Opening a sidebar entry does two separable things — retarget, and navigate —
+ * and each gesture covers one cell:
  *
- * Alt rather than ⌘ for two reasons. Option's established meaning is "a variant
- * of the normal action", which is exactly this. And ⌘-click means *extend the
- * selection* — a meaning we will want literally once ownership scope becomes the
- * union of several selected collections, so it is left unclaimed. Ctrl is
- * avoided too: on macOS it is a secondary click.
+ *     click        both
+ *     click a dot  retarget only, staying where you are
+ *     alt-click    navigate only, keeping the current target
+ *
+ * The last is for peeking at another deck without losing what you are building
+ * against. Alt rather than ⌘ because Option means "a variant of the normal
+ * action", and because ⌘-click means *extend the selection* — a meaning we will
+ * want literally once ownership scope becomes the union of several selected
+ * collections. Ctrl is avoided too: on macOS it is a secondary click.
  */
-function retargets(event: React.MouseEvent): boolean {
+function navigatesOnly(event: React.MouseEvent): boolean {
   return event.altKey;
 }
 
@@ -224,14 +226,16 @@ export default function App() {
   const target = touched[0] ?? null;
 
   function openDeck(deck: Deck, event?: React.MouseEvent) {
-    touch({ kind: "deck", id: deck.id, name: deck.name });
-    if (event && retargets(event)) return;
+    if (!event || !navigatesOnly(event)) {
+      touch({ kind: "deck", id: deck.id, name: deck.name });
+    }
     setView({ kind: "deck", id: deck.id });
   }
 
   function openCollection(collection: Collection, event?: React.MouseEvent) {
-    touch({ kind: "collection", id: collection.id, name: collection.name });
-    if (event && retargets(event)) return;
+    if (!event || !navigatesOnly(event)) {
+      touch({ kind: "collection", id: collection.id, name: collection.name });
+    }
     setView({ kind: "collection", id: collection.id });
   }
 
@@ -347,18 +351,31 @@ export default function App() {
   }, [activeDeck, decks, currentDeck?.id, entries, remoteIdentity]);
 
   /**
-   * How many of each printing of the selected card the current target holds.
-   * Fetched here rather than in the rail so the rail stays agnostic about
-   * whether its target is a deck or a collection.
+   * Per-printing counts of the shown card in each active slot.
+   *
+   * Both are fetched regardless of which one is the target, because the panel
+   * lists both — you want to see that a card is in your deck *and* how many you
+   * hold, not just whichever you touched last.
    */
-  const [targetQuantities, setTargetQuantities] = useState<Record<string, number>>(
-    {},
-  );
-
-  /** The same, for the active collection — what the panel states its counts in. */
+  const [deckQuantities, setDeckQuantities] = useState<Record<string, number>>({});
   const [collectionQuantities, setCollectionQuantities] = useState<
     Record<string, number>
   >({});
+
+  useEffect(() => {
+    const oracleId = shownCard?.oracleId;
+    if (!activeDeck || !oracleId) {
+      setDeckQuantities({});
+      return;
+    }
+    let active = true;
+    decksApi.printingQuantitiesInDeck(activeDeck.id, oracleId).then((rows) => {
+      if (active) setDeckQuantities(rows);
+    });
+    return () => {
+      active = false;
+    };
+  }, [activeDeck?.id, shownCard?.oracleId, refreshKey]);
 
   useEffect(() => {
     const oracleId = shownCard?.oracleId;
@@ -366,40 +383,16 @@ export default function App() {
       setCollectionQuantities({});
       return;
     }
-
     let active = true;
     collectionsApi
       .printingQuantitiesInCollection(activeCollection.id, oracleId)
       .then((rows) => {
         if (active) setCollectionQuantities(rows);
       });
-
     return () => {
       active = false;
     };
   }, [activeCollection?.id, shownCard?.oracleId, refreshKey]);
-
-  useEffect(() => {
-    const oracleId = shownCard?.oracleId;
-    if (!target || !oracleId) {
-      setTargetQuantities({});
-      return;
-    }
-
-    let active = true;
-    const load =
-      target.kind === "collection"
-        ? collectionsApi.printingQuantitiesInCollection(target.id, oracleId)
-        : decksApi.printingQuantitiesInDeck(target.id, oracleId);
-
-    load.then((rows) => {
-      if (active) setTargetQuantities(rows);
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [target?.kind, target?.id, shownCard?.oracleId, refreshKey]);
 
   /** Put the candidate-card pool above a deck view when the pool is showing. */
   function withPool(node: ReactNode): ReactNode {
@@ -461,7 +454,7 @@ export default function App() {
                 view.kind === "deck" && view.id === deck.id ? "active" : ""
               }`}
               onClick={(e) => openDeck(deck, e)}
-              title={`${deck.name} — ${RETARGET_KEY}-click to target without opening`}
+              title={`${deck.name} — ${PEEK_KEY}-click to open without retargeting`}
             >
               <span className="name">{deck.name}</span>
               <SlotDot
@@ -501,7 +494,7 @@ export default function App() {
                 view.kind === "collection" && view.id === collection.id ? "active" : ""
               }`}
               onClick={(e) => openCollection(collection, e)}
-              title={`${collection.name} — ${RETARGET_KEY}-click to target without opening`}
+              title={`${collection.name} — ${PEEK_KEY}-click to open without retargeting`}
             >
               <span className="name">{collection.name}</span>
               <span className="count">{collection.kind}</span>
@@ -656,12 +649,25 @@ export default function App() {
 
       <CardDetail
         card={shownCard}
-        decks={decks}
-        collections={collections}
-        onAddToDeck={addToDeck}
-        onAddToCollection={addToCollection}
+        onSetCommander={
+          target?.kind === "deck" &&
+          decks.find((d) => d.id === target.id)?.format === "commander"
+            ? async (card) => {
+                // Move rather than add: the old combo box inserted a second
+                // entry, leaving the card held in two zones at once.
+                await decksApi.setCommander(target.id, card);
+                await reloadDecks();
+                if (view.kind === "deck" && view.id === target.id) {
+                  await reloadEntries(target.id);
+                }
+                bump();
+              }
+            : undefined
+        }
         target={target}
-        targetQuantities={targetQuantities}
+        onTargetSlot={touch}
+        activeDeck={activeDeck}
+        deckQuantities={deckQuantities}
         activeCollection={activeCollection}
         collectionQuantities={collectionQuantities}
         onAdjustTarget={async (card, delta) => {

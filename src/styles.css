@@ -540,7 +540,78 @@ textarea:focus {
 
 .ops-row {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The two active slots. The target is marked rather than described, so the
+   stepper needs no accompanying "writes to X" caption. */
+.slots {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.slot-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text-faint);
+  border-left: 2px solid transparent;
+}
+
+.slot-row:not(.target) {
+  cursor: pointer;
+}
+
+.slot-row:not(.target):hover {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+
+.slot-row.target {
+  background: var(--bg-raised);
+  border-left-color: var(--accent);
+  color: var(--text-dim);
+}
+
+.slot-count {
+  min-width: 26px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Recessive: the printing count is the number the stepper drives. */
+.slot-total {
+  color: var(--text-faint);
+}
+
+.slot-count.owned {
+  color: var(--ok);
+}
+
+.slot-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.slot-row:not(.target) .slot-name {
+  color: var(--text-dim);
+}
+
+.slot-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
 }
 
 .ops-row select {
@@ -612,6 +683,50 @@ textarea:focus {
 
 .carousel-arrow.right {
   right: 6px;
+}
+
+/* Controls overlay the art, revealed on hover — the same idiom as the wall
+   tiles. Bottom-centre so they clear the carousel arrows at the side edges. */
+.art-controls {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid var(--border-strong);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.carousel:hover .art-controls {
+  opacity: 1;
+}
+
+.art-controls .printing-qty > span {
+  color: var(--text);
+}
+
+.art-controls button {
+  background: transparent;
+  border-color: transparent;
+}
+
+.art-controls button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.art-commander {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  line-height: 1;
+  font-size: 13px;
 }
 
 .carousel-controls {

@@ -3,7 +3,7 @@ import { ownedByPrinting } from "../lib/collections";
 import { cachedPrintings } from "../lib/cards";
 import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
-import type { Card, Collection, Deck } from "../lib/types";
+import type { Card } from "../lib/types";
 import { CardImage } from "./CardImage";
 import { ManaCost } from "./ManaCost";
 
@@ -55,31 +55,43 @@ function printingLabel(card: Card): string {
 
 export function CardDetail({
   card,
-  decks,
-  collections,
-  onAddToDeck,
-  onAddToCollection,
+  onSetCommander,
   target,
-  targetQuantities,
   onAdjustTarget,
+  onTargetSlot,
+  activeDeck,
+  deckQuantities,
   activeCollection,
   collectionQuantities,
   refreshKey,
 }: {
   card: Card | null;
-  decks: Deck[];
-  collections: Collection[];
-  onAddToDeck: (card: Card, deckId: string, asCommander: boolean) => void;
-  onAddToCollection: (card: Card, collectionId: string) => void;
+  /**
+   * Move this card into the target deck's commander zone. Absent when the
+   * target is not a Commander deck. *Moves* rather than adds, so a card already
+   * in the 99 does not end up held twice.
+   */
+  onSetCommander?: (card: Card) => void;
   /**
    * The most recently opened deck or collection — where the carousel's +/-
    * writes. For a deck this means its maindeck: the default zone, which is the
    * one sensible answer that does not depend on how zones end up being modelled.
    */
   target: { kind: "deck" | "collection"; id: string; name: string } | null;
-  /** Per-printing counts held by the target, keyed by printing id. */
-  targetQuantities: Record<string, number>;
   onAdjustTarget: (card: Card, delta: number) => void | Promise<void>;
+  /**
+   * Retarget to one of the listed slots — the same "select without navigating"
+   * gesture as the sidebar dot, offered where the counts already are.
+   */
+  onTargetSlot: (slot: {
+    kind: "deck" | "collection";
+    id: string;
+    name: string;
+  }) => void;
+  /** The active deck slot, listed alongside the collection one. */
+  activeDeck: { id: string; name: string } | null;
+  /** Per-printing counts in `activeDeck`, keyed by printing id. */
+  deckQuantities: Record<string, number>;
   /**
    * The collection the panel's counts are stated against. Naming a specific
    * collection beats a vague "owned" aggregate: it answers *which* collection,
@@ -94,7 +106,13 @@ export function CardDetail({
   const [printings, setPrintings] = useState<Card[]>([]);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [ownedQty, setOwnedQty] = useState<Record<string, number>>({});
-  const [ownedOnly, setOwnedOnly] = useState(false);
+  /**
+   * Which printings the carousel steps through. A preference, so it persists as
+   * focus moves between cards.
+   */
+  const [printingFilter, setPrintingFilter] = useState<
+    "all" | "deck" | "collection"
+  >("all");
   const [printingsError, setPrintingsError] = useState<string | null>(null);
 
   const oracleId = card?.oracleId ?? null;
@@ -189,24 +207,41 @@ export function CardDetail({
    * named wherever it appears.
    */
   const scopedQty = activeCollection ? collectionQuantities : ownedQty;
-  const scopeLabel = activeCollection ? `in ${activeCollection.name}` : "owned";
+
+  /** Copies held in each slot, across every printing of this card. */
+  const deckTotal = useMemo(
+    () => Object.values(deckQuantities).reduce((sum, n) => sum + n, 0),
+    [deckQuantities],
+  );
+  const collectionTotal = useMemo(
+    () => Object.values(collectionQuantities).reduce((sum, n) => sum + n, 0),
+    [collectionQuantities],
+  );
+
+  /** Counts backing the active printing filter, and the labels beside them. */
+  const filterQty =
+    printingFilter === "deck"
+      ? deckQuantities
+      : printingFilter === "collection"
+        ? collectionQuantities
+        : scopedQty;
 
   const visible = useMemo(
-    () => (ownedOnly ? printings.filter((p) => scopedQty[p.id]) : printings),
-    [printings, ownedOnly, scopedQty],
+    () =>
+      printingFilter === "all"
+        ? printings
+        : printings.filter((p) => filterQty[p.id]),
+    [printings, printingFilter, filterQty],
   );
 
-  const scopedTotal = useMemo(
-    () => Object.values(scopedQty).reduce((sum, n) => sum + n, 0),
-    [scopedQty],
-  );
-
-  // Kept so a card held somewhere other than the active collection is not
-  // silently reported as absent.
-  const ownedEverywhere = useMemo(
-    () => Object.values(ownedQty).reduce((sum, n) => sum + n, 0),
-    [ownedQty],
-  );
+  // Falling back covers both the slot disappearing and its last copy being
+  // removed — either way the filter would otherwise show an empty carousel.
+  useEffect(() => {
+    if (printingFilter === "deck" && deckTotal === 0) setPrintingFilter("all");
+    if (printingFilter === "collection" && collectionTotal === 0) {
+      setPrintingFilter("all");
+    }
+  }, [printingFilter, deckTotal, collectionTotal]);
 
   if (!card) {
     return (
@@ -222,8 +257,30 @@ export function CardDetail({
   const index = visible.findIndex((p) => p.id === shown.id);
   const usd = money(shown.prices.usd);
   const usdFoil = money(shown.prices.usd_foil);
-  const shownScoped = scopedQty[shown.id] ?? 0;
-  const inTarget = targetQuantities[shown.id] ?? 0;
+  /**
+   * The two active slots, listed together. Only ever these two — not an
+   * inventory of everywhere the card lives — because they are what the controls
+   * act on and what the counts are stated against.
+   */
+  const slots = [
+    activeDeck && {
+      kind: "deck" as const,
+      name: activeDeck.name,
+      id: activeDeck.id,
+      count: deckQuantities[shown.id] ?? 0,
+      total: deckTotal,
+    },
+    activeCollection && {
+      kind: "collection" as const,
+      name: activeCollection.name,
+      id: activeCollection.id,
+      count: collectionQuantities[shown.id] ?? 0,
+      total: collectionTotal,
+    },
+  ].filter((slot) => slot !== null);
+
+  const inTarget =
+    slots.find((s) => s.kind === target?.kind && s.id === target?.id)?.count ?? 0;
 
   function step(delta: number) {
     if (visible.length < 2) return;
@@ -240,67 +297,92 @@ export function CardDetail({
             and burying them under the reference data meant scrolling past two
             screenfuls to add a card. */}
         <div className="ops">
-          <div className="ops-row">
-            <select
-              value=""
-              onChange={(e) => {
-                const [deckId, mode] = e.target.value.split("|");
-                if (deckId) onAddToDeck(shown, deckId, mode === "commander");
-                e.target.value = "";
-              }}
-              disabled={decks.length === 0}
-            >
-              <option value="">
-                {decks.length ? "Add to deck…" : "No decks yet"}
-              </option>
-              {decks.map((deck) => (
-                <optgroup key={deck.id} label={deck.name}>
-                  <option value={`${deck.id}|main`}>Add to the 99</option>
-                  <option value={`${deck.id}|commander`}>Set as commander</option>
-                </optgroup>
-              ))}
-            </select>
+          {/* The two active slots and how many of *this printing* each holds.
+              The target is marked, so it is visible which one ± drives without
+              needing separate text saying so. */}
+          {slots.length > 0 ? (
+            <div className="slots">
+              {slots.map((slot) => {
+                const isTarget =
+                  slot.kind === target?.kind && slot.id === target?.id;
+                return (
+                  <div
+                    key={`${slot.kind}-${slot.id}`}
+                    className={`slot-row ${isTarget ? "target" : ""}`}
+                    onClick={() => !isTarget && onTargetSlot(slot)}
+                    title={
+                      isTarget
+                        ? `± changes this — ${slot.name}`
+                        : `Click to point ± at ${slot.name}`
+                    }
+                  >
+                    <span
+                      className={`slot-count ${slot.count ? "owned" : ""}`}
+                      title={
+                        slot.total > slot.count
+                          ? `${slot.count} of this printing, ${slot.total} across all printings`
+                          : `${slot.count} of this printing`
+                      }
+                    >
+                      {slot.count}×
+                      {/* Adjacent and parenthesised so it reads as part-of-whole.
+                          Shown only when other printings exist, so the common
+                          case stays a single uncluttered number. */}
+                      {slot.total > slot.count && (
+                        <span className="slot-total"> ({slot.total})</span>
+                      )}
+                    </span>
+                    <span className="slot-name">{slot.name}</span>
+                    <span className="slot-kind">{slot.kind}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="hint">
+              Open a deck or collection to add cards to it.
+            </div>
+          )}
 
-            <select
-              value=""
-              onChange={(e) => {
-                if (e.target.value) onAddToCollection(shown, e.target.value);
-                e.target.value = "";
-              }}
-              disabled={collections.length === 0}
-            >
-              <option value="">
-                {collections.length ? "Add to collection…" : "No collections yet"}
-              </option>
-              {collections.map((collection) => (
-                <option key={collection.id} value={collection.id}>
-                  {collection.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Any printing counts, so this is an oracle-level number. Stated
-              against the active collection, with the wider total alongside when
-              copies live somewhere else. */}
-          <div className="owned-line">
-            <span className={`owned-badge ${scopedTotal ? "owned" : "missing"}`}>
-              {scopedTotal
-                ? `${scopedTotal} ${scopeLabel}`
-                : activeCollection
-                  ? `None ${scopeLabel}`
-                  : "Not owned"}
-            </span>
-            {activeCollection && ownedEverywhere > scopedTotal && (
-              <span className="hint">{ownedEverywhere} owned in total</span>
-            )}
-          </div>
         </div>
 
         {/* The image is the carousel viewport: stepping changes the printing
             and everything printing-level below follows it. */}
         <div className="carousel">
           <CardImage key={shown.id} card={shown} size="normal" className="art" />
+
+          {/* Controls overlay the art rather than sitting above it, matching the
+              wall tiles. Hover-only, and bottom-centre so they clear the
+              carousel arrows at the left and right edges. */}
+          <div className="art-controls">
+            <span className="printing-qty">
+              <button
+                onClick={() => onAdjustTarget(shown, -1)}
+                disabled={!target || inTarget === 0}
+                title={target ? `Remove one from ${target.name}` : "Nothing targeted"}
+              >
+                −
+              </button>
+              <span className={inTarget ? "owned" : ""}>{inTarget}</span>
+              <button
+                onClick={() => onAdjustTarget(shown, 1)}
+                disabled={!target}
+                title={target ? `Add one to ${target.name}` : "Nothing targeted"}
+              >
+                +
+              </button>
+            </span>
+
+            {onSetCommander && (
+              <button
+                className="art-commander"
+                onClick={() => onSetCommander(shown)}
+                title={`Make this ${target?.name ?? "the deck"}'s commander`}
+              >
+                ★
+              </button>
+            )}
+          </div>
 
           {visible.length > 1 && (
             <>
@@ -336,9 +418,7 @@ export function CardDetail({
             {visible.map((printing) => (
               <option key={printing.id} value={printing.id}>
                 {printingLabel(printing)}
-                {scopedQty[printing.id]
-                  ? ` — ${scopedQty[printing.id]}× ${scopeLabel}`
-                  : ""}
+                {filterQty[printing.id] ? ` — ${filterQty[printing.id]}×` : ""}
               </option>
             ))}
           </select>
@@ -349,45 +429,23 @@ export function CardDetail({
               : ""}
           </span>
 
-          {/* Record copies of *this printing* into whichever deck or collection
-              you most recently opened, without leaving the card. */}
-          <span
-            className="printing-qty"
-            title={
-              target
-                ? `Copies of this printing in ${target.name}`
-                : "Open a deck or collection first — this writes to the last one"
+          <select
+            value={printingFilter}
+            onChange={(e) =>
+              setPrintingFilter(e.target.value as typeof printingFilter)
             }
+            title="Which printings to step through"
           >
-            <button
-              onClick={() => onAdjustTarget(shown, -1)}
-              disabled={!target || inTarget === 0}
-            >
-              −
-            </button>
-            <span className={inTarget ? "owned" : ""}>{inTarget}</span>
-            <button onClick={() => onAdjustTarget(shown, 1)} disabled={!target}>
-              +
-            </button>
-          </span>
-
-          <label className="check" title={`Show only printings ${scopeLabel}`}>
-            <input
-              type="checkbox"
-              checked={ownedOnly}
-              onChange={(e) => setOwnedOnly(e.target.checked)}
-              disabled={scopedTotal === 0}
-            />
-            Only {scopeLabel}
-          </label>
+            <option value="all">All printings</option>
+            {/* Only offered when there is something to narrow to. */}
+            {activeDeck && deckTotal > 0 && (
+              <option value="deck">In {activeDeck.name}</option>
+            )}
+            {activeCollection && collectionTotal > 0 && (
+              <option value="collection">In {activeCollection.name}</option>
+            )}
+          </select>
         </div>
-
-        {target && (
-          <div className="hint" style={{ marginBottom: 10 }}>
-            ± writes to <strong>{target.name}</strong>
-            {target.kind === "deck" ? " (maindeck)" : ""}
-          </div>
-        )}
 
         {printingsError && (
           <div className="status error" style={{ borderBottom: "none" }}>
@@ -496,12 +554,6 @@ export function CardDetail({
             </>
           )}
 
-          <dt style={{ textTransform: "capitalize" }}>{scopeLabel}</dt>
-          <dd className={shownScoped ? "owned" : "missing"}>
-            {shownScoped
-              ? `${shownScoped} of this printing`
-              : "None of this printing"}
-          </dd>
         </dl>
       </div>
     </aside>

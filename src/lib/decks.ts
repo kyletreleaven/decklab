@@ -188,6 +188,39 @@ export async function adjustDeckQuantity(
 }
 
 /**
+ * Make a card the deck's commander.
+ *
+ * *Moves* an existing entry rather than inserting a second one — the old
+ * "Set as commander" menu added a row in the commander zone while leaving the
+ * card in the 99, so you held it twice and the deck read 101 cards.
+ */
+export async function setCommander(deckId: string, card: Card): Promise<void> {
+  const existing = await select<{ id: string; zone: DeckZone }>(
+    "SELECT id, zone FROM deck_cards WHERE deck_id = $1 AND card_id = $2",
+    [deckId, card.id],
+  );
+
+  const inCommandZone = existing.find((e) => e.zone === "commander");
+  if (inCommandZone) return;
+
+  const elsewhere = existing[0];
+  if (elsewhere) {
+    // Only ever one copy in the command zone, however many were in the 99.
+    await execute("UPDATE deck_cards SET zone = 'commander', quantity = 1 WHERE id = $1", [
+      elsewhere.id,
+    ]);
+  } else {
+    await execute(
+      `INSERT INTO deck_cards (id, deck_id, card_id, quantity, zone, added_at)
+       VALUES ($1, $2, $3, 1, 'commander', $4)`,
+      [newId(), deckId, card.id, now()],
+    );
+  }
+
+  await touch(deckId);
+}
+
+/**
  * The combined colour identity of a deck's commander zone, or **null when the
  * zone is empty**.
  *
