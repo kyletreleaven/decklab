@@ -327,25 +327,6 @@ textarea:focus {
   color: var(--text-faint);
 }
 
-.card-tile .add {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.75);
-  border-color: var(--border-strong);
-  font-size: 15px;
-  line-height: 1;
-  opacity: 0;
-}
-
-.card-tile:hover .add {
-  opacity: 1;
-}
-
 /* ---------- lists ---------- */
 
 .group {
@@ -1039,6 +1020,12 @@ textarea:focus {
 
 .card-tile:hover .tile-controls {
   opacity: 1;
+}
+
+/* Nothing to remove — kept visible rather than hidden so the pair does not
+   reflow as counts change. */
+.tile-controls button:disabled {
+  color: var(--text-faint);
 }
 
 .tile-controls button {

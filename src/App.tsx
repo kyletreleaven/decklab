@@ -243,6 +243,9 @@ export default function App() {
     await decksApi.addCardToDeck(deckId, card, 1, asCommander ? "commander" : "main");
     await reloadDecks();
     if (view.kind === "deck" && view.id === deckId) await reloadEntries(deckId);
+    // Reloading entries only refreshes the deck *view*; the card panel's counts
+    // are keyed on refreshKey, so without this they stay stale.
+    bump();
   }
 
   async function addToCollection(card: Card, collectionId: string) {
@@ -255,6 +258,25 @@ export default function App() {
     if (!target) return;
     if (target.kind === "deck") await addToDeck(card, target.id, false);
     else await addToCollection(card, target.id);
+  }
+
+  async function adjustDeck(deckId: string, card: Card, delta: number) {
+    // Maindeck is the default zone. Which zone the +/- writes to is a separate
+    // question, and it depends on how zones get modelled.
+    await decksApi.adjustDeckQuantity(deckId, card, delta, "main");
+    await reloadDecks();
+    if (view.kind === "deck" && view.id === deckId) await reloadEntries(deckId);
+    bump();
+  }
+
+  async function adjustTarget(card: Card, delta: number) {
+    if (!target) return;
+    if (target.kind === "deck") await adjustDeck(target.id, card, delta);
+    else {
+      await collectionsApi.adjustCollectionQuantity(target.id, card, delta);
+      await reloadCollections();
+      bump();
+    }
   }
 
   async function createThing() {
@@ -394,6 +416,45 @@ export default function App() {
     };
   }, [activeCollection?.id, shownCard?.oracleId, refreshKey]);
 
+  /**
+   * Contents of the deck under the pool, and of the current target — one query
+   * each, so a grid of results costs no per-card lookups.
+   */
+  const [deckContents, setDeckContents] = useState<Record<string, number>>({});
+  const [targetContents, setTargetContents] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!currentDeck) {
+      setDeckContents({});
+      return;
+    }
+    let alive = true;
+    decksApi.deckQuantitiesByPrinting(currentDeck.id).then((rows) => {
+      if (alive) setDeckContents(rows);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [currentDeck?.id, refreshKey]);
+
+  useEffect(() => {
+    if (!target) {
+      setTargetContents({});
+      return;
+    }
+    let alive = true;
+    const load =
+      target.kind === "deck"
+        ? decksApi.deckQuantitiesByPrinting(target.id)
+        : collectionsApi.collectionQuantitiesByPrinting(target.id);
+    load.then((rows) => {
+      if (alive) setTargetContents(rows);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [target?.kind, target?.id, refreshKey]);
+
   /** Put the candidate-card pool above a deck view when the pool is showing. */
   function withPool(node: ReactNode): ReactNode {
     if (!showPool || !currentDeck) return node;
@@ -406,8 +467,12 @@ export default function App() {
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
-            onAdd={(card) => addToDeck(card, currentDeck.id, false)}
-            target={{ name: currentDeck.name }}
+            destination={{
+              name: currentDeck.name,
+              quantities: deckContents,
+              add: (card) => addToDeck(card, currentDeck.id, false),
+              remove: (card) => adjustDeck(currentDeck.id, card, -1),
+            }}
             activeCollection={activeCollection}
             scopes={deckScopes}
           />
@@ -535,8 +600,16 @@ export default function App() {
               selectedId={selectedCard?.id ?? null}
               onSelect={setSelectedCard}
               onHoverCard={hoverCard}
-              onAdd={target ? addToTarget : undefined}
-              target={target}
+              destination={
+                target
+                  ? {
+                      name: target.name,
+                      quantities: targetContents,
+                      add: addToTarget,
+                      remove: (card) => adjustTarget(card, -1),
+                    }
+                  : null
+              }
               activeCollection={activeCollection}
               scopes={deckScopes}
             />
@@ -547,7 +620,7 @@ export default function App() {
           <DeckView
             deck={currentDeck}
             entries={entries}
-            collections={collections}
+            activeCollection={activeCollection}
             selectedCardId={selectedCard?.id ?? null}
             onSelectCard={setSelectedCard}
             onHoverCard={hoverCard}
@@ -555,14 +628,17 @@ export default function App() {
             onChangeQuantity={async (entry, quantity) => {
               await decksApi.setDeckCardQuantity(entry.id, currentDeck.id, quantity);
               await reloadEntries(currentDeck.id);
+              bump();
             }}
             onRemove={async (entry) => {
               await decksApi.removeDeckEntry(entry.id, currentDeck.id);
               await reloadEntries(currentDeck.id);
+              bump();
             }}
             onSetZone={async (entry, zone) => {
               await decksApi.moveDeckEntry(entry.id, currentDeck.id, zone);
               await reloadEntries(currentDeck.id);
+              bump();
             }}
             onRename={async (name) => {
               await decksApi.renameDeck(currentDeck.id, name);
@@ -670,22 +746,7 @@ export default function App() {
         deckQuantities={deckQuantities}
         activeCollection={activeCollection}
         collectionQuantities={collectionQuantities}
-        onAdjustTarget={async (card, delta) => {
-          if (!target) return;
-          if (target.kind === "collection") {
-            await collectionsApi.adjustCollectionQuantity(target.id, card, delta);
-            await reloadCollections();
-          } else {
-            // Maindeck is the default zone. Which zone the +/- writes to is a
-            // separate question, and it depends on how zones get modelled.
-            await decksApi.adjustDeckQuantity(target.id, card, delta, "main");
-            await reloadDecks();
-            if (view.kind === "deck" && view.id === target.id) {
-              await reloadEntries(target.id);
-            }
-          }
-          bump();
-        }}
+        onAdjustTarget={adjustTarget}
         refreshKey={refreshKey}
       />
 

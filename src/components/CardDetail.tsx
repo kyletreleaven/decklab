@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ownedByPrinting } from "../lib/collections";
 import { cachedPrintings } from "../lib/cards";
 import { isSuperseded } from "../lib/scheduler";
@@ -175,31 +175,21 @@ export function CardDetail({
   }, [oracleId, refreshKey]);
 
   /**
-   * The printing chosen per card, so hover stays non-destructive: sweeping the
-   * pointer across a grid and back must not discard a printing you picked.
-   * Keyed by oracle id, since that is the grain a print run belongs to.
+   * The panel always shows the printing it was handed. Hovering or clicking a
+   * tile is an unambiguous request for *that* printing, so nothing is restored
+   * from a previous choice — pointing at a card and seeing a different one is
+   * more confusing than losing a carousel selection.
    *
-   * (`ownedOnly` deliberately lives outside this reset — it is a preference, and
-   * clearing it whenever focus moved silently switched it off.)
+   * A choice made in the carousel still persists while you stay on the card:
+   * this only fires when a different card arrives.
    */
-  const chosenPrinting = useRef(new Map<string, string>());
-
   useEffect(() => {
-    if (!card) {
-      setPrintingId(null);
-      return;
-    }
-    setPrintingId(chosenPrinting.current.get(card.oracleId) ?? card.id);
-  }, [card?.id, card?.oracleId]);
+    setPrintingId(card?.id ?? null);
+  }, [card?.id]);
 
-  /** Select a printing and remember it for this card. */
-  const choosePrinting = useCallback(
-    (printing: Card) => {
-      setPrintingId(printing.id);
-      chosenPrinting.current.set(printing.oracleId, printing.id);
-    },
-    [],
-  );
+  const choosePrinting = useCallback((printing: Card) => {
+    setPrintingId(printing.id);
+  }, []);
 
   /**
    * Counts are stated against the active collection when there is one, falling

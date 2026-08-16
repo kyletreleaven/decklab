@@ -243,6 +243,23 @@ export async function commanderIdentity(deckId: string): Promise<string | null> 
   return canonicalColors(rows.flatMap((row) => [...row.color_identity]));
 }
 
+/**
+ * Every printing the deck holds, keyed by printing id — one query for the whole
+ * deck rather than one per card, so a grid of results costs a single round trip.
+ */
+export async function deckQuantitiesByPrinting(
+  deckId: string,
+): Promise<Record<string, number>> {
+  const rows = await select<{ card_id: string; quantity: number }>(
+    `SELECT card_id, SUM(quantity) AS quantity
+       FROM deck_cards WHERE deck_id = $1 GROUP BY card_id`,
+    [deckId],
+  );
+  const byPrinting: Record<string, number> = {};
+  for (const row of rows) byPrinting[row.card_id] = row.quantity;
+  return byPrinting;
+}
+
 /** Copies of each printing of a card held in one deck, keyed by printing id. */
 export async function printingQuantitiesInDeck(
   deckId: string,

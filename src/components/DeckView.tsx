@@ -17,7 +17,6 @@ import {
 } from "../lib/deckstats";
 import type {
   Card,
-  Collection,
   Deck,
   DeckEntry,
   DeckPile,
@@ -29,7 +28,7 @@ import { PilesView } from "./PilesView";
 export function DeckView({
   deck,
   entries,
-  collections,
+  activeCollection,
   selectedCardId,
   onSelectCard,
   onHoverCard,
@@ -48,7 +47,12 @@ export function DeckView({
 }: {
   deck: Deck;
   entries: DeckEntry[];
-  collections: Collection[];
+  /**
+   * The collection ownership is checked against — one notion of scope, shared
+   * with the card panel, rather than a per-view set of chips. When it becomes
+   * multi-valued it should do so in the selection model, once, not here.
+   */
+  activeCollection: { id: string; name: string } | null;
   selectedCardId: string | null;
   onSelectCard: (card: Card) => void;
   /** Previews a card in the detail panel without changing the selection. */
@@ -69,7 +73,6 @@ export function DeckView({
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(deck.name);
-  const [against, setAgainst] = useState<string[]>([]);
   const [ownership, setOwnership] = useState<Map<string, OwnershipRow>>(new Map());
   const [layout, setLayout] = useState<"list" | "piles">("list");
   const [piles, setPiles] = useState<DeckPile[]>([]);
@@ -99,24 +102,19 @@ export function DeckView({
     setEditingName(false);
   }, [deck.id, deck.name]);
 
-  // Drop any collection that has since been deleted.
-  useEffect(() => {
-    setAgainst((prev) => prev.filter((id) => collections.some((c) => c.id === id)));
-  }, [collections]);
-
   useEffect(() => {
     let active = true;
-    if (!against.length) {
+    if (!activeCollection) {
       setOwnership(new Map());
       return;
     }
-    deckOwnership(deck.id, against).then((rows) => {
+    deckOwnership(deck.id, [activeCollection.id]).then((rows) => {
       if (active) setOwnership(new Map(rows.map((r) => [r.cardId, r])));
     });
     return () => {
       active = false;
     };
-  }, [deck.id, against, entries, refreshKey]);
+  }, [deck.id, activeCollection?.id, entries, refreshKey]);
 
   const stats = useMemo(() => deckStats(entries), [entries]);
   const issues = useMemo(() => commanderIssues(entries), [entries]);
@@ -140,13 +138,13 @@ export function DeckView({
   }, [main]);
 
   const missingCount = useMemo(() => {
-    if (!against.length) return null;
+    if (!activeCollection) return null;
     let missing = 0;
     for (const row of ownership.values()) {
       missing += Math.max(0, row.required - row.playable);
     }
     return missing;
-  }, [ownership, against]);
+  }, [ownership, activeCollection]);
 
   const maxCurve = Math.max(1, ...stats.curve.map((c) => c.count));
 
@@ -338,31 +336,6 @@ export function DeckView({
           </div>
         )}
       </div>
-
-      {collections.length > 0 && (
-        <div className="status">
-          Check against:{" "}
-          {collections.map((collection) => {
-            const on = against.includes(collection.id);
-            return (
-              <button
-                key={collection.id}
-                className={on ? "primary" : "ghost"}
-                style={{ marginRight: 6, padding: "2px 8px" }}
-                onClick={() =>
-                  setAgainst((prev) =>
-                    on
-                      ? prev.filter((id) => id !== collection.id)
-                      : [...prev, collection.id],
-                  )
-                }
-              >
-                {collection.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {issues.length > 0 && (
         <div className="issues">

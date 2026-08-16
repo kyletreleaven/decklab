@@ -18,15 +18,32 @@ function toggle(list: string[] | undefined, value: string): string[] {
  * two behave identically. Purely presentational — the caller decides whether the
  * resulting filter drives a Scryfall query or a local SQL query.
  */
+/**
+ * A labelled row of on/off toggles supplied by the caller — deck scopes,
+ * collection membership, anything contextual. Kept generic so this component
+ * does not need to know what a "scope" is; it only knows they AND with the
+ * facets, like everything else here.
+ */
+export interface FilterGroup {
+  label: string;
+  toggles: {
+    key: string;
+    label: React.ReactNode;
+    title?: string;
+    on: boolean;
+    onChange: (on: boolean) => void;
+  }[];
+}
+
 export function CardFilters({
   filter,
   onChange,
-  showOwnership = false,
+  groups = [],
 }: {
   filter: CardFilter;
   onChange: (next: CardFilter) => void;
-  /** Ownership toggles only make sense where a reference collection exists. */
-  showOwnership?: boolean;
+  /** Contextual toggles, rendered after the fixed facets. */
+  groups?: FilterGroup[];
 }) {
   const active = countActiveFilters(filter);
   const patch = (next: Partial<CardFilter>) => onChange({ ...filter, ...next });
@@ -98,39 +115,28 @@ export function CardFilters({
         />
       </div>
 
-      {showOwnership && (
-        <div className="filter-group">
-          <span className="filter-label">Show</span>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={filter.showOwned !== false}
-              onChange={(e) => patch({ showOwned: e.target.checked })}
-            />
-            Collected
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={filter.showUnowned !== false}
-              onChange={(e) => patch({ showUnowned: e.target.checked })}
-            />
-            Not collected
-          </label>
+      {groups.map((group) => (
+        <div className="filter-group" key={group.label}>
+          <span className="filter-label">{group.label}</span>
+          {group.toggles.map((toggle) => (
+            <button
+              key={toggle.key}
+              className={`chip ${toggle.on ? "on" : ""}`}
+              onClick={() => toggle.onChange(!toggle.on)}
+              title={toggle.title}
+            >
+              {toggle.label}
+            </button>
+          ))}
         </div>
-      )}
+      ))}
 
       {active > 0 && (
         <button
           className="ghost"
-          onClick={() =>
-            onChange({
-              // Ownership toggles are a display mode, not a filter, so a
-              // "clear filters" should leave them alone.
-              showOwned: filter.showOwned,
-              showUnowned: filter.showUnowned,
-            })
-          }
+          // Clears the facets only — contextual toggles belong to whatever
+          // supplied them and are not this component's to reset.
+          onClick={() => onChange({})}
         >
           Clear all
         </button>

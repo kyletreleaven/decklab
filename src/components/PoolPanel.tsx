@@ -17,7 +17,7 @@ export interface Scope {
   title: string;
   filter: CardFilter;
 }
-import { CardFilters } from "./CardFilters";
+import { CardFilters, type FilterGroup } from "./CardFilters";
 import { CardImage } from "./CardImage";
 
 /** How many cards a page shows, so the union pages at a steady rhythm. */
@@ -35,8 +35,7 @@ export function PoolPanel({
   selectedId,
   onSelect,
   onHoverCard,
-  onAdd,
-  target,
+  destination,
   activeCollection,
   scopes = [],
 }: {
@@ -44,14 +43,21 @@ export function PoolPanel({
   onSelect: (card: Card) => void;
   /** Previews a card in the detail panel without changing the selection. */
   onHoverCard?: (card: Card | null) => void;
-  /** Omitted when there is nowhere to add to, which hides the + button. */
-  onAdd?: (card: Card) => void;
   /**
-   * Where a bare `+` lands. Used only to label the button — the destination
-   * itself comes from `onAdd`, since it differs by context (the deck under the
-   * pool, versus the most recently touched thing in the search view).
+   * Where this pool's cards go, and how many are already there.
+   *
+   * A deck pool's destination is that deck *by construction* — it exists to fill
+   * it — while the standalone search sends cards to the current target, which
+   * may be a deck or a collection. Either way the panel does not care which kind
+   * it is; it only adds, removes and counts.
    */
-  target: { name: string } | null;
+  destination: {
+    name: string;
+    /** Copies held, keyed by printing id. */
+    quantities: Record<string, number>;
+    add: (card: Card) => void;
+    remove: (card: Card) => void;
+  } | null;
   /**
    * The "my cards" source. Follows the selection rather than being chosen from
    * a list, so there is one notion of which collection is current.
@@ -68,8 +74,14 @@ export function PoolPanel({
   const [filter, setFilter] = useState<CardFilter>({});
   const [showFilters, setShowFilters] = useState(false);
   const [scopesOff, setScopesOff] = useState<Set<string>>(new Set());
-  /** Whether cards outside the active collection appear, shadowed. */
-  const [showUnowned, setShowUnowned] = useState(true);
+  /**
+   * Whether cards outside the active collection appear, shadowed.
+   *
+   * Not "unowned": a card sitting in your Cube while Paper is active is owned,
+   * just not *here*. The distinction matters now that scope is one named
+   * collection rather than a vague aggregate.
+   */
+  const [showOutside, setShowOutside] = useState(true);
 
   const [ownedCards, setOwnedCards] = useState<Card[]>([]);
   const [universeCards, setUniverseCards] = useState<Card[]>([]);
@@ -105,7 +117,7 @@ export function PoolPanel({
 
   // With no collection selected there is no "mine" to narrow to, so the wider
   // pool is the only meaningful view.
-  const includeUnowned = !activeCollection || showUnowned;
+  const includeOutside = !activeCollection || showOutside;
 
   useEffect(() => {
     const id = ++requestId.current;
@@ -127,7 +139,7 @@ export function PoolPanel({
             // collection half is better than failing a query that All Magic
             // could have answered.
             if (!(err instanceof QueryError)) throw err;
-            if (includeUnowned) setError(`${err.message} — showing all of Magic only`);
+            if (includeOutside) setError(`${err.message} — showing all of Magic only`);
             else throw err;
           }
         }
@@ -135,7 +147,7 @@ export function PoolPanel({
         setOwnedCards(mine);
 
         // Only reach for the network when the local side cannot fill a page.
-        if (includeUnowned && hasSearchableTerms(effective) && mine.length < PAGE) {
+        if (includeOutside && hasSearchableTerms(effective) && mine.length < PAGE) {
           const page = await scryfall.search(toScryfallQuery(effective));
           if (requestId.current !== id) return;
           setUniverseCards(page.cards);
@@ -167,7 +179,7 @@ export function PoolPanel({
 
     const timer = setTimeout(run, 350);
     return () => clearTimeout(timer);
-  }, [activeCollection?.id, includeUnowned, effectiveKey]);
+  }, [activeCollection?.id, includeOutside, effectiveKey]);
 
   /**
    * The union, deduped by *oracle* id — a collection holds printings while a
@@ -206,7 +218,56 @@ export function PoolPanel({
   const visible = useMemo(() => merged.slice(0, shown), [merged, shown]);
   const hasMore = shown < merged.length || nextPage !== null;
 
-  const activeFilters = countActiveFilters(filter);
+  /**
+   * Everything contextual, expressed as toggle groups for the filter bar — so
+   * one place answers "why am I seeing these cards" rather than three.
+   */
+  const groups = useMemo<FilterGroup[]>(() => {
+    const out: FilterGroup[] = [];
+
+    if (scopes.length) {
+      out.push({
+        label: "Deck",
+        toggles: scopes.map((scope) => ({
+          key: scope.key,
+          label: scope.label,
+          title: scope.title,
+          on: !scopesOff.has(scope.key),
+          onChange: (on) =>
+            setScopesOff((prev) => {
+              const next = new Set(prev);
+              if (on) next.delete(scope.key);
+              else next.add(scope.key);
+              return next;
+            }),
+        })),
+      });
+    }
+
+    if (activeCollection) {
+      out.push({
+        label: activeCollection.name,
+        toggles: [
+          {
+            key: "outside",
+            label: `Not in ${activeCollection.name}`,
+            title: `Also show cards not in ${activeCollection.name}, shadowed`,
+            on: showOutside,
+            onChange: setShowOutside,
+          },
+        ],
+      });
+    }
+
+    return out;
+  }, [scopes, scopesOff, activeCollection, showOutside]);
+
+  // Counts what is *narrowing* the list: active facets, enabled scopes, and the
+  // collection restriction when cards outside it are hidden.
+  const activeFilters =
+    countActiveFilters(filter) +
+    activeScopes.length +
+    (activeCollection && !showOutside ? 1 : 0);
 
   return (
     <div className="pool">
@@ -220,27 +281,6 @@ export function PoolPanel({
           onChange={(e) => setFilter({ ...filter, query: e.target.value })}
         />
 
-        {scopes.map((s) => {
-          const on = !scopesOff.has(s.key);
-          return (
-            <button
-              key={s.key}
-              className={on ? "primary" : ""}
-              onClick={() =>
-                setScopesOff((prev) => {
-                  const next = new Set(prev);
-                  if (on) next.add(s.key);
-                  else next.delete(s.key);
-                  return next;
-                })
-              }
-              title={s.title}
-            >
-              {s.label}
-            </button>
-          );
-        })}
-
         <button
           className={showFilters || activeFilters ? "primary" : ""}
           onClick={() => setShowFilters((v) => !v)}
@@ -248,20 +288,6 @@ export function PoolPanel({
         >
           More filters{activeFilters ? ` (${activeFilters})` : ""}
         </button>
-
-        {/* Not a source picker — an inclusion toggle. Off narrows to the
-            collection the selection says is current; on widens to all of Magic
-            with everything outside it shadowed. */}
-        {activeCollection && (
-          <label className="check" title={`Also show cards not in ${activeCollection.name}`}>
-            <input
-              type="checkbox"
-              checked={showUnowned}
-              onChange={(e) => setShowUnowned(e.target.checked)}
-            />
-            Show unowned
-          </label>
-        )}
 
         <span className="hint">
           {loading
@@ -273,7 +299,7 @@ export function PoolPanel({
       </div>
 
       {showFilters && (
-        <CardFilters filter={filter} onChange={setFilter} />
+        <CardFilters filter={filter} onChange={setFilter} groups={groups} />
       )}
 
       {error && <div className="status error">{error}</div>}
@@ -290,6 +316,7 @@ export function PoolPanel({
         <div className="card-grid">
           {visible.map((card) => {
             const isOwned = owned.has(card.oracleId);
+            const inDestination = destination?.quantities[card.id] ?? 0;
             return (
               <div
                 key={card.id}
@@ -305,7 +332,7 @@ export function PoolPanel({
                 onClick={() => onSelect(card)}
                 onMouseEnter={() => onHoverCard?.(card)}
                 onMouseLeave={() => onHoverCard?.(null)}
-                onDoubleClick={() => onAdd?.(card)}
+                onDoubleClick={() => destination?.add(card)}
                 title={`${card.name}${
                   activeCollection && !isOwned
                     ? ` — not in ${activeCollection.name}`
@@ -313,17 +340,30 @@ export function PoolPanel({
                 }`}
               >
                 <CardImage card={card} size="small" />
-                {onAdd && (
-                  <button
-                    className="add"
-                    title={target ? `Add to ${target.name}` : "Add"}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAdd(card);
-                    }}
+                {destination && (
+                  <span
+                    className="tile-controls"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    +
-                  </button>
+                    <button
+                      title={`Remove one from ${destination.name}`}
+                      onClick={() => destination.remove(card)}
+                      disabled={!inDestination}
+                    >
+                      −
+                    </button>
+                    <button
+                      title={`Add one to ${destination.name}`}
+                      onClick={() => destination.add(card)}
+                    >
+                      +
+                    </button>
+                  </span>
+                )}
+                {/* How many are already in the destination — distinct from the
+                    dimming, which is about the active collection. */}
+                {inDestination > 0 && (
+                  <span className="qty-badge">{inDestination}×</span>
                 )}
               </div>
             );

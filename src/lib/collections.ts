@@ -418,6 +418,20 @@ export async function ownedByPrinting(
   return byPrinting;
 }
 
+/** Every printing the collection holds, keyed by printing id. One query. */
+export async function collectionQuantitiesByPrinting(
+  collectionId: string,
+): Promise<Record<string, number>> {
+  const rows = await select<{ card_id: string; quantity: number }>(
+    `SELECT card_id, SUM(quantity) AS quantity
+       FROM collection_items WHERE collection_id = $1 GROUP BY card_id`,
+    [collectionId],
+  );
+  const byPrinting: Record<string, number> = {};
+  for (const row of rows) byPrinting[row.card_id] = row.quantity;
+  return byPrinting;
+}
+
 /** Copies of each printing of a card held in one collection, by printing id. */
 export async function printingQuantitiesInCollection(
   collectionId: string,
