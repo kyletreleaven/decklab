@@ -1401,6 +1401,11 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
   helpers in `decks.ts`/`collections.ts` own the signal, or make the panel
   *subscribe* to its data rather than being told to refetch — the "derived data
   belongs in a cache keyed by its input" rule from *Where state lives*.
+- **`touched` is trimmed by hand, same trap.** `forget()` is called from only two
+  places — deleting the deck or collection you are viewing — so a future delete
+  path that misses it leaves a stale entry that can still be chosen as `target`,
+  aiming `+` at a deleted id. Fix by deriving: filter `touched` against the live
+  `decks`/`collections` arrays, which makes `forget` redundant for correctness.
 - **CSP is `null`.** Fine for local dev; tighten before shipping signed builds.
 - **Bundle identifier ends in `.app`.** `com.decklab.app` triggers a build warning
   and conflicts with the macOS bundle extension. Changing it moves the database
