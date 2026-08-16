@@ -173,12 +173,19 @@ interface ScryfallList {
  * Full Scryfall search. Every card that comes back is written into the local
  * cache, which is what incrementally builds up the offline catalogue.
  */
-export async function search(query: string, page = 1): Promise<SearchPage> {
+export async function search(
+  query: string,
+  page = 1,
+  sort: { order: string; dir: "asc" | "desc" } = { order: "name", dir: "asc" },
+): Promise<SearchPage> {
   const params = new URLSearchParams({
     q: query,
     page: String(page),
     unique: "cards",
-    order: "name",
+    // Always both: Scryfall's default direction varies by key, so omitting
+    // `dir` sorts prices ascending on one key and descending on another.
+    order: sort.order,
+    dir: sort.dir,
   });
 
   let list: ScryfallList;

@@ -1,6 +1,7 @@
 import { CardRow, execute, newId, now, rowToCard, select } from "./db";
 import type { CardFilter } from "./filters";
 import { compileQuery } from "./query";
+import type { SortKey } from "./sort";
 
 /**
  * A free-text query that could not be compiled — a syntax error, or a term we
@@ -128,7 +129,8 @@ type CollectionItemRow = CardRow & {
  */
 export type CollectionFilter = CardFilter;
 
-export type CollectionSort = "name" | "mv" | "quantity" | "value";
+/** Kept as an alias so existing call sites read naturally. */
+export type CollectionSort = SortKey;
 
 const SORT_SQL: Record<CollectionSort, string> = {
   name: "c.name",

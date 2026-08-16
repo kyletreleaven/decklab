@@ -6,6 +6,12 @@ import {
   type CardFilter,
 } from "../lib/filters";
 import { isSuperseded } from "../lib/scheduler";
+import {
+  availableSorts,
+  DEFAULT_SORT,
+  sortOption,
+  type SortKey,
+} from "../lib/sort";
 import * as scryfall from "../lib/scryfall";
 import type { Card } from "../lib/types";
 
@@ -94,6 +100,7 @@ export function PoolPanel({
    * collection rather than a vague aggregate.
    */
   const [showOutside, setShowOutside] = useState(true);
+  const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
 
   const [ownedCards, setOwnedCards] = useState<Card[]>([]);
   const [universeCards, setUniverseCards] = useState<Card[]>([]);
@@ -135,6 +142,21 @@ export function PoolPanel({
   // pool is the only meaningful view.
   const includeOutside = !activeCollection || showOutside;
 
+  /**
+   * Which sorts are offerable, and the current one's remote spelling.
+   *
+   * Keyed on whether a Scryfall stream is involved, not on which source is
+   * "selected": the constraint is that every stream in the answer must be able
+   * to produce the ordering.
+   */
+  const sorts = useMemo(() => availableSorts(includeOutside), [includeOutside]);
+  const remoteSort = sortOption(sort).remote ?? { order: "name", dir: "asc" as const };
+
+  // Turning outside cards back on can strand a sort the universe cannot do.
+  useEffect(() => {
+    if (!sorts.some((s) => s.key === sort)) setSort(DEFAULT_SORT);
+  }, [sorts, sort]);
+
   useEffect(() => {
     const id = ++requestId.current;
 
@@ -150,7 +172,11 @@ export function PoolPanel({
           // collection as well and merging would truncate the universe behind
           // however many of your own cards happened to match.
           setOwnedCards([]);
-          const page = await scryfall.search(toScryfallQuery(effective) || EVERYTHING);
+          const page = await scryfall.search(
+            toScryfallQuery(effective) || EVERYTHING,
+            1,
+            remoteSort,
+          );
           if (requestId.current !== id) return;
           setUniverseCards(page.cards);
           setNextPage(page.nextPage);
@@ -158,7 +184,7 @@ export function PoolPanel({
         } else {
           // Cards outside the collection are unwanted, so the whole answer is
           // local — and complete, since nothing here is paged by Scryfall.
-          const items = await collectionItems(activeCollection!.id, effective);
+          const items = await collectionItems(activeCollection!.id, effective, sort);
           if (requestId.current !== id) return;
           setOwnedCards(items.map((item) => item.card));
           setUniverseCards([]);
@@ -189,7 +215,7 @@ export function PoolPanel({
     // The mutation counter matters only while the list itself is local. Adding
     // it unconditionally would re-run a Scryfall search on every `+`, which is
     // exactly the traffic the scheduler exists to avoid.
-  }, [activeCollection?.id, includeOutside, effectiveKey, includeOutside ? 0 : refreshKey]);
+  }, [activeCollection?.id, includeOutside, effectiveKey, sort, includeOutside ? 0 : refreshKey]);
 
   /**
    * Exactly one of the two lanes is populated — All Magic when outside cards
@@ -217,6 +243,7 @@ export function PoolPanel({
       const page = await scryfall.search(
         toScryfallQuery(effective) || EVERYTHING,
         nextPage,
+        remoteSort,
       );
       setUniverseCards((prev) => [...prev, ...page.cards]);
       setNextPage(page.nextPage);
@@ -303,6 +330,17 @@ export function PoolPanel({
             Show not in {activeCollection.name}
           </label>
         )}
+
+        <label className="toggle" title="Order the pool">
+          Sort
+          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+            {sorts.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <span className="hint">
           {loading
