@@ -178,31 +178,25 @@ Note `writable` is *not* simply "is it computed". A **stored** collection can
 want it too: locking an imported reference binder — a friend's list, a
 tournament decklist — against accidental edits is the same flag.
 
-**But All Magic needs a second, stronger property: it is not a *holding*.**
-Unwritable is not enough to describe it. A locked reference binder is unwritable
-yet still a set of specific cards, so it can meaningfully be a *scope* — "what is
-in Dave's binder that I do not have". The universe cannot: scoping ownership to
-it says everything is owned, which is vacuous, and its quantities are ∞ rather
-than counts.
+**`writable` is the only property All Magic needs.** An earlier version of this
+section argued for a second axis — "is it a *holding*" — to stop the universe
+becoming the pool's dimming scope. That was wrong. Dimming is a **set
+difference**: the pool renders a background set and un-dims members of a
+comparison set, and any card set can play either role. Choosing All Magic as the
+comparison set yields an empty difference — an unhelpful choice, but a
+well-defined one, and the user's to make.
 
-| | writable | usable as a scope |
-| --- | --- | --- |
-| Paper, Cube | ✓ | ✓ |
-| Locked reference binder | ✗ | ✓ |
-| **All Magic** | ✗ | **✗** |
+Writes are the real constraint, because a write is not a set operation. There is
+nowhere to put a card in the universe, so `target` must skip it.
 
-- ⬜ So the touch list needs to exclude it from *both* derivations, not just the
-      write one:
-      `activeCollection = first collection that is a holding`,
-      `target = first entry that is writable`.
-      Clicking All Magic then views it without moving the sidebar dot off Paper,
-      or repointing the card panel's `±`.
-- ⬜ Whether that is a general flag or simply "the universe is the one
-      non-holding" is open. A flag keeps the model uniform; it may only ever
-      have one instance.
+- ✅ `isWritable` / `isUniverse` in `App.tsx`, with `UNIVERSE_ID` in
+      `collections.ts`. `target` is now `touched.find(isWritable)` rather than
+      `touched[0]`, so viewing a read-only source leaves `+` where it was.
+      `activeCollection` needs no predicate.
+- ⬜ Derived, not stored. `writable` becomes a column only when a *stored*
+      collection wants locking — the reference binder above — which is a
+      separate feature and not on this path.
 
-- ⬜ `writable` becomes a real column, defaulted true; Universe is the first
-      `false`
 - ⬜ Everything else stays user metadata with good affordances rather than
       app-enforced semantics. Resist adding a `game` enum the app reasons about;
       a deck warning is friendlier than a hard rule, and cheaper to be wrong.
@@ -281,10 +275,24 @@ rather than as scaffolding.
       shortcut made the pool silently collection-only for any query a
       decent-sized collection could satisfy, and the merge it protected also
       handed *ordering* to whichever side happened to be non-empty.
-- ❌ *Dropped:* "generalise the merge into a reusable foreground/background
-      synchronisation". There is no merge left to generalise — the two branches
-      are exclusive, and `PoolPanel.merged` survives only as a concatenation.
-      Revisit only if some panel genuinely needs to show two sources at once.
+- ⬜ **Asc/desc control.** Free remotely (`dir` is already threaded), but
+      `SORT_SQL` hardcodes direction inside each string
+      (`"ci.quantity DESC, c.name"`), so it must first split into expression +
+      direction + tiebreaker. Worth doing once, with the merge in mind: the
+      tiebreaker is what makes the key **total**, so keep it fixed ascending
+      rather than flipping it with the primary key. The control flips the
+      per-key default (price stays descending on open) rather than forcing asc.
+- ⬜ **Merging returns when the sets stop being nested.** Today background ⊇
+      foreground (All Magic contains every collection), so one page of the
+      background is the whole answer and un-dimming is a local membership test.
+      For sets in no subset relation — "all red cards" against a collection
+      holding blue — a foreground card may be absent from the background
+      entirely, so each set needs its own ordered stream, merged k-way by their
+      heads. Two constraints: the sort key must be **total** (`(name, id)`, not
+      `name`, or ties across a page boundary duplicate or drop), and both sides
+      must page in the **same** order — the intersection of Scryfall's `order=`
+      and SQL, which is why sort has to be settled first. Costs k page-fetches
+      per screen instead of one.
 
 - ✅ **Pool tiles gained a `− N +` stepper**, acting on the pool's
       *destination*: the deck when the pool sits under one (by construction —
@@ -301,6 +309,11 @@ rather than as scaffolding.
       <collection>" went back to the toolbar and out of that count: it chooses
       shadowed vs. absent, which is the same axis as the dimming, so hiding it
       behind a disclosure separated the switch from its effect.
+
+- ⬜ Split the deck-attached pool into its own lightweight component once
+      `compact` grows siblings — three or four "not in the strip" flags means it
+      already is a different component wearing the same one. Not yet: the
+      two-branch fetch, sort, facets, dimming and paging are genuinely shared.
 
 - 🐛 **Reconcile printings between the pool and the containers.** Now that All
       Magic is the base set, each tile shows whichever printing Scryfall's
@@ -327,6 +340,20 @@ rather than as scaffolding.
       (1) and (2) compose; do (1) before Slice 2 so the grown panel is not built
       on counts that can be wrong.
 
+- ⬜ **Card mode needs an *active printing*, and a way to pick it.** The above is
+      really one question — when a row is a card rather than a printing, which
+      printing do `+`/`−` write? Today nobody decides: it is whatever
+      `unique=cards` returned.
+      1. **Default to the one you own.** Same as resolution (2) above, and it
+         makes the badge and `−` correct in the same stroke.
+      2. **Hover carousel on the tile as the override**, with hovering a printing
+         putting it in the card panel — the existing rule ("what you hover is
+         what the panel shows") extended from card grain to printing grain. The
+         tile becomes the picker, the panel stays the detail surface, so the two
+         are not redundant.
+      Cost is fine: printings are cached after the first fetch (migration 003),
+      and a hover storm is exactly what the scheduler's keyed eviction is for.
+
 - ⬜ **Slice 2 — grow `PoolPanel`** with the collection view's features behind
       capability flags: wall/list, sort, quantities (∞ or blank for the
       universe), stats, toolbar. Needed *before* All Magic becomes a sidebar
@@ -335,8 +362,13 @@ rather than as scaffolding.
 - ⬜ **Slice 3** — point the collection view at it, delete `CollectionView`, add
       All Magic to the sidebar.
 - ⬜ Uniform navigation: every card source is a sidebar entry
-- ⬜ Facet filters, wall/list layout and sort come free in search, since they
-      already exist in the collection view
+- ⬜ Facet filters and wall/list layout come free in search — they already exist
+      in the collection view. **Sort does not.** `CollectionView` sorts locally
+      over a complete result set; the universe is paged, so sorting the 175 rows
+      in hand out of ~33.6k is meaningless. It has to move into Scryfall's
+      `order=` (hardcoded to `name` in `scryfall.search`), and any sort derived
+      from *your* copy — quantity, date added — must disappear for the universe
+      rather than silently sort by something else.
 - ⬜ The search view's bespoke "Adding to X" bar goes away; the ordinary target
       mechanism already covers it
 
