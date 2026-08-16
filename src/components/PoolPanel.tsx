@@ -38,6 +38,7 @@ export function PoolPanel({
   destination,
   activeCollection,
   scopes = [],
+  refreshKey = 0,
 }: {
   selectedId: string | null;
   onSelect: (card: Card) => void;
@@ -70,6 +71,11 @@ export function PoolPanel({
    * ones outside them when weighing a splash.
    */
   scopes?: Scope[];
+  /**
+   * Bumped on every mutation. Only the *local* queries depend on it — the
+   * Scryfall side must not re-fetch just because you added a card.
+   */
+  refreshKey?: number;
 }) {
   const [filter, setFilter] = useState<CardFilter>({});
   const [showFilters, setShowFilters] = useState(false);
@@ -108,12 +114,16 @@ export function PoolPanel({
   );
   const effectiveKey = JSON.stringify(effective);
 
-  /** Oracle ids held by the collection this pool is scoped to. */
+  /**
+   * Oracle ids held by the collection this pool is scoped to — the un-dimming
+   * set. Keyed on `refreshKey` as well as the collection, so adding a card to
+   * the collection lights its tile up immediately.
+   */
   useEffect(() => {
     ownedOracleIds(activeCollection ? [activeCollection.id] : undefined).then(
       setOwned,
     );
-  }, [activeCollection?.id]);
+  }, [activeCollection?.id, refreshKey]);
 
   // With no collection selected there is no "mine" to narrow to, so the wider
   // pool is the only meaningful view.
@@ -127,36 +137,33 @@ export function PoolPanel({
       setError(null);
       setShown(PAGE);
       try {
-        // The collection side is queried in full and locally: your own cards
-        // must never be truncated by Scryfall's pagination.
-        let mine: Card[] = [];
-        if (activeCollection) {
-          try {
-            const items = await collectionItems(activeCollection.id, effective);
-            mine = items.map((item) => item.card);
-          } catch (err) {
-            // `is:` and friends compile remotely but not locally. Losing the
-            // collection half is better than failing a query that All Magic
-            // could have answered.
-            if (!(err instanceof QueryError)) throw err;
-            if (includeOutside) setError(`${err.message} — showing all of Magic only`);
-            else throw err;
+        if (includeOutside) {
+          // All of Magic is the base set, a page at a time. What you own does
+          // not decide what appears here — it only decides what is un-dimmed,
+          // which comes from the oracle-id set loaded separately. Querying the
+          // collection as well and merging would truncate the universe behind
+          // however many of your own cards happened to match.
+          setOwnedCards([]);
+          if (!hasSearchableTerms(effective)) {
+            setUniverseCards([]);
+            setNextPage(null);
+            setTotal(0);
+            return;
           }
-        }
-        if (requestId.current !== id) return;
-        setOwnedCards(mine);
-
-        // Only reach for the network when the local side cannot fill a page.
-        if (includeOutside && hasSearchableTerms(effective) && mine.length < PAGE) {
           const page = await scryfall.search(toScryfallQuery(effective));
           if (requestId.current !== id) return;
           setUniverseCards(page.cards);
           setNextPage(page.nextPage);
           setTotal(page.totalCards);
         } else {
+          // Cards outside the collection are unwanted, so the whole answer is
+          // local — and complete, since nothing here is paged by Scryfall.
+          const items = await collectionItems(activeCollection!.id, effective);
+          if (requestId.current !== id) return;
+          setOwnedCards(items.map((item) => item.card));
           setUniverseCards([]);
           setNextPage(null);
-          setTotal(mine.length);
+          setTotal(items.length);
         }
       } catch (err) {
         if (requestId.current !== id) return;
@@ -179,12 +186,17 @@ export function PoolPanel({
 
     const timer = setTimeout(run, 350);
     return () => clearTimeout(timer);
-  }, [activeCollection?.id, includeOutside, effectiveKey]);
+    // The mutation counter matters only while the list itself is local. Adding
+    // it unconditionally would re-run a Scryfall search on every `+`, which is
+    // exactly the traffic the scheduler exists to avoid.
+  }, [activeCollection?.id, includeOutside, effectiveKey, includeOutside ? 0 : refreshKey]);
 
   /**
-   * The union, deduped by *oracle* id — a collection holds printings while a
-   * search returns one printing per card, so keying on printing would show the
-   * same card twice. Owned first: those are the ones you can actually play.
+   * Exactly one of the two lanes is populated — All Magic when outside cards
+   * are shown, the collection when they are not — so this is a concatenation in
+   * practice. The dedupe by *oracle* id is kept because a collection holds
+   * printings while a search returns one printing per card, and the two lanes
+   * may yet be mixed.
    */
   const merged = useMemo(() => {
     const seen = new Set(ownedCards.map((c) => c.oracleId));
@@ -219,8 +231,9 @@ export function PoolPanel({
   const hasMore = shown < merged.length || nextPage !== null;
 
   /**
-   * Everything contextual, expressed as toggle groups for the filter bar — so
-   * one place answers "why am I seeing these cards" rather than three.
+   * Contextual *constraints*, expressed as toggle groups for the filter bar.
+   * They belong beside the facets because they narrow the same way: AND-ed onto
+   * whatever has been searched for. Purely visual switches do not go here.
    */
   const groups = useMemo<FilterGroup[]>(() => {
     const out: FilterGroup[] = [];
@@ -244,30 +257,12 @@ export function PoolPanel({
       });
     }
 
-    if (activeCollection) {
-      out.push({
-        label: activeCollection.name,
-        toggles: [
-          {
-            key: "outside",
-            label: `Not in ${activeCollection.name}`,
-            title: `Also show cards not in ${activeCollection.name}, shadowed`,
-            on: showOutside,
-            onChange: setShowOutside,
-          },
-        ],
-      });
-    }
-
     return out;
-  }, [scopes, scopesOff, activeCollection, showOutside]);
+  }, [scopes, scopesOff]);
 
-  // Counts what is *narrowing* the list: active facets, enabled scopes, and the
-  // collection restriction when cards outside it are hidden.
-  const activeFilters =
-    countActiveFilters(filter) +
-    activeScopes.length +
-    (activeCollection && !showOutside ? 1 : 0);
+  // Counts what is *narrowing* the list: active facets and enabled scopes. The
+  // outside toggle is deliberately absent — it is a view control, not a filter.
+  const activeFilters = countActiveFilters(filter) + activeScopes.length;
 
   return (
     <div className="pool">
@@ -288,6 +283,23 @@ export function PoolPanel({
         >
           More filters{activeFilters ? ` (${activeFilters})` : ""}
         </button>
+
+        {/* Shadowed or absent — the same axis as the dimming, so it lives in
+            the open rather than behind "More filters" with the constraints
+            that join with the search query. */}
+        {activeCollection && (
+          <label
+            className="toggle"
+            title={`Show cards not in ${activeCollection.name}, shadowed`}
+          >
+            <input
+              type="checkbox"
+              checked={showOutside}
+              onChange={(e) => setShowOutside(e.target.checked)}
+            />
+            Show not in {activeCollection.name}
+          </label>
+        )}
 
         <span className="hint">
           {loading

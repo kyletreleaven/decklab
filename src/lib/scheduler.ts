@@ -114,7 +114,16 @@ export function schedule<T>(
     };
 
     if (lane === "interactive") {
-      interactive.get(key)?.reject(new Superseded(key));
+      const displaced = interactive.get(key);
+      if (displaced) {
+        displaced.reject(new Superseded(key));
+        // `set` on an existing key keeps its original insertion position, so
+        // without this the map would still order this job by when its *key*
+        // first appeared — a fresh search would queue behind a stale hover
+        // instead of preempting it, which is the opposite of the LIFO that
+        // `takeNext` is relying on.
+        interactive.delete(key);
+      }
       interactive.set(key, job);
     } else {
       background.push(job);

@@ -256,6 +256,25 @@ textarea:focus {
   flex: 1;
 }
 
+/* Inline checkbox for view controls that sit in the open, beside the buttons
+   rather than behind them. */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .search-input {
   flex: 1;
   min-width: 120px;

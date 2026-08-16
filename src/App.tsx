@@ -475,6 +475,7 @@ export default function App() {
             }}
             activeCollection={activeCollection}
             scopes={deckScopes}
+            refreshKey={refreshKey}
           />
         }
         bottom={node}
@@ -612,6 +613,7 @@ export default function App() {
               }
               activeCollection={activeCollection}
               scopes={deckScopes}
+              refreshKey={refreshKey}
             />
           </>
         )}

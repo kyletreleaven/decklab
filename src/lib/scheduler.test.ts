@@ -98,6 +98,43 @@ describe("scheduler", () => {
     vi.useRealTimers();
   });
 
+  it("orders a replacement job by when it was queued, not when its key first appeared", async () => {
+    vi.useFakeTimers();
+    const gate = deferred<string>();
+    const ran: string[] = [];
+
+    const blocker = schedule(() => gate.promise, { key: "blocker" });
+    // "search" enters the map first, then "printings" — so a naive `set` would
+    // leave the *replacement* search pinned at search's original position and
+    // serve the older hover first.
+    const stale = schedule(async () => {
+      ran.push("stale-search");
+      return "stale";
+    }, { key: "search" });
+    schedule(async () => {
+      ran.push("printings");
+      return "printings";
+    }, { key: "printings" });
+    const fresh = schedule(async () => {
+      ran.push("fresh-search");
+      return "fresh";
+    }, { key: "search" });
+
+    // Attached before the rejection lands, or it surfaces as unhandled.
+    const staleOutcome = stale.catch((e) => e);
+
+    gate.resolve("done");
+    await settle();
+
+    await expect(blocker).resolves.toBe("done");
+    expect(isSuperseded(await staleOutcome)).toBe(true);
+    await expect(fresh).resolves.toBe("fresh");
+    // The newest interactive request is the one on screen, so it goes first.
+    expect(ran).toEqual(["fresh-search", "printings"]);
+
+    vi.useRealTimers();
+  });
+
   it("serves interactive work before background work", async () => {
     vi.useFakeTimers();
     const gate = deferred<string>();
