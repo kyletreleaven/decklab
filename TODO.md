@@ -525,14 +525,27 @@ juxtaposition-as-AND, explicit `and`/`or`, `-` negation and nested parens.
       zone, since `entries` only holds the viewed deck), and `scope` is only
       passed to `PoolPanel` in the deck view. Fixing either alone changes nothing.
 
-- ⬜ **Split the bundled scope into contextual facets.** `deckScope` fuses format
-      legality and commander identity behind one toggle, so you cannot ask for
-      format-legal cards *outside* your identity — a real case when weighing a
-      splash. The tell: the button relabels itself "Deck-legal" vs
-      "Format-legal" depending on whether a commander is set.
-      `scope?: {label, filter}` becomes `scopes: Scope[]`, each shown only when
-      meaningful: legal in *format*, within *colours*, not already in *deck*, in
-      *collection*. They AND like every other facet, so no new mechanism.
+- ✅ **Split the bundled scope into independent toggles.** `deckScope` fused
+      format legality and colour identity, so a single switch reached only two
+      corners of a 2x2 — banned-cards-in-your-colours and
+      legal-cards-outside-them were both unaskable. Now `scopes: Scope[]`, each
+      toggled separately, identity rendered as mana symbols since the constraint
+      is about colours rather than the deck.
+
+- ⬜ **Rename `Scope`.** The word already means something else here —
+      selection-as-scope, i.e. which collections count as owned. `ContextFilter`
+      is the better name: a constraint whose *value* comes from context, where
+      you control only whether it applies. One interface, one prop, two call
+      sites.
+
+- ⬜ **App derives the scopes, which sits oddly.** The derivation depends on the
+      selection (App's) but is consumed by the panel, so App ends up knowing what
+      the pool wants. Resolves under selection-as-shared-context: scopes come
+      from the shared store and any panel reads them. Symptom of the missing
+      store rather than a problem of its own — leave until then.
+
+- ⬜ More contextual filters of the same shape once they are wanted: not already
+      in *deck*, in *collection*.
 
 ### Persist the printings TTL — migration 003 ✅
 
