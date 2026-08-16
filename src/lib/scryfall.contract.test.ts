@@ -138,6 +138,83 @@ describe.runIf(ENABLED)("scryfall contract", () => {
     });
   });
 
+  describe("sorting", () => {
+    /**
+     * Sorting the universe cannot be done locally — a page is 175 rows of tens
+     * of thousands — so it has to be pushed into `order=`/`dir=`. These pin the
+     * semantics that decision rests on.
+     */
+    const names = async (query: string, params = ""): Promise<string[]> => {
+      const res = await get(
+        `/cards/search?q=${encodeURIComponent(query)}${params}`,
+      );
+      if (res.status === 404) return [];
+      const body = await res.json();
+      return (body.data ?? []).map((c: { name: string }) => c.name);
+    };
+
+    it("rejects `order:` inside parentheses — it is a display option, not a predicate", async () => {
+      // Why the sort control cannot simply be compiled into the query text
+      // alongside the facets: display options are only legal at the top level.
+      const res = await get(
+        `/cards/search?q=${encodeURIComponent("t:creature (order:cmc or c:r)")}`,
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.details).toMatch(/parentheses/i);
+    });
+
+    it("takes `order` as a URL parameter or as an in-query term", async () => {
+      const viaParam = await names("t:creature", "&order=cmc");
+      const viaQuery = await names("t:creature order:cmc");
+      expect(viaParam.length).toBeGreaterThan(0);
+      expect(viaQuery).toEqual(viaParam);
+    });
+
+    it("lets an in-query `order:` beat the URL parameter", async () => {
+      // The trap for a sort control: a user typing `order:` into the search box
+      // silently overrides it, so we either strip display options when
+      // compiling or reflect them back into the control.
+      const conflicted = await names("t:creature order:cmc", "&order=name");
+      const byCmc = await names("t:creature", "&order=cmc");
+      expect(conflicted).toEqual(byCmc);
+    });
+
+    it("defaults direction per sort key, so `dir` is not optional", async () => {
+      // cmc ascends by default, usd descends. Anything relying on one default
+      // for every key gets the price list backwards.
+      expect(await names("t:creature", "&order=cmc")).toEqual(
+        await names("t:creature", "&order=cmc&dir=asc"),
+      );
+      expect(await names("t:creature", "&order=usd")).toEqual(
+        await names("t:creature", "&order=usd&dir=desc"),
+      );
+    });
+
+    it("accepts `direction:` as the in-query spelling of `dir`", async () => {
+      expect(await names("t:creature order:cmc direction:desc")).toEqual(
+        await names("t:creature", "&order=cmc&dir=desc"),
+      );
+    });
+
+    it("accepts `*` as a catch-all query", async () => {
+      // The pool opens on this rather than an empty grid, and Scryfall rejects
+      // an empty `q`. Compared against two unrelated always-true predicates: if
+      // `*` ever became a narrowing term these would diverge.
+      const res = await get("/cards/search?q=*");
+      expect(res.status).toBe(200);
+      const total = (await res.json()).total_cards;
+      expect(total).toBeGreaterThan(20000);
+
+      for (const equivalent of ["c>=0", "year>=0"]) {
+        const other = await get(
+          `/cards/search?q=${encodeURIComponent(equivalent)}`,
+        );
+        expect((await other.json()).total_cards).toBe(total);
+      }
+    });
+  });
+
   describe("batching printings", () => {
     it("accepts several oracleid terms joined by or", async () => {
       // The basis for fetching print runs for a page of results in one request
