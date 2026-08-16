@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collectionItems, ownedOracleIds, QueryError } from "../lib/collections";
 import {
   countActiveFilters,
-  hasSearchableTerms,
   toScryfallQuery,
   type CardFilter,
 } from "../lib/filters";
@@ -22,6 +21,13 @@ import { CardImage } from "./CardImage";
 
 /** How many cards a page shows, so the union pages at a steady rhythm. */
 const PAGE = 175;
+
+/**
+ * Scryfall rejects an empty `q`, but "everything" is a perfectly good pool to
+ * open on — browsing beats an empty grid, and it is no more traffic than the
+ * deck pool already spends, since `f:commander` excludes almost nothing.
+ */
+const EVERYTHING = "*";
 
 /**
  * The candidate-card pool for the deck builder.
@@ -144,13 +150,7 @@ export function PoolPanel({
           // collection as well and merging would truncate the universe behind
           // however many of your own cards happened to match.
           setOwnedCards([]);
-          if (!hasSearchableTerms(effective)) {
-            setUniverseCards([]);
-            setNextPage(null);
-            setTotal(0);
-            return;
-          }
-          const page = await scryfall.search(toScryfallQuery(effective));
+          const page = await scryfall.search(toScryfallQuery(effective) || EVERYTHING);
           if (requestId.current !== id) return;
           setUniverseCards(page.cards);
           setNextPage(page.nextPage);
@@ -214,7 +214,10 @@ export function PoolPanel({
     if (next <= merged.length || nextPage === null) return;
     setLoading(true);
     try {
-      const page = await scryfall.search(toScryfallQuery(effective), nextPage);
+      const page = await scryfall.search(
+        toScryfallQuery(effective) || EVERYTHING,
+        nextPage,
+      );
       setUniverseCards((prev) => [...prev, ...page.cards]);
       setNextPage(page.nextPage);
     } catch (err) {
@@ -318,11 +321,7 @@ export function PoolPanel({
 
       <div className="scroll">
         {visible.length === 0 && !loading && (
-          <div className="empty">
-            {!hasSearchableTerms(effective) && !activeCollection
-              ? "Search or pick a filter to fill the pool."
-              : "Nothing matches."}
-          </div>
+          <div className="empty">Nothing matches.</div>
         )}
 
         <div className="card-grid">
