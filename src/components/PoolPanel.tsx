@@ -52,6 +52,7 @@ export function PoolPanel({
   activeCollection,
   scopes = [],
   refreshKey = 0,
+  subject = null,
   compact = false,
 }: {
   selectedId: string | null;
@@ -91,6 +92,21 @@ export function PoolPanel({
    */
   refreshKey?: number;
   /**
+   * The container this panel is *presenting*, when it is presenting one.
+   *
+   * Absent for the deck-attached strip and for All Magic — capability by
+   * absence, like `destination`: nothing is passed, so nothing renders, rather
+   * than a flag saying "you have this but hide it". Note there is no "Add
+   * cards": it navigated to the search view, and this panel is the search view.
+   */
+  subject?: {
+    name: string;
+    onRename: (name: string) => void;
+    onDelete: () => void;
+    onImport: () => void;
+    onExport: () => void;
+  } | null;
+  /**
    * Strip the browsing chrome — layout toggle and totals — and stay a card wall.
    *
    * Set for the pool under a deck, which is a candidate strip in one half of a
@@ -114,6 +130,21 @@ export function PoolPanel({
   const [showOutside, setShowOutside] = useState(true);
   const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
   const [layout, setLayout] = useState<"wall" | "list">("wall");
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(subject?.name ?? "");
+
+  // Follow a rename made elsewhere, and reset a half-typed draft on navigation.
+  useEffect(() => {
+    setDraftName(subject?.name ?? "");
+    setEditingName(false);
+  }, [subject?.name]);
+
+  function commitName() {
+    setEditingName(false);
+    const next = draftName.trim();
+    if (next && next !== subject?.name) subject?.onRename(next);
+    else setDraftName(subject?.name ?? "");
+  }
 
   /**
    * The local branch's rows *as items*, not as cards.
@@ -340,6 +371,48 @@ export function PoolPanel({
 
   return (
     <div className="pool">
+      {subject && (
+        <div className="toolbar">
+          {editingName ? (
+            <input
+              className="search-input"
+              value={draftName}
+              autoFocus
+              onChange={(e) => setDraftName(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitName();
+                if (e.key === "Escape") {
+                  setDraftName(subject.name);
+                  setEditingName(false);
+                }
+              }}
+            />
+          ) : (
+            <h1
+              onDoubleClick={() => setEditingName(true)}
+              title="Double-click to rename"
+            >
+              {subject.name}
+            </h1>
+          )}
+          <span className="spacer" />
+
+          <button className="ghost" onClick={subject.onImport}>
+            Import
+          </button>
+          <button className="ghost" onClick={subject.onExport}>
+            Export
+          </button>
+          <button className="ghost" onClick={() => setEditingName(true)}>
+            Rename
+          </button>
+          <button className="ghost" onClick={subject.onDelete}>
+            Delete
+          </button>
+        </div>
+      )}
+
       <div className="toolbar">
         <input
           className="search-input"
