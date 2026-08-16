@@ -254,11 +254,12 @@ that. But it should *not* reuse the entity-metadata mechanism, for four reasons:
 - ⬜ Subsumes several backlog items that are each "metadata on a thing": deck
       notes, tags, favourites, archived/competitive status.
 
-**Not speculative — `PoolPanel` already does this.** It has a source dropdown
-offering "All of Magic (Scryfall)" alongside every collection, with one
-`CardFilter` driving both (compiled to a Scryfall query string on one branch, a
-SQL predicate on the other). This proposal is to promote that pattern from one
-panel to the whole app.
+**Not speculative — `PoolPanel` already does this.** One `CardFilter` drives
+both branches, compiled to a Scryfall query string on one and a SQL predicate on
+the other. (It *used* to offer the choice as a source dropdown; that became the
+"Show not in <collection>" toggle, and then the branches stopped being peers at
+all — see the base-set note below.) This proposal is to promote the pattern from
+one panel to the whole app.
 
 **It is also the algebra arriving early, and usefully.** `Universe` is already a
 node in the card-set model — the constant `∞` at a given grain. Making it a
@@ -271,14 +272,60 @@ rather than as scaffolding.
       collection from the selection, the source combo box became an inclusion
       toggle, and the add-button label derives from `target` rather than being
       passed separately.
-- ⬜ **Remove the "skip the network when the collection fills a page"
-      shortcut.** The background set owns *ordering*, so skipping it makes
-      results sort by SQL above 175 rows and by Scryfall's `order=` below —
-      same query, different sequence, invisible threshold. Always merge both.
-- ⬜ *Later:* generalise the merge into a reusable foreground/background
-      synchronisation (dedupe key, ordering authority, which side is complete).
-      Deferred — one background exists today, so it would be an abstraction
-      designed against a single caller.
+- ✅ **Removed the "skip the network when the collection fills a page"
+      shortcut** — and with it the merge it was guarding. The pool is not a
+      union of two sources: **All Magic is the base set**, paged from Scryfall,
+      and the active collection only decides which tiles are *un-dimmed*. The
+      local query runs only when "Show not in <collection>" is unchecked, which
+      is the one case where outside cards are genuinely unwanted. The old
+      shortcut made the pool silently collection-only for any query a
+      decent-sized collection could satisfy, and the merge it protected also
+      handed *ordering* to whichever side happened to be non-empty.
+- ❌ *Dropped:* "generalise the merge into a reusable foreground/background
+      synchronisation". There is no merge left to generalise — the two branches
+      are exclusive, and `PoolPanel.merged` survives only as a concatenation.
+      Revisit only if some panel genuinely needs to show two sources at once.
+
+- ✅ **Pool tiles gained a `− N +` stepper**, acting on the pool's
+      *destination*: the deck when the pool sits under one (by construction —
+      that pool exists to fill it), the current target in the standalone search.
+      `onAdd`/`target` collapsed into one `destination` prop, so the panel never
+      learns whether it is feeding a deck or a collection. Counts come from one
+      whole-container query (`deckQuantitiesByPrinting` /
+      `collectionQuantitiesByPrinting`) rather than per-card lookups. The
+      inline `onAdjustTarget` closure became named `adjustTarget`/`adjustDeck`
+      in `App.tsx`, so fewer places can forget to `bump()`.
+- ✅ **Control placement now follows what a control acts on.** Constraints that
+      AND onto the search query — facets, deck scopes, format legality — live
+      behind "More filters" and count toward its badge. "Show not in
+      <collection>" went back to the toolbar and out of that count: it chooses
+      shadowed vs. absent, which is the same axis as the dimming, so hiding it
+      behind a disclosure separated the switch from its effect.
+
+- 🐛 **Reconcile printings between the pool and the containers.** Now that All
+      Magic is the base set, each tile shows whichever printing Scryfall's
+      `unique=cards` happened to return, while decks and collections hold
+      *specific* printings. The two grains disagree, and three things sit on the
+      wrong side of it today:
+      - `destination.quantities` is keyed by printing id, so a card you hold in
+        another printing shows `0` and a disabled `−` even with copies in the
+        deck. **This is live and wrong**, introduced with the tile steppers.
+      - `+` adds Scryfall's arbitrary printing rather than the one you own, so
+        building from your collection quietly scatters printings.
+      - The dimming is *correct* — it is oracle-keyed via `ownedOracleIds` —
+        which is why the disagreement is easy to miss on screen.
+
+      Candidate resolutions, cheapest first:
+      1. **Roll counts up to oracle grain for display**, keep printing grain for
+         writes. Fixes the lying badge immediately; `+` still picks arbitrarily.
+      2. **Substitute the owned printing in the tile** when the collection holds
+         one — the pool then shows you *your* copy, and `+`/`−` land on it.
+         Wants a printing→oracle index over the active collection.
+      3. Full mixed-grain storage — see *Migration 004* below, which is the
+         principled version and the one the card-set algebra assumes.
+
+      (1) and (2) compose; do (1) before Slice 2 so the grown panel is not built
+      on counts that can be wrong.
 
 - ⬜ **Slice 2 — grow `PoolPanel`** with the collection view's features behind
       capability flags: wall/list, sort, quantities (∞ or blank for the
@@ -633,9 +680,16 @@ and risk a 429. What is needed is preemption, not parallelism:
       ignores, rather than surfacing as a failure.
 - ✅ **No debounce needed.** Eviction subsumes it and is better: it adds no
       latency, where a debounce would delay even an already-cached card.
-- ✅ 9 tests covering the parts that fail silently — that an evicted job really
-      does not run, that different keys coexist, that interactive preempts
-      background, that background work is never dropped, and that spacing holds.
+- ✅ **Fixed: eviction was not actually LIFO.** `Map.set` on an existing key
+      keeps that key's *original* insertion position, so a replacement job was
+      ordered by when its kind first appeared rather than when it was queued —
+      a fresh search would wait behind a stale hover, inverting the whole point
+      of the lane. `delete` before `set`. Caught while tracing why the pool
+      looked unresponsive; pinned by a test that fails without the delete.
+- ✅ 10 tests covering the parts that fail silently — that an evicted job really
+      does not run, that different keys coexist, that a replacement is ordered by
+      when it was *queued*, that interactive preempts background, that background
+      work is never dropped, and that spacing holds.
 - ⬜ **Background lane stays FIFO**, where fairness beats recency: a backfill
       should finish, not restart at the newest item forever.
 - ⬜ The UI renders whatever is cached *now* and never awaits the scheduler;
@@ -1136,6 +1190,43 @@ since the pool panel scopes itself by format.
 - ⬜ Target formats: Commander, Standard, Pioneer, Modern, Legacy, Vintage,
       Pauper, Brawl, and a Limited/sealed pool mode
 
+**Once the registry exists, feed its copy limit back into the UI.** Today `+` is
+always enabled, so a singleton deck accepts a second copy and then complains
+about it in the advisory checks.
+
+Two ways, and the second is the more useful one:
+
+- ⬜ **Make the issues actionable** — the better fit. `commanderIssues()` already
+      returns a list the deck view renders; give an issue an optional *fix* and
+      surface it as a button. "Reset all to one" then handles the case that
+      actually produces duplicates: pasting a 60-card list into a Commander deck
+      gives 4-ofs everywhere, which no amount of disabling `+` would have
+      prevented. It also keeps the advisory-not-blocking stance — do not stop the
+      edit, make undoing it one click.
+- ⬜ **Disable `+` at the limit** — one in Commander, four elsewhere, unlimited
+      for basic lands and cards reading `A deck can have any number of cards
+      named…`. Both exemptions already live in `commanderIssues()` and want
+      lifting into the registry rather than being re-derived. Say *why* in the
+      tooltip; a dead control with no explanation is worse than a visible
+      mistake.
+- ⬜ Deliberately **not** a hard block on import or paste — brewing and fixing up
+      pass through illegal states constantly, which is the whole reason the
+      checks are advisory.
+
+**First define "one of what" — the rule is ambiguous across zones.** A card can
+sit in `main` *and* the commander zone, or `main` and `maybe`. `commanderIssues()`
+currently inspects `main` alone, so the maybeboard is already exempt (right — it
+is a scratch list), but cross-zone duplicates go unnoticed entirely.
+
+- ⬜ Proposed: the singleton constraint covers **commander + main together** —
+      the deck proper — and ignores `maybe` and `side`. A card in both the
+      command zone and the 99 is a genuine violation that nothing currently
+      flags.
+- ⬜ "Reset all to one" then means one copy across that union, keeping the
+      commander-zone copy when there is one. `setCommander()` already moves
+      rather than duplicates, so new data cannot get into this state — but
+      existing decks and imports can.
+
 ### Set operations — surfacing the algebra
 
 Subsumed by the card-set algebra above; what remains here is the UI over it.
@@ -1275,13 +1366,15 @@ Statistical, not necessarily AI.
 
 Small, known, and cheap to fix — listed so they don't get rediscovered.
 
-- **Ownership scope is still inconsistent between views** — though no longer
-  *wrong*. `OWNABLE_KINDS` now excludes `wishlist` and `loaned`, so a wishlist
-  card no longer reads as owned and a loaned card no longer reads as available.
-  What remains: the card panel scopes to the active collection, `deckOwnership()`
-  makes you tick collections by hand, and the pool dims against all ownable
-  collections. Three scopes for one question. Selection-as-shared-context is the
-  real fix.
+- ✅ **Ownership scope is now consistent.** All three views — card panel counts,
+  pool dimming, deck ownership — read the *active collection*, falling back to
+  all ownable kinds when none is selected. `wishlist` and `loaned` stay excluded
+  from that fallback. The deck view's "check against" chips are gone: they were a
+  per-view scope competing with the global one.
+- ⬜ **Scope is single-valued.** Removing the chips lost checking a deck against
+  several collections at once. That should come back as *multi-select in the
+  selection model* — once, globally — rather than as a control on one view. See
+  selection-as-shared-context.
 - **Digital and paper still mix.** Arena and MTGO copies count toward a paper
   deck, because separating them needs a notion of a deck's *game* that does not
   exist yet.
@@ -1296,6 +1389,18 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
   dropped one. Revisit its *shape* when the algebra lands (see *Card
   annotations*, which argues card tags want different storage from entity
   metadata), not before.
+- **`bump()` is a manual convention with nothing enforcing it.** Every mutation
+  has to remember to signal, and five call sites did not — `addToDeck` plus the
+  deck row's quantity, remove and zone handlers — so the card panel's counts went
+  stale after adding from search. It then recurred in the *other* direction: the
+  pool's `ownedOracleIds` effect was keyed on the collection alone, so adding a
+  card from search left its tile dimmed. Signalling was never the whole problem;
+  every consumer must also *subscribe* to the signal. Fixed case by case, but the
+  next mutation — or the next derived set — will have the same trap.
+  Two ways out, both already implied elsewhere in this file: have the mutation
+  helpers in `decks.ts`/`collections.ts` own the signal, or make the panel
+  *subscribe* to its data rather than being told to refetch — the "derived data
+  belongs in a cache keyed by its input" rule from *Where state lives*.
 - **CSP is `null`.** Fine for local dev; tighten before shipping signed builds.
 - **Bundle identifier ends in `.app`.** `com.decklab.app` triggers a build warning
   and conflicts with the macOS bundle extension. Changing it moves the database
