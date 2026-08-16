@@ -502,6 +502,7 @@ export default function App() {
             activeCollection={activeCollection}
             scopes={deckScopes}
             refreshKey={refreshKey}
+            compact
           />
         }
         bottom={node}

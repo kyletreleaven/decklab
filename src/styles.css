@@ -382,6 +382,17 @@ textarea:focus {
   background: var(--bg-raised);
 }
 
+/* Same meaning as the tile dimming — outside the active collection — but rows
+   have no artwork to fade, so it lands on the text. Lifted on hover so the row
+   stays readable while you are pointing at it. */
+.row.dim {
+  opacity: 0.45;
+}
+
+.row.dim:hover {
+  opacity: 1;
+}
+
 .row .qty {
   width: 26px;
   text-align: right;

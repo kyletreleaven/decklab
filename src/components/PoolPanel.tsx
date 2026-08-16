@@ -13,7 +13,7 @@ import {
   type SortKey,
 } from "../lib/sort";
 import * as scryfall from "../lib/scryfall";
-import type { Card } from "../lib/types";
+import type { Card, CollectionItem } from "../lib/types";
 
 /** One toggleable contextual constraint, e.g. format legality or colour identity. */
 export interface Scope {
@@ -24,6 +24,7 @@ export interface Scope {
 }
 import { CardFilters, type FilterGroup } from "./CardFilters";
 import { CardImage } from "./CardImage";
+import { ManaCost } from "./ManaCost";
 
 /** How many cards a page shows, so the union pages at a steady rhythm. */
 const PAGE = 175;
@@ -51,6 +52,7 @@ export function PoolPanel({
   activeCollection,
   scopes = [],
   refreshKey = 0,
+  compact = false,
 }: {
   selectedId: string | null;
   onSelect: (card: Card) => void;
@@ -88,6 +90,16 @@ export function PoolPanel({
    * Scryfall side must not re-fetch just because you added a card.
    */
   refreshKey?: number;
+  /**
+   * Strip the browsing chrome — layout toggle and totals — and stay a card wall.
+   *
+   * Set for the pool under a deck, which is a candidate strip in one half of a
+   * split pane rather than a place you browse. A list view trades away the thing
+   * that strip is for (seeing many cards at once) for detail the card panel
+   * already gives, and a totals row there is either dashes or a subtotal of
+   * somebody else's collection.
+   */
+  compact?: boolean;
 }) {
   const [filter, setFilter] = useState<CardFilter>({});
   const [showFilters, setShowFilters] = useState(false);
@@ -101,8 +113,17 @@ export function PoolPanel({
    */
   const [showOutside, setShowOutside] = useState(true);
   const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
+  const [layout, setLayout] = useState<"wall" | "list">("wall");
 
-  const [ownedCards, setOwnedCards] = useState<Card[]>([]);
+  /**
+   * The local branch's rows *as items*, not as cards.
+   *
+   * Quantity and finish are dropped when mapping to `Card`, and totals need
+   * both — est. value has to pick `usd_foil` over `usd` for a foil copy. Only
+   * ever populated in collection-only mode; the universe has no such thing.
+   */
+  const [ownedItems, setOwnedItems] = useState<CollectionItem[]>([]);
+  const ownedCards = useMemo(() => ownedItems.map((i) => i.card), [ownedItems]);
   const [universeCards, setUniverseCards] = useState<Card[]>([]);
   const [owned, setOwned] = useState<Set<string>>(new Set());
   const [shown, setShown] = useState(PAGE);
@@ -171,7 +192,7 @@ export function PoolPanel({
           // which comes from the oracle-id set loaded separately. Querying the
           // collection as well and merging would truncate the universe behind
           // however many of your own cards happened to match.
-          setOwnedCards([]);
+          setOwnedItems([]);
           const page = await scryfall.search(
             toScryfallQuery(effective) || EVERYTHING,
             1,
@@ -186,7 +207,7 @@ export function PoolPanel({
           // local — and complete, since nothing here is paged by Scryfall.
           const items = await collectionItems(activeCollection!.id, effective, sort);
           if (requestId.current !== id) return;
-          setOwnedCards(items.map((item) => item.card));
+          setOwnedItems(items);
           setUniverseCards([]);
           setNextPage(null);
           setTotal(items.length);
@@ -199,7 +220,7 @@ export function PoolPanel({
         // previous results on screen rather than blanking the grid — which
         // would be indistinguishable from "nothing matched".
         if (!(err instanceof QueryError)) {
-          setOwnedCards([]);
+          setOwnedItems([]);
           setUniverseCards([]);
           setTotal(0);
           setNextPage(null);
@@ -231,6 +252,29 @@ export function PoolPanel({
       ...universeCards.filter((c) => !seen.has(c.oracleId)),
     ];
   }, [ownedCards, universeCards]);
+
+  /**
+   * Cards / unique / estimated value.
+   *
+   * `null` whenever a Scryfall stream is in the answer, and shown as `—` rather
+   * than as a number. The universe has no quantities to sum, and its "unique"
+   * is the total match count, not what happens to be loaded — printing a running
+   * subtotal of the page in hand would look like a fact about the search.
+   */
+  const totals = useMemo(() => {
+    if (includeOutside) return null;
+    let cards = 0;
+    let value = 0;
+    for (const item of ownedItems) {
+      cards += item.quantity;
+      const price = Number.parseFloat(
+        (item.finish === "foil" ? item.card.prices.usd_foil : item.card.prices.usd) ??
+          "",
+      );
+      if (Number.isFinite(price)) value += price * item.quantity;
+    }
+    return { cards, unique: ownedItems.length, value };
+  }, [includeOutside, ownedItems]);
 
   async function loadMore() {
     const next = shown + PAGE;
@@ -331,6 +375,25 @@ export function PoolPanel({
           </label>
         )}
 
+        {!compact && (
+          <div className="segmented">
+            <button
+              className={layout === "wall" ? "on" : ""}
+              onClick={() => setLayout("wall")}
+              title="Card wall"
+            >
+              Wall
+            </button>
+            <button
+              className={layout === "list" ? "on" : ""}
+              onClick={() => setLayout("list")}
+              title="List"
+            >
+              List
+            </button>
+          </div>
+        )}
+
         <label className="toggle" title="Order the pool">
           Sort
           <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
@@ -351,6 +414,26 @@ export function PoolPanel({
         </span>
       </div>
 
+      {/* Only when the numbers are true. Against the universe they are not:
+          there are no quantities to sum, and the match count is already in the
+          toolbar hint — a row of dashes would be chrome pretending to be data. */}
+      {totals && !compact && (
+        <div className="stats">
+          <div className="stat">
+            <span className="label">Cards</span>
+            <span className="value">{totals.cards}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Unique</span>
+            <span className="value">{totals.unique}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Est. value</span>
+            <span className="value">${totals.value.toFixed(2)}</span>
+          </div>
+        </div>
+      )}
+
       {showFilters && (
         <CardFilters filter={filter} onChange={setFilter} groups={groups} />
       )}
@@ -362,6 +445,7 @@ export function PoolPanel({
           <div className="empty">Nothing matches.</div>
         )}
 
+        {layout === "wall" ? (
         <div className="card-grid">
           {visible.map((card) => {
             const isOwned = owned.has(card.oracleId);
@@ -418,6 +502,54 @@ export function PoolPanel({
             );
           })}
         </div>
+        ) : (
+          visible.map((card) => {
+            const isOwned = owned.has(card.oracleId);
+            const inDestination = destination?.quantities[card.id] ?? 0;
+            return (
+              <div
+                key={card.id}
+                className={[
+                  "row",
+                  selectedId === card.id ? "selected" : "",
+                  activeCollection && !isOwned ? "dim" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => onSelect(card)}
+                onMouseEnter={() => onHoverCard?.(card)}
+                onMouseLeave={() => onHoverCard?.(null)}
+                onDoubleClick={() => destination?.add(card)}
+              >
+                {/* Blank rather than 0× when the destination holds none: a
+                    zero would read as a quantity you own. */}
+                <span className="qty">
+                  {inDestination > 0 ? `${inDestination}×` : ""}
+                </span>
+                <span className="name">{card.name}</span>
+                <span className="meta">{card.setCode.toUpperCase()}</span>
+                <ManaCost cost={card.manaCost} />
+                {destination && (
+                  <span className="controls" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      title={`Remove one from ${destination.name}`}
+                      onClick={() => destination.remove(card)}
+                      disabled={!inDestination}
+                    >
+                      −
+                    </button>
+                    <button
+                      title={`Add one to ${destination.name}`}
+                      onClick={() => destination.add(card)}
+                    >
+                      +
+                    </button>
+                  </span>
+                )}
+              </div>
+            );
+          })
+        )}
 
         {hasMore && (
           <div style={{ padding: "12px 0", textAlign: "center" }}>
