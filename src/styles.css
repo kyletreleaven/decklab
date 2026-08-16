@@ -177,18 +177,35 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
-/* Active deck / collection marker. Hollow ring for "active", filled for the
-   most recently touched of either — the one a bare + would use. */
+/* Target marker *and* control. Invisible until the row is hovered, a hollow ring
+   once active, filled once it is the most recent — the one a bare + would use.
+   Clicking it retargets without navigating, the visible form of alt-click. */
 .slot-dot {
-  width: 7px;
-  height: 7px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
-  border: 1px solid var(--accent-dim);
+  border: 1px solid transparent;
   background: transparent;
+  cursor: pointer;
 }
 
-.slot-dot.target {
+.nav-item:hover .slot-dot {
+  border-color: var(--border-strong);
+}
+
+.nav-item:hover .slot-dot:hover {
+  border-color: var(--accent);
+  background: rgba(216, 166, 87, 0.25);
+}
+
+.slot-dot.active,
+.nav-item:hover .slot-dot.active {
+  border-color: var(--accent-dim);
+}
+
+.slot-dot.target,
+.nav-item:hover .slot-dot.target {
   background: var(--accent);
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(216, 166, 87, 0.22);

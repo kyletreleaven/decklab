@@ -62,22 +62,56 @@ function SlotDot({
   active,
   target,
   what,
+  onTarget,
 }: {
   active: boolean;
   target: boolean;
   what: "deck" | "collection";
+  /** Retarget without navigating — the visible counterpart to ⌥-click. */
+  onTarget: () => void;
 }) {
-  if (!active) return null;
+  // Always rendered, so the row does not reflow when the state changes. CSS
+  // hides it until the row is hovered unless it is already active.
   return (
     <span
-      className={`slot-dot ${target ? "target" : ""}`}
+      className={[
+        "slot-dot",
+        active ? "active" : "",
+        target ? "target" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      // A nested <button> would be invalid inside the row's own button, so this
+      // is a span that swallows the click rather than letting it navigate.
+      onClick={(e) => {
+        e.stopPropagation();
+        onTarget();
+      }}
       title={
         target
           ? `Active ${what} — and the most recent, so a bare + lands here`
-          : `Active ${what}`
+          : active
+            ? `Active ${what}`
+            : `Make this the active ${what} without opening it`
       }
     />
   );
+}
+
+const RETARGET_KEY = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌥" : "Alt";
+
+/**
+ * Alt-click retargets *without* navigating, so `±` and the pool's scopes can be
+ * pointed at another deck while you stay on the card you are reading.
+ *
+ * Alt rather than ⌘ for two reasons. Option's established meaning is "a variant
+ * of the normal action", which is exactly this. And ⌘-click means *extend the
+ * selection* — a meaning we will want literally once ownership scope becomes the
+ * union of several selected collections, so it is left unclaimed. Ctrl is
+ * avoided too: on macOS it is a secondary click.
+ */
+function retargets(event: React.MouseEvent): boolean {
+  return event.altKey;
 }
 
 export default function App() {
@@ -189,14 +223,16 @@ export default function App() {
   const activeCollection = touched.find((t) => t.kind === "collection") ?? null;
   const target = touched[0] ?? null;
 
-  function openDeck(deck: Deck) {
-    setView({ kind: "deck", id: deck.id });
+  function openDeck(deck: Deck, event?: React.MouseEvent) {
     touch({ kind: "deck", id: deck.id, name: deck.name });
+    if (event && retargets(event)) return;
+    setView({ kind: "deck", id: deck.id });
   }
 
-  function openCollection(collection: Collection) {
-    setView({ kind: "collection", id: collection.id });
+  function openCollection(collection: Collection, event?: React.MouseEvent) {
     touch({ kind: "collection", id: collection.id, name: collection.name });
+    if (event && retargets(event)) return;
+    setView({ kind: "collection", id: collection.id });
   }
 
   async function addToDeck(card: Card, deckId: string, asCommander: boolean) {
@@ -424,13 +460,17 @@ export default function App() {
               className={`nav-item ${
                 view.kind === "deck" && view.id === deck.id ? "active" : ""
               }`}
-              onClick={() => openDeck(deck)}
+              onClick={(e) => openDeck(deck, e)}
+              title={`${deck.name} — ${RETARGET_KEY}-click to target without opening`}
             >
               <span className="name">{deck.name}</span>
               <SlotDot
                 active={activeDeck?.id === deck.id}
                 target={target?.kind === "deck" && target.id === deck.id}
                 what="deck"
+                onTarget={() =>
+                  touch({ kind: "deck", id: deck.id, name: deck.name })
+                }
               />
             </button>
           ))}
@@ -460,7 +500,8 @@ export default function App() {
               className={`nav-item ${
                 view.kind === "collection" && view.id === collection.id ? "active" : ""
               }`}
-              onClick={() => openCollection(collection)}
+              onClick={(e) => openCollection(collection, e)}
+              title={`${collection.name} — ${RETARGET_KEY}-click to target without opening`}
             >
               <span className="name">{collection.name}</span>
               <span className="count">{collection.kind}</span>
@@ -470,6 +511,13 @@ export default function App() {
                   target?.kind === "collection" && target.id === collection.id
                 }
                 what="collection"
+                onTarget={() =>
+                  touch({
+                    kind: "collection",
+                    id: collection.id,
+                    name: collection.name,
+                  })
+                }
               />
             </button>
           ))}
