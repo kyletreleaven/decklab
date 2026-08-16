@@ -1,6 +1,13 @@
 import { CardRow, execute, newId, now, rowToCard, select } from "./db";
 import { CATEGORY_ORDER, categoryOf } from "./deckstats";
-import type { Card, Deck, DeckEntry, DeckPile, DeckZone } from "./types";
+import {
+  canonicalColors,
+  type Card,
+  type Deck,
+  type DeckEntry,
+  type DeckPile,
+  type DeckZone,
+} from "./types";
 
 interface DeckRow {
   id: string;
@@ -178,6 +185,29 @@ export async function adjustDeckQuantity(
 
   await touch(deckId);
   return next;
+}
+
+/**
+ * The combined colour identity of a deck's commander zone, or **null when the
+ * zone is empty**.
+ *
+ * Null rather than an empty string because those mean opposite things: no
+ * commander should impose no restriction, while a colourless commander restricts
+ * to colourless only. Collapsing them would hide nearly every card.
+ *
+ * Needed because `entries` is only ever loaded for the deck on screen, and the
+ * pool scopes itself by the *active* deck, which may not be the one displayed.
+ */
+export async function commanderIdentity(deckId: string): Promise<string | null> {
+  const rows = await select<{ color_identity: string }>(
+    `SELECT c.color_identity
+       FROM deck_cards dc
+       JOIN cards c ON c.id = dc.card_id
+      WHERE dc.deck_id = $1 AND dc.zone = 'commander'`,
+    [deckId],
+  );
+  if (!rows.length) return null;
+  return canonicalColors(rows.flatMap((row) => [...row.color_identity]));
 }
 
 /** Copies of each printing of a card held in one deck, keyed by printing id. */

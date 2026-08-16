@@ -9,6 +9,14 @@ import {
 import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
 import type { Card } from "../lib/types";
+
+/** One toggleable contextual constraint, e.g. format legality or colour identity. */
+export interface Scope {
+  key: string;
+  label: React.ReactNode;
+  title: string;
+  filter: CardFilter;
+}
 import { CardFilters } from "./CardFilters";
 import { CardImage } from "./CardImage";
 
@@ -30,7 +38,7 @@ export function PoolPanel({
   onAdd,
   target,
   activeCollection,
-  scope,
+  scopes = [],
 }: {
   selectedId: string | null;
   onSelect: (card: Card) => void;
@@ -49,12 +57,17 @@ export function PoolPanel({
    * a list, so there is one notion of which collection is current.
    */
   activeCollection: { id: string; name: string } | null;
-  /** Extra constraints from the deck, e.g. commander identity + format. */
-  scope?: { label: string; filter: CardFilter };
+  /**
+   * Contextual constraints, each independently toggleable. Separate rather than
+   * bundled because a single "deck-legal" switch can only reach two corners of a
+   * 2x2 — you could never ask for banned cards inside your colours, nor legal
+   * ones outside them when weighing a splash.
+   */
+  scopes?: Scope[];
 }) {
   const [filter, setFilter] = useState<CardFilter>({});
   const [showFilters, setShowFilters] = useState(false);
-  const [scopeOn, setScopeOn] = useState(true);
+  const [scopesOff, setScopesOff] = useState<Set<string>>(new Set());
   /** Whether cards outside the active collection appear, shadowed. */
   const [showUnowned, setShowUnowned] = useState(true);
 
@@ -70,9 +83,16 @@ export function PoolPanel({
   // Guards against a slow early request landing after a later one.
   const requestId = useRef(0);
 
+  const activeScopes = useMemo(
+    () => scopes.filter((s) => !scopesOff.has(s.key)),
+    [scopes, scopesOff],
+  );
+
+  // Scopes AND onto the filter exactly like facets do; each sets its own keys,
+  // so a shallow merge is enough.
   const effective = useMemo<CardFilter>(
-    () => (scopeOn && scope ? { ...filter, ...scope.filter } : filter),
-    [filter, scopeOn, scope],
+    () => activeScopes.reduce<CardFilter>((acc, s) => ({ ...acc, ...s.filter }), filter),
+    [filter, activeScopes],
   );
   const effectiveKey = JSON.stringify(effective);
 
@@ -200,15 +220,26 @@ export function PoolPanel({
           onChange={(e) => setFilter({ ...filter, query: e.target.value })}
         />
 
-        {scope && (
-          <button
-            className={scopeOn ? "primary" : ""}
-            onClick={() => setScopeOn((v) => !v)}
-            title="Restrict the pool to cards this deck can legally play"
-          >
-            {scope.label}
-          </button>
-        )}
+        {scopes.map((s) => {
+          const on = !scopesOff.has(s.key);
+          return (
+            <button
+              key={s.key}
+              className={on ? "primary" : ""}
+              onClick={() =>
+                setScopesOff((prev) => {
+                  const next = new Set(prev);
+                  if (on) next.add(s.key);
+                  else next.delete(s.key);
+                  return next;
+                })
+              }
+              title={s.title}
+            >
+              {s.label}
+            </button>
+          );
+        })}
 
         <button
           className={showFilters || activeFilters ? "primary" : ""}

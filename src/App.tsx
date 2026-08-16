@@ -11,11 +11,12 @@ import { CollectionView } from "./components/CollectionView";
 import { DeckView } from "./components/DeckView";
 import { ExportDialog } from "./components/ExportDialog";
 import { ImportDialog, type ImportTarget } from "./components/ImportDialog";
-import { PoolPanel } from "./components/PoolPanel";
+import { ManaCost } from "./components/ManaCost";
+import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
-import type { CardFilter } from "./lib/filters";
 import * as collectionsApi from "./lib/collections";
 import { COLLECTION_KINDS } from "./lib/collections";
+import { commanderIdentityOf } from "./lib/deckstats";
 import { exportCollection, exportDeck, type ExportFormat } from "./lib/decklist";
 import * as decksApi from "./lib/decks";
 import type {
@@ -236,31 +237,78 @@ export default function App() {
   }
 
   /**
-   * What the open deck allows, expressed as a filter the pool can apply.
+   * The commander identity of the *active* deck — which may not be the one on
+   * screen, since the pool scopes itself by what you last touched.
    *
-   * Format legality always applies; colour identity only in Commander, and only
-   * once a commander is set — before that, restricting to colourless would hide
-   * almost everything.
+   * Read from `entries` when they are the same deck, and only queried when they
+   * differ, so the common case costs nothing. Null means the commander zone is
+   * empty, which is different from a colourless commander.
    */
-  const deckScope = useMemo<{ label: string; filter: CardFilter } | undefined>(() => {
-    if (!currentDeck) return undefined;
+  const [remoteIdentity, setRemoteIdentity] = useState<string | null>(null);
 
-    const commanders = entries.filter((e) => e.zone === "commander");
-    const identity = new Set<string>();
-    for (const entry of commanders) {
-      for (const color of entry.card.colorIdentity) identity.add(color);
+  useEffect(() => {
+    if (!activeDeck || activeDeck.id === currentDeck?.id) {
+      setRemoteIdentity(null);
+      return;
+    }
+    let alive = true;
+    decksApi.commanderIdentity(activeDeck.id).then((identity) => {
+      if (alive) setRemoteIdentity(identity);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [activeDeck?.id, currentDeck?.id, refreshKey]);
+
+  /**
+   * What the active deck constrains, as *independent* toggles.
+   *
+   * Two rather than one bundled switch: format legality and colour identity are
+   * orthogonal, and fusing them makes two useful questions unaskable — banned
+   * cards inside your colours, and legal cards outside them when weighing a
+   * splash.
+   *
+   * Keyed off the *active* deck rather than the displayed one, so they survive
+   * navigating away — exactly when you are browsing for cards to add.
+   */
+  const deckScopes = useMemo<Scope[]>(() => {
+    if (!activeDeck) return [];
+    const deck = decks.find((d) => d.id === activeDeck.id);
+    if (!deck) return [];
+
+    const scopes: Scope[] = [
+      {
+        key: "format",
+        label: `Legal in ${deck.format}`,
+        title: `Only cards legal in ${deck.format}`,
+        filter: { legalIn: deck.format },
+      },
+    ];
+
+    const identity =
+      activeDeck.id === currentDeck?.id
+        ? commanderIdentityOf(entries)
+        : remoteIdentity;
+
+    // Only once a commander exists: with an empty zone there is nothing to
+    // restrict to, and restricting to colourless would hide almost everything.
+    if (deck.format === "commander" && identity !== null) {
+      scopes.push({
+        key: "identity",
+        // Shown as symbols rather than the deck's name, because the constraint
+        // is about colours.
+        label: identity ? (
+          <ManaCost cost={[...identity].map((c) => `{${c}}`).join("")} />
+        ) : (
+          "Colourless"
+        ),
+        title: `Only cards within ${deck.name}'s colour identity`,
+        filter: { withinIdentity: identity },
+      });
     }
 
-    const scoped = currentDeck.format === "commander" && commanders.length > 0;
-    const withinIdentity = scoped
-      ? ["W", "U", "B", "R", "G"].filter((c) => identity.has(c)).join("")
-      : undefined;
-
-    return {
-      label: scoped ? "Deck-legal" : "Format-legal",
-      filter: { legalIn: currentDeck.format, withinIdentity },
-    };
-  }, [currentDeck, entries]);
+    return scopes;
+  }, [activeDeck, decks, currentDeck?.id, entries, remoteIdentity]);
 
   /**
    * How many of each printing of the selected card the current target holds.
@@ -332,7 +380,7 @@ export default function App() {
             onAdd={(card) => addToDeck(card, currentDeck.id, false)}
             target={{ name: currentDeck.name }}
             activeCollection={activeCollection}
-            scope={deckScope}
+            scopes={deckScopes}
           />
         }
         bottom={node}
@@ -449,6 +497,7 @@ export default function App() {
               onAdd={target ? addToTarget : undefined}
               target={target}
               activeCollection={activeCollection}
+              scopes={deckScopes}
             />
           </>
         )}

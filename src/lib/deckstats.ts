@@ -1,4 +1,18 @@
-import type { Card, DeckEntry } from "./types";
+import { canonicalColors, type Card, type DeckEntry } from "./types";
+
+/**
+ * Combined colour identity of a deck's commander zone, or **null when the zone
+ * is empty** — which is not the same as an empty identity. No commander should
+ * impose no restriction; a colourless commander restricts to colourless only.
+ *
+ * The counterpart to `commanderIdentity(deckId)` in `decks.ts`, which answers
+ * the same question from the database when the deck's entries are not loaded.
+ */
+export function commanderIdentityOf(entries: DeckEntry[]): string | null {
+  const commanders = entries.filter((e) => e.zone === "commander");
+  if (!commanders.length) return null;
+  return canonicalColors(commanders.flatMap((e) => [...e.card.colorIdentity]));
+}
 
 /** Broad card categories, in the order a decklist usually reads. */
 export const CATEGORY_ORDER = [
