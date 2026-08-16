@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { scheduledFetch } from "./scheduler";
 
 /**
  * Contract tests for the Scryfall API.
@@ -18,19 +19,33 @@ const ENABLED = !!process.env.SCRYFALL_CONTRACT;
 const API = "https://api.scryfall.com";
 const UA = "DeckLab/0.1.0 (contract tests)";
 
-/** Scryfall asks for 50-100ms between requests. */
-const GAP_MS = 120;
+/**
+ * Every request in this file shares one queue — the app's own scheduler, not a
+ * per-call sleep.
+ *
+ * A `setTimeout` before each fetch spaces nothing: it is a delay, not a
+ * serialisation, so anything overlapping just sleeps concurrently and then
+ * fires together. Scryfall's limit is per *client*, so the whole file has to
+ * share one pipe or a long run trips 429 and every assertion after it fails for
+ * a reason that has nothing to do with the contract.
+ *
+ * The background lane specifically: FIFO and never evicted. The interactive
+ * lane would have same-key requests supersede each other, which for a test
+ * means the request silently never happens.
+ */
+const send = scheduledFetch(fetch);
+
+const request = (path: string, init?: RequestInit): Promise<Response> =>
+  send(`${API}${path}`, init, { lane: "background" });
 
 async function get(path: string): Promise<Response> {
-  await new Promise((r) => setTimeout(r, GAP_MS));
-  return fetch(`${API}${path}`, {
+  return request(path, {
     headers: { Accept: "application/json", "User-Agent": UA },
   });
 }
 
 async function post(path: string, body: unknown): Promise<Response> {
-  await new Promise((r) => setTimeout(r, GAP_MS));
-  return fetch(`${API}${path}`, {
+  return request(path, {
     method: "POST",
     headers: {
       Accept: "application/json",
