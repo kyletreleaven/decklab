@@ -55,6 +55,8 @@ function rowToCollection(row: CollectionRow): Collection {
  */
 export const UNIVERSE_ID = "decklab:universe";
 
+export const UNIVERSE_NAME = "All Magic (Scryfall)";
+
 export const COLLECTION_KINDS: { value: CollectionKind; label: string }[] = [
   { value: "paper", label: "Paper" },
   { value: "arena", label: "Arena" },

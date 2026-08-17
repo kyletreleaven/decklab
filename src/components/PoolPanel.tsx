@@ -84,8 +84,12 @@ export function PoolPanel({
     remove: (card: Card) => void;
   } | null;
   /**
-   * The "my cards" source. Follows the selection rather than being chosen from
-   * a list, so there is one notion of which collection is current.
+   * The set this pool is compared against: its members stay lit, everything
+   * else recedes. Dimming is a set difference, so this is just the other
+   * operand — `null` means no comparison, and nothing dims.
+   *
+   * Follows the selection rather than being chosen from a list, so there is one
+   * notion of which collection is current.
    */
   activeCollection: { id: string; name: string } | null;
   /**
@@ -109,6 +113,7 @@ export function PoolPanel({
    * cards": it navigated to the search view, and this panel is the search view.
    */
   subject?: {
+    id: string;
     name: string;
     /**
      * Item-level edits, which only exist at printing grain. Separate from
@@ -217,9 +222,21 @@ export function PoolPanel({
     );
   }, [activeCollection?.id, refreshKey]);
 
-  // With no collection selected there is no "mine" to narrow to, so the wider
-  // pool is the only meaningful view.
-  const includeOutside = !activeCollection || showOutside;
+  /**
+   * Whether the universe is the source.
+   *
+   * Never when presenting a collection: you navigated to Paper to see Paper,
+   * and "all of Magic, dimmed against Paper" is a view that already exists in
+   * the sidebar. Offering it here as a checkbox would be a second route to
+   * somewhere you can already go, and it would quietly change the grain
+   * underfoot.
+   */
+  const includeOutside = subject
+    ? false
+    : !activeCollection || showOutside;
+
+  /** The collection the local branch reads — the one presented, if any. */
+  const localSourceId = subject?.id ?? activeCollection?.id;
 
   /**
    * Which sorts are offerable, and the current one's remote spelling.
@@ -263,7 +280,7 @@ export function PoolPanel({
         } else {
           // Cards outside the collection are unwanted, so the whole answer is
           // local — and complete, since nothing here is paged by Scryfall.
-          const items = await collectionItems(activeCollection!.id, effective, sort);
+          const items = await collectionItems(localSourceId!, effective, sort);
           if (requestId.current !== id) return;
           setHeldItems(items);
           setUniverseCards([]);
@@ -294,7 +311,7 @@ export function PoolPanel({
     // The mutation counter matters only while the list itself is local. Adding
     // it unconditionally would re-run a Scryfall search on every `+`, which is
     // exactly the traffic the scheduler exists to avoid.
-  }, [activeCollection?.id, includeOutside, effectiveKey, sort, includeOutside ? 0 : refreshKey]);
+  }, [localSourceId, includeOutside, effectiveKey, sort, includeOutside ? 0 : refreshKey]);
 
   /**
    * Exactly one of the two lanes is populated — All Magic when outside cards
@@ -517,7 +534,7 @@ export function PoolPanel({
         {/* Shadowed or absent — the same axis as the dimming, so it lives in
             the open rather than behind "More filters" with the constraints
             that join with the search query. */}
-        {activeCollection && (
+        {activeCollection && !subject && (
           <label
             className="toggle"
             title={`Show cards not in ${activeCollection.name}, shadowed`}

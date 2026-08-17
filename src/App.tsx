@@ -14,7 +14,7 @@ import { ManaCost } from "./components/ManaCost";
 import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import * as collectionsApi from "./lib/collections";
-import { UNIVERSE_ID } from "./lib/collections";
+import { UNIVERSE_ID, UNIVERSE_NAME } from "./lib/collections";
 import { COLLECTION_KINDS } from "./lib/collections";
 import { commanderIdentityOf } from "./lib/deckstats";
 import { exportCollection, exportDeck, type ExportFormat } from "./lib/decklist";
@@ -28,7 +28,6 @@ import type {
 } from "./lib/types";
 
 type View =
-  | { kind: "search" }
   | { kind: "deck"; id: string }
   | { kind: "collection"; id: string };
 
@@ -132,6 +131,9 @@ const PEEK_KEY = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌥" : "Alt";
  * want literally once ownership scope becomes the union of several selected
  * collections. Ctrl is avoided too: on macOS it is a secondary click.
  */
+/** Where the app opens, and where it falls back after a delete. */
+const UNIVERSE_VIEW = { kind: "collection", id: UNIVERSE_ID } as const;
+
 function navigatesOnly(event: React.MouseEvent): boolean {
   return event.altKey;
 }
@@ -139,7 +141,7 @@ function navigatesOnly(event: React.MouseEvent): boolean {
 export default function App() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [view, setView] = useState<View>({ kind: "search" });
+  const [view, setView] = useState<View>(UNIVERSE_VIEW);
   const [touched, setTouched] = useState<Touched[]>([]);
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [hoveredCard, setHoveredCard] = useState<Card | null>(null);
@@ -194,6 +196,12 @@ export default function App() {
     view.kind === "collection"
       ? (collections.find((c) => c.id === view.id) ?? null)
       : null;
+
+  /**
+   * All Magic has no row in the `collections` table, so the usual lookup above
+   * finds nothing and it has to resolve on its own.
+   */
+  const viewingUniverse = view.kind === "collection" && view.id === UNIVERSE_ID;
 
   const reloadEntries = useCallback(async (deckId: string) => {
     setEntries(await decksApi.deckEntries(deckId));
@@ -547,14 +555,6 @@ export default function App() {
       <nav className="sidebar">
         <div className="brand">DECKLAB</div>
 
-        <div className="nav-section">
-          <button
-            className={`nav-item ${view.kind === "search" ? "active" : ""}`}
-            onClick={() => setView({ kind: "search" })}
-          >
-            <span>Card search</span>
-          </button>
-        </div>
 
         <div className="nav-section">
           <div className="nav-header">
@@ -609,6 +609,23 @@ export default function App() {
               +
             </button>
           </div>
+          {/* Pinned first: it is what every other collection is drawn from. */}
+          <button
+            className={`nav-item ${viewingUniverse ? "active" : ""}`}
+            // Deliberately does not `touch`. Making the universe the active
+            // collection would set it as the comparison set for dimming, and
+            // that difference is empty — nothing would recede. Browsing all of
+            // Magic while your own collection stays lit is the useful reading,
+            // and it is what this view is for.
+            onClick={() => setView({ kind: "collection", id: UNIVERSE_ID })}
+            title={`${UNIVERSE_NAME} — every card that exists`}
+          >
+            <span className="name">{UNIVERSE_NAME}</span>
+            <span className="count">∞</span>
+          </button>
+
+          <div className="nav-divider" />
+
           {collections.length === 0 && (
             <div className="nav-empty">No collections yet.</div>
           )}
@@ -645,39 +662,6 @@ export default function App() {
       <main className="main">
         {error && <div className="status error">{error}</div>}
 
-        {view.kind === "search" && (
-          <>
-            {target && (
-              <div className="status">
-                Adding to <strong>{target.name}</strong>
-                <span className="hint">
-                  {" "}
-                  — the last deck or collection you opened
-                </span>
-              </div>
-            )}
-            <PoolPanel
-              selectedId={selectedCard?.id ?? null}
-              onSelect={setSelectedCard}
-              onHoverCard={hoverCard}
-              destination={
-                target
-                  ? {
-                      name: target.name,
-                      quantities: targetContents,
-                      add: addToTarget,
-                      remove: (card) => adjustTarget(card, -1),
-                    }
-                  : null
-              }
-              activeCollection={activeCollection}
-              scopes={deckScopes}
-              refreshKey={refreshKey}
-              activePrintings={activePrintings}
-            />
-          </>
-        )}
-
         {view.kind === "deck" && currentDeck && withPool(
           <DeckView
             deck={currentDeck}
@@ -710,10 +694,10 @@ export default function App() {
             onDelete={async () => {
               await decksApi.deleteDeck(currentDeck.id);
               await reloadDecks();
-              setView({ kind: "search" });
+              setView(UNIVERSE_VIEW);
               forget("deck", currentDeck.id);
             }}
-            onAddCards={() => setView({ kind: "search" })}
+            onAddCards={() => setView(UNIVERSE_VIEW)}
             onReloadEntries={() => reloadEntries(currentDeck.id)}
             onImport={() =>
               setImportTarget({
@@ -732,6 +716,36 @@ export default function App() {
             poolOn={showPool}
             onTogglePool={() => setShowPool((v) => !v)}
           />,
+        )}
+
+        {viewingUniverse && (
+          <PoolPanel
+            key={UNIVERSE_ID}
+            selectedId={selectedCard?.id ?? null}
+            onSelect={setSelectedCard}
+            onHoverCard={hoverCard}
+            // No subject: nothing to rename, delete or import into. And the
+            // destination is the target, exactly as in search — the universe is
+            // where cards come *from*.
+            destination={
+              target
+                ? {
+                    name: target.name,
+                    quantities: targetContents,
+                    add: addToTarget,
+                    remove: (card) => adjustTarget(card, -1),
+                  }
+                : null
+            }
+            // No comparison set: All Magic is the thing being shown, so there
+            // is nothing to hold it against and nothing recedes. This also
+            // removes the "Show not in …" toggle, since narrowing to a
+            // collection would stop the view being what it claims to be.
+            activeCollection={null}
+            activePrintings={activePrintings}
+            scopes={deckScopes}
+            refreshKey={refreshKey}
+          />
         )}
 
         {view.kind === "collection" && currentCollection && (
@@ -757,6 +771,7 @@ export default function App() {
             activePrintings={activePrintings}
             refreshKey={refreshKey}
             subject={{
+              id: currentCollection.id,
               name: currentCollection.name,
               onSetItemQuantity: async (item, quantity) => {
                 await collectionsApi.setCollectionItemQuantity(item.id, quantity);
@@ -774,7 +789,7 @@ export default function App() {
               onDelete: async () => {
                 await collectionsApi.deleteCollection(currentCollection.id);
                 await reloadCollections();
-                setView({ kind: "search" });
+                setView(UNIVERSE_VIEW);
                 forget("collection", currentCollection.id);
                 bump();
               },

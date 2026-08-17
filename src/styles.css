@@ -211,6 +211,14 @@ textarea:focus {
   box-shadow: 0 0 0 2px rgba(216, 166, 87, 0.22);
 }
 
+/* Separates All Magic from the collections you keep — it is the source they
+   are drawn from, not one of them. */
+.nav-divider {
+  height: 1px;
+  margin: 6px 8px;
+  background: var(--border);
+}
+
 .nav-empty {
   padding: 4px 8px 8px;
   font-size: 12px;
