@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collectionItems, ownedOracleIds, QueryError } from "../lib/collections";
+import { collectionItems, collectionOracleIds, QueryError } from "../lib/collections";
 import {
   countActiveFilters,
   toScryfallQuery,
@@ -25,6 +25,14 @@ export interface Scope {
 import { CardFilters, type FilterGroup } from "./CardFilters";
 import { CardImage } from "./CardImage";
 import { ManaCost } from "./ManaCost";
+
+/**
+ * One rendered row, at oracle grain (a card) or printing grain (a held item).
+ * The grain follows the stream, not a setting — see `rows`.
+ */
+type Row =
+  | { kind: "card"; key: string; card: Card }
+  | { kind: "item"; key: string; card: Card; item: CollectionItem };
 
 /** How many cards a page shows, so the union pages at a steady rhythm. */
 const PAGE = 175;
@@ -53,6 +61,7 @@ export function PoolPanel({
   scopes = [],
   refreshKey = 0,
   subject = null,
+  activePrintings = {},
   compact = false,
 }: {
   selectedId: string | null;
@@ -101,11 +110,25 @@ export function PoolPanel({
    */
   subject?: {
     name: string;
+    /**
+     * Item-level edits, which only exist at printing grain. Separate from
+     * `destination` because they address a *specific* row — this foil, this
+     * printing — where the stepper addresses a card.
+     */
+    onSetItemQuantity: (item: CollectionItem, quantity: number) => void;
+    onRemoveItem: (item: CollectionItem) => void;
     onRename: (name: string) => void;
     onDelete: () => void;
     onImport: () => void;
     onExport: () => void;
   } | null;
+  /**
+   * The printing each card currently stands for, by oracle id — chosen in the
+   * card panel. Consulted only at oracle grain: a printing-grain row already
+   * *is* a specific printing, so substituting would be a lie about what you
+   * hold.
+   */
+  activePrintings?: Record<string, Card>;
   /**
    * Strip the browsing chrome — layout toggle and totals — and stay a card wall.
    *
@@ -127,7 +150,11 @@ export function PoolPanel({
    * just not *here*. The distinction matters now that scope is one named
    * collection rather than a vague aggregate.
    */
-  const [showOutside, setShowOutside] = useState(true);
+  // Viewing a collection means showing *that collection*, so the universe is
+  // off by default there and on everywhere else. Initial state only: the panel
+  // is remounted per view, so switching collections re-derives it rather than
+  // carrying your last toggle across.
+  const [showOutside, setShowOutside] = useState(!subject);
   const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
   const [layout, setLayout] = useState<"wall" | "list">("wall");
   const [editingName, setEditingName] = useState(false);
@@ -153,10 +180,10 @@ export function PoolPanel({
    * both — est. value has to pick `usd_foil` over `usd` for a foil copy. Only
    * ever populated in collection-only mode; the universe has no such thing.
    */
-  const [ownedItems, setOwnedItems] = useState<CollectionItem[]>([]);
-  const ownedCards = useMemo(() => ownedItems.map((i) => i.card), [ownedItems]);
+  const [heldItems, setHeldItems] = useState<CollectionItem[]>([]);
+  const heldCards = useMemo(() => heldItems.map((i) => i.card), [heldItems]);
   const [universeCards, setUniverseCards] = useState<Card[]>([]);
-  const [owned, setOwned] = useState<Set<string>>(new Set());
+  const [inCollection, setInCollection] = useState<Set<string>>(new Set());
   const [shown, setShown] = useState(PAGE);
   const [total, setTotal] = useState(0);
   const [nextPage, setNextPage] = useState<number | null>(null);
@@ -185,8 +212,8 @@ export function PoolPanel({
    * the collection lights its tile up immediately.
    */
   useEffect(() => {
-    ownedOracleIds(activeCollection ? [activeCollection.id] : undefined).then(
-      setOwned,
+    collectionOracleIds(activeCollection ? [activeCollection.id] : undefined).then(
+      setInCollection,
     );
   }, [activeCollection?.id, refreshKey]);
 
@@ -223,7 +250,7 @@ export function PoolPanel({
           // which comes from the oracle-id set loaded separately. Querying the
           // collection as well and merging would truncate the universe behind
           // however many of your own cards happened to match.
-          setOwnedItems([]);
+          setHeldItems([]);
           const page = await scryfall.search(
             toScryfallQuery(effective) || EVERYTHING,
             1,
@@ -238,7 +265,7 @@ export function PoolPanel({
           // local — and complete, since nothing here is paged by Scryfall.
           const items = await collectionItems(activeCollection!.id, effective, sort);
           if (requestId.current !== id) return;
-          setOwnedItems(items);
+          setHeldItems(items);
           setUniverseCards([]);
           setNextPage(null);
           setTotal(items.length);
@@ -251,7 +278,7 @@ export function PoolPanel({
         // previous results on screen rather than blanking the grid — which
         // would be indistinguishable from "nothing matched".
         if (!(err instanceof QueryError)) {
-          setOwnedItems([]);
+          setHeldItems([]);
           setUniverseCards([]);
           setTotal(0);
           setNextPage(null);
@@ -277,12 +304,41 @@ export function PoolPanel({
    * may yet be mixed.
    */
   const merged = useMemo(() => {
-    const seen = new Set(ownedCards.map((c) => c.oracleId));
+    const seen = new Set(heldCards.map((c) => c.oracleId));
     return [
-      ...ownedCards,
+      ...heldCards,
       ...universeCards.filter((c) => !seen.has(c.oracleId)),
     ];
-  }, [ownedCards, universeCards]);
+  }, [heldCards, universeCards]);
+
+  /**
+   * Rows, at whichever grain the stream produces.
+   *
+   * The local branch yields collection *items* — a specific printing in a
+   * specific finish, which is what you actually hold — while Scryfall yields
+   * one arbitrary printing per card. Rendering both as "cards" would collide:
+   * a foil and a nonfoil of the same printing share a `card.id`, so they would
+   * fight over the same React key and appear as one row.
+   */
+  const rows = useMemo<Row[]>(
+    () =>
+      includeOutside
+        ? merged.map((card) => ({
+            kind: "card" as const,
+            // Keyed on the oracle id, not the printing: swapping the printing
+            // must update the row in place rather than unmount and remount it,
+            // or the tile flickers and loses hover.
+            key: card.oracleId,
+            card: activePrintings[card.oracleId] ?? card,
+          }))
+        : heldItems.map((item) => ({
+            kind: "item" as const,
+            key: item.id,
+            card: item.card,
+            item,
+          })),
+    [includeOutside, merged, heldItems, activePrintings],
+  );
 
   /**
    * Cards / unique / estimated value.
@@ -296,7 +352,7 @@ export function PoolPanel({
     if (includeOutside) return null;
     let cards = 0;
     let value = 0;
-    for (const item of ownedItems) {
+    for (const item of heldItems) {
       cards += item.quantity;
       const price = Number.parseFloat(
         (item.finish === "foil" ? item.card.prices.usd_foil : item.card.prices.usd) ??
@@ -304,15 +360,42 @@ export function PoolPanel({
       );
       if (Number.isFinite(price)) value += price * item.quantity;
     }
-    return { cards, unique: ownedItems.length, value };
-  }, [includeOutside, ownedItems]);
+    return { cards, unique: heldItems.length, value };
+  }, [includeOutside, heldItems]);
+
+  /**
+   * What a row's `±` acts on, which depends on its grain.
+   *
+   * A printing-grain row addresses one *entry* — this printing, this finish —
+   * so it edits that entry's quantity directly. Routing it through the
+   * card-grained destination would let a `−` on your foil decrement the nonfoil
+   * copy instead, since the two share a printing id.
+   */
+  function stepperFor(row: Row) {
+    if (row.kind === "item" && subject) {
+      const { item } = row;
+      return {
+        name: subject.name,
+        dec: () => subject.onSetItemQuantity(item, item.quantity - 1),
+        inc: () => subject.onSetItemQuantity(item, item.quantity + 1),
+        drop: () => subject.onRemoveItem(item),
+      };
+    }
+    if (!destination) return null;
+    return {
+      name: destination.name,
+      dec: () => destination.remove(row.card),
+      inc: () => destination.add(row.card),
+      drop: null,
+    };
+  }
 
   async function loadMore() {
     const next = shown + PAGE;
     setShown(next);
 
     // Pull another page only once the merged list runs dry.
-    if (next <= merged.length || nextPage === null) return;
+    if (next <= rows.length || nextPage === null) return;
     setLoading(true);
     try {
       const page = await scryfall.search(
@@ -332,8 +415,8 @@ export function PoolPanel({
 
   // The union is chopped to a page so the rhythm stays the same whether the
   // cards came from disk, the network, or both.
-  const visible = useMemo(() => merged.slice(0, shown), [merged, shown]);
-  const hasMore = shown < merged.length || nextPage !== null;
+  const visible = useMemo(() => rows.slice(0, shown), [rows, shown]);
+  const hasMore = shown < rows.length || nextPage !== null;
 
   /**
    * Contextual *constraints*, expressed as toggle groups for the filter bar.
@@ -520,103 +603,120 @@ export function PoolPanel({
 
         {layout === "wall" ? (
         <div className="card-grid">
-          {visible.map((card) => {
-            const isOwned = owned.has(card.oracleId);
-            const inDestination = destination?.quantities[card.id] ?? 0;
+          {visible.map((row) => {
+            const card = row.card;
+            const isIn = inCollection.has(card.oracleId);
+            // At printing grain the count is what you hold in *this* row; at
+            // oracle grain it is what the destination holds of that card.
+            const count =
+              row.kind === "item"
+                ? row.item.quantity
+                : (destination?.quantities[card.id] ?? 0);
+            const step = stepperFor(row);
             return (
               <div
-                key={card.id}
+                key={row.key}
                 className={[
                   "card-tile",
                   selectedId === card.id ? "selected" : "",
                   // Arena's convention: cards outside the active collection
                   // stay visible but recede.
-                  activeCollection && !isOwned ? "dim" : "",
+                  activeCollection && !isIn ? "dim" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
                 onClick={() => onSelect(card)}
                 onMouseEnter={() => onHoverCard?.(card)}
                 onMouseLeave={() => onHoverCard?.(null)}
-                onDoubleClick={() => destination?.add(card)}
+                onDoubleClick={() => step?.inc()}
                 title={`${card.name}${
-                  activeCollection && !isOwned
+                  activeCollection && !isIn
                     ? ` — not in ${activeCollection.name}`
                     : ""
                 }`}
               >
                 <CardImage card={card} size="small" />
-                {destination && (
+                {step && (
                   <span
                     className="tile-controls"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
-                      title={`Remove one from ${destination.name}`}
-                      onClick={() => destination.remove(card)}
-                      disabled={!inDestination}
+                      title={`Remove one from ${step.name}`}
+                      onClick={step.dec}
+                      disabled={!count}
                     >
                       −
                     </button>
-                    <button
-                      title={`Add one to ${destination.name}`}
-                      onClick={() => destination.add(card)}
-                    >
+                    <button title={`Add one to ${step.name}`} onClick={step.inc}>
                       +
                     </button>
                   </span>
                 )}
                 {/* How many are already in the destination — distinct from the
                     dimming, which is about the active collection. */}
-                {inDestination > 0 && (
-                  <span className="qty-badge">{inDestination}×</span>
+                {count > 0 && <span className="qty-badge">{count}×</span>}
+                {row.kind === "item" && row.item.finish !== "nonfoil" && (
+                  <span className="finish-badge">{row.item.finish}</span>
                 )}
               </div>
             );
           })}
         </div>
         ) : (
-          visible.map((card) => {
-            const isOwned = owned.has(card.oracleId);
-            const inDestination = destination?.quantities[card.id] ?? 0;
+          visible.map((row) => {
+            const card = row.card;
+            const isIn = inCollection.has(card.oracleId);
+            const count =
+              row.kind === "item"
+                ? row.item.quantity
+                : (destination?.quantities[card.id] ?? 0);
+            const step = stepperFor(row);
             return (
               <div
-                key={card.id}
+                key={row.key}
                 className={[
                   "row",
                   selectedId === card.id ? "selected" : "",
-                  activeCollection && !isOwned ? "dim" : "",
+                  activeCollection && !isIn ? "dim" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
                 onClick={() => onSelect(card)}
                 onMouseEnter={() => onHoverCard?.(card)}
                 onMouseLeave={() => onHoverCard?.(null)}
-                onDoubleClick={() => destination?.add(card)}
+                onDoubleClick={() => step?.inc()}
               >
                 {/* Blank rather than 0× when the destination holds none: a
                     zero would read as a quantity you own. */}
-                <span className="qty">
-                  {inDestination > 0 ? `${inDestination}×` : ""}
-                </span>
+                <span className="qty">{count > 0 ? `${count}×` : ""}</span>
                 <span className="name">{card.name}</span>
-                <span className="meta">{card.setCode.toUpperCase()}</span>
+                <span className="meta">
+                  {card.setCode.toUpperCase()}
+                  {row.kind === "item" && row.item.finish !== "nonfoil"
+                    ? ` · ${row.item.finish}`
+                    : ""}
+                </span>
                 <ManaCost cost={card.manaCost} />
-                {destination && (
+                {step && (
                   <span className="controls" onClick={(e) => e.stopPropagation()}>
                     <button
-                      title={`Remove one from ${destination.name}`}
-                      onClick={() => destination.remove(card)}
-                      disabled={!inDestination}
+                      title={`Remove one from ${step.name}`}
+                      onClick={step.dec}
+                      disabled={!count}
                     >
                       −
                     </button>
-                    <button
-                      title={`Add one to ${destination.name}`}
-                      onClick={() => destination.add(card)}
-                    >
+                    <button title={`Add one to ${step.name}`} onClick={step.inc}>
                       +
                     </button>
+                    {/* Drop the entry outright, rather than stepping to zero —
+                        only meaningful for a row that *is* an entry. */}
+                    {step.drop && (
+                      <button title="Remove this printing" onClick={step.drop}>
+                        ×
+                      </button>
+                    )}
                   </span>
                 )}
               </div>

@@ -383,7 +383,7 @@ function ownableClause(alias: string): string {
  * Set because the caller checks it once per rendered card. Even a large paper
  * collection is only a few thousand ids, so this is cheap to hold in memory.
  */
-export async function ownedOracleIds(
+export async function collectionOracleIds(
   collectionIds?: string[],
 ): Promise<Set<string>> {
   const scoped = !!collectionIds?.length;
@@ -410,7 +410,7 @@ export async function ownedOracleIds(
  * Finishes and conditions are summed together — the badge answers "how many of
  * this printing do I have", and the finish breakdown lives elsewhere.
  */
-export async function ownedByPrinting(
+export async function collectionCountsByPrinting(
   oracleId: string,
 ): Promise<Record<string, number>> {
   const rows = await select<{ card_id: string; quantity: number }>(

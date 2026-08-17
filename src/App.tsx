@@ -162,6 +162,18 @@ export default function App() {
   // Bumped whenever collection contents change, so views recompute ownership
   // and owned-copy counts without threading callbacks everywhere.
   const [refreshKey, setRefreshKey] = useState(0);
+
+  /**
+   * The printing each card is currently *standing for*, by oracle id.
+   *
+   * Lives here because two surfaces have to agree on it: the card panel picks
+   * it, and the pool renders and writes it. Only meaningful at oracle grain —
+   * a collection row already is a specific printing, so it ignores this.
+   *
+   * Empty by default: with no choice made, each surface falls back to the
+   * printing its own stream produced.
+   */
+  const [activePrintings, setActivePrintings] = useState<Record<string, Card>>({});
   const bump = useCallback(() => setRefreshKey((n) => n + 1), []);
 
   const reloadDecks = useCallback(async () => {
@@ -502,6 +514,7 @@ export default function App() {
             activeCollection={activeCollection}
             scopes={deckScopes}
             refreshKey={refreshKey}
+            activePrintings={activePrintings}
             compact
           />
         }
@@ -641,6 +654,7 @@ export default function App() {
               activeCollection={activeCollection}
               scopes={deckScopes}
               refreshKey={refreshKey}
+              activePrintings={activePrintings}
             />
           </>
         )}
@@ -776,6 +790,9 @@ export default function App() {
         activeCollection={activeCollection}
         collectionQuantities={collectionQuantities}
         onAdjustTarget={adjustTarget}
+        onChoosePrinting={(printing) =>
+          setActivePrintings((prev) => ({ ...prev, [printing.oracleId]: printing }))
+        }
         refreshKey={refreshKey}
       />
 
