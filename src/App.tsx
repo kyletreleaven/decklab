@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import { CardDetail } from "./components/CardDetail";
-import { CollectionView } from "./components/CollectionView";
 import { DeckView } from "./components/DeckView";
 import { ExportDialog } from "./components/ExportDialog";
 import { ImportDialog, type ImportTarget } from "./components/ImportDialog";
@@ -23,7 +22,6 @@ import * as decksApi from "./lib/decks";
 import type {
   Card,
   Collection,
-  CollectionItem,
   CollectionKind,
   Deck,
   DeckEntry,
@@ -475,6 +473,27 @@ export default function App() {
     };
   }, [currentDeck?.id, refreshKey]);
 
+  /** Per-printing counts for the collection on screen, for its oracle-grain rows. */
+  const [collectionContents, setCollectionContents] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    if (!currentCollection) {
+      setCollectionContents({});
+      return;
+    }
+    let alive = true;
+    collectionsApi
+      .collectionQuantitiesByPrinting(currentCollection.id)
+      .then((rows) => {
+        if (alive) setCollectionContents(rows);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [currentCollection?.id, refreshKey]);
+
   useEffect(() => {
     if (!target) {
       setTargetContents({});
@@ -716,54 +735,71 @@ export default function App() {
         )}
 
         {view.kind === "collection" && currentCollection && (
-          <CollectionView
-            collection={currentCollection}
-            selectedCardId={selectedCard?.id ?? null}
-            onSelectCard={setSelectedCard}
+          <PoolPanel
+            // Remount per collection: the panel derives its initial state from
+            // the subject (collection-only by default), which an update alone
+            // would not re-run.
+            key={currentCollection.id}
+            selectedId={selectedCard?.id ?? null}
+            onSelect={setSelectedCard}
             onHoverCard={hoverCard}
+            destination={{
+              name: currentCollection.name,
+              quantities: collectionContents,
+              add: (card) => addToCollection(card, currentCollection.id),
+              remove: (card) =>
+                collectionsApi
+                  .adjustCollectionQuantity(currentCollection.id, card, -1)
+                  .then(reloadCollections)
+                  .then(bump),
+            }}
+            activeCollection={activeCollection}
+            activePrintings={activePrintings}
             refreshKey={refreshKey}
-            onChangeQuantity={async (item: CollectionItem, quantity: number) => {
-              await collectionsApi.setCollectionItemQuantity(item.id, quantity);
-              bump();
-            }}
-            onRemove={async (item: CollectionItem) => {
-              await collectionsApi.removeCollectionItem(item.id);
-              bump();
-            }}
-            onRename={async (name) => {
-              await collectionsApi.renameCollection(currentCollection.id, name);
-              await reloadCollections();
-              touch({ kind: "collection", id: currentCollection.id, name });
-            }}
-            onDelete={async () => {
-              await collectionsApi.deleteCollection(currentCollection.id);
-              await reloadCollections();
-              setView({ kind: "search" });
-              forget("collection", currentCollection.id);
-              bump();
-            }}
-            onAddCards={() => setView({ kind: "search" })}
-            onImport={() =>
-              setImportTarget({
-                kind: "collection",
-                id: currentCollection.id,
-                name: currentCollection.name,
-              })
-            }
-            onExport={async () => {
-              // The collection view owns its filtered item list, so fetch the
-              // full contents here rather than exporting whatever is on screen.
-              const items = await collectionsApi.collectionItems(
-                currentCollection.id,
-              );
-              setExportState({
-                title: currentCollection.name,
-                filenameBase: currentCollection.name,
-                render: (format) => exportCollection(items, format),
-              });
+            subject={{
+              name: currentCollection.name,
+              onSetItemQuantity: async (item, quantity) => {
+                await collectionsApi.setCollectionItemQuantity(item.id, quantity);
+                bump();
+              },
+              onRemoveItem: async (item) => {
+                await collectionsApi.removeCollectionItem(item.id);
+                bump();
+              },
+              onRename: async (name) => {
+                await collectionsApi.renameCollection(currentCollection.id, name);
+                await reloadCollections();
+                touch({ kind: "collection", id: currentCollection.id, name });
+              },
+              onDelete: async () => {
+                await collectionsApi.deleteCollection(currentCollection.id);
+                await reloadCollections();
+                setView({ kind: "search" });
+                forget("collection", currentCollection.id);
+                bump();
+              },
+              onImport: () =>
+                setImportTarget({
+                  kind: "collection",
+                  id: currentCollection.id,
+                  name: currentCollection.name,
+                }),
+              onExport: async () => {
+                // Export the whole collection, not whatever survived the
+                // on-screen filter.
+                const items = await collectionsApi.collectionItems(
+                  currentCollection.id,
+                );
+                setExportState({
+                  title: currentCollection.name,
+                  filenameBase: currentCollection.name,
+                  render: (format) => exportCollection(items, format),
+                });
+              },
             }}
           />
         )}
+
       </main>
 
       <CardDetail
