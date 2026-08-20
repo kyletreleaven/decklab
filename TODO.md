@@ -12,6 +12,30 @@ migration. See the reasoning in git history.
 
 ---
 
+## Campaigns
+
+The `###` sections below are the breakdowns. Open-item counts are rough.
+
+| Campaign | State | Sections |
+| --- | --- | --- |
+| **1. One panel for every card source** | ~done | Universe as a collection · Card panel layout · Active slots and hover · Panel state retention |
+| **2. Storage and fetching** | partly done | Mixed-grain storage (004) · Card data fetching · Local query parser ✅ · Printings TTL ✅ · Compact printing rows |
+| **3. Card-set algebra** ⭐⭐⭐ | design only | Card-set algebra · Set operations |
+| **4. Formats beyond Commander** ⭐ | not started | Format support |
+| **5. Multi-panel workspace** ⭐ | not started | Multi-panel workspace |
+| **6. Analytics and intelligence** | sketched | Statistics · Card intelligence · Discovery · Suggestions · Playtesting |
+| **7. Gaps and polish** | ongoing | Deck builder gaps · Collection gaps · Deck database · Version control · Polish · Known debt |
+
+**Campaign 1 is the one just finished.** What is left of it is small and named:
+roll counts up to oracle grain (the last wrong thing on screen), the active-
+printing carousel, and panel state retention.
+
+**Campaigns 3 and 5 are the big bets**, and both are still prose rather than
+tasks. Campaign 2's migration 004 is the one piece of work that touches real
+user data and wants a backup first.
+
+---
+
 ## Shipped
 
 Moved to **[`FEATURES.md`](FEATURES.md)** — a current description of what the
@@ -595,7 +619,7 @@ rather than simply the first. That is arguably a better definition anyway:
 - ⬜ Ownership overlay in Universe needs a scope, which is the same
       selection-as-scope question as everywhere else.
 
-### Local query parser ✅ — not yet wired in
+### Local query parser ✅ — wired in
 
 `src/lib/query/` — lex → parse → compile, behind `compileQuery()`. Supports
 `t: o: name: c: id: mv: pow: tou: loy: r: set: f: kw: layout: a:` plus
