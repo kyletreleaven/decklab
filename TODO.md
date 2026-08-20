@@ -323,8 +323,9 @@ rather than as scaffolding.
       - `destination.quantities` is keyed by printing id, so a card you hold in
         another printing shows `0` and a disabled `−` even with copies in the
         deck. **This is live and wrong**, introduced with the tile steppers.
-      - `+` adds Scryfall's arbitrary printing rather than the one you own, so
-        building from your collection quietly scatters printings.
+      - ✅ `+` adding an arbitrary printing is fixed *once you have picked one* —
+        `activePrintings` substitutes it into the row, so the stepper writes what
+        you see. Unpicked cards still use whatever the stream returned.
       - The dimming is *correct* — it is oracle-keyed via `ownedOracleIds` —
         which is why the disagreement is easy to miss on screen.
 
@@ -337,8 +338,10 @@ rather than as scaffolding.
       3. Full mixed-grain storage — see *Migration 004* below, which is the
          principled version and the one the card-set algebra assumes.
 
-      (1) and (2) compose; do (1) before Slice 2 so the grown panel is not built
-      on counts that can be wrong.
+      (1) is the piece still outstanding, and it is now the *only* wrong thing
+      on screen: the badge and `−` read printing-keyed counts, so a card you hold
+      in another printing shows `0` with `−` disabled. Slice 2 shipped without
+      it.
 
 - ⬜ **Card mode needs an *active printing*, and a way to pick it.** The above is
       really one question — when a row is a card rather than a printing, which
@@ -354,30 +357,59 @@ rather than as scaffolding.
       Cost is fine: printings are cached after the first fetch (migration 003),
       and a hover storm is exactly what the scheduler's keyed eviction is for.
 
-- ⬜ **Slice 2 — grow `PoolPanel`** with the collection view's features behind
-      capability flags: wall/list, sort, quantities (∞ or blank for the
-      universe), stats, toolbar. Needed *before* All Magic becomes a sidebar
-      entry, or clicking it would render a visibly different UI from clicking
-      Paper.
-- ⬜ **Slice 3** — point the collection view at it, delete `CollectionView`, add
-      All Magic to the sidebar.
-- ⬜ Uniform navigation: every card source is a sidebar entry
-- ⬜ Facet filters and wall/list layout come free in search — they already exist
-      in the collection view. **Sort does not.** `CollectionView` sorts locally
-      over a complete result set; the universe is paged, so sorting the 175 rows
-      in hand out of ~33.6k is meaningless. It has to move into Scryfall's
-      `order=` (hardcoded to `name` in `scryfall.search`), and any sort derived
-      from *your* copy — quantity, date added — must disappear for the universe
-      rather than silently sort by something else.
-- ⬜ The search view's bespoke "Adding to X" bar goes away; the ordinary target
-      mechanism already covers it
+- ✅ **Slice 2 — `PoolPanel` grew the collection view's features.** Wall/list
+      layout, sort, totals, item-grain rows, and the collection actions. Two
+      things landed differently than planned: totals are *hidden* against the
+      universe rather than shown as `∞`/blank (a row of dashes is chrome
+      pretending to be data), and capability is expressed by **absence of a
+      prop** — no `subject`, no header row — never by a flag saying "you have
+      this, hide it". `compact` covers the deck-attached strip, which drops the
+      browsing chrome because it is a candidate strip, not a place you browse.
+- ✅ **Slice 2b — sort drives both branches.** `src/lib/sort.ts` is the one
+      vocabulary, mapping to Scryfall's `order=`/`dir=`. `dir` is always
+      explicit: the default varies by key (`cmc` ascends, `usd` descends), which
+      a contract test pins. `quantity` carries no remote mapping and drops out
+      whenever a Scryfall stream is in the answer.
+- ✅ **Slice 3 — `CollectionView` deleted** (316 lines), the collection view is
+      `PoolPanel` with a `subject`, and All Magic (Scryfall) is pinned first in
+      the sidebar with a divider under it. The bundle *shrank* despite the
+      panel absorbing everything.
+- ✅ **Card search is gone as a separate view.** It was All Magic with a
+      different comparison set, so it is now the All Magic view — which is also
+      the default view and the fallback after a delete. Its bespoke "Adding to
+      X" bar went with it.
+- ✅ **Grain follows the stream.** Local branch → `CollectionItem[]`, printing
+      grain, with finishes and a `×` to drop an entry. Scryfall branch → cards,
+      oracle grain. `stepperFor(row)` resolves what `±` acts on from the row's
+      grain, so a `−` on your foil no longer decrements the nonfoil entry that
+      shares its printing id.
+- ✅ **Active printing is shared.** `activePrintings` (oracle id → card) lives in
+      `App`: the card panel picks, oracle-grain rows render and write it. Row
+      keys moved to the oracle id so swapping a printing updates in place rather
+      than remounting and dropping hover.
+- ✅ **The universe is never the comparison set.** Not a modelled property — the
+      sidebar entry simply declines to `touch`, so the model keeps "any set can
+      be the comparison set" while the UI offers no gesture for the useless one.
+      The All Magic view passes `activeCollection={null}`: nothing dims, and the
+      "Show not in …" toggle does not render.
+- ✅ **"Show not in <collection>" survives only in the deck pool.** In the
+      collection view it was a second route to a view already in the sidebar,
+      and it changed grain underfoot. Fixing that surfaced a real bug: the local
+      branch read `activeCollection` rather than the collection being
+      *presented*, so alt-clicking into Paper with Cube active showed Cube's
+      items under Paper's header. `subject` now carries an `id`.
 
-**The hard part: one input box needs one language.** This is the real blocker,
-and the asymmetry already exists — `PoolPanel` today sends free text straight to
-Scryfall for the Universe source, but compiles it to `c.name LIKE '%…%'` for a
-collection. So typing `t:creature` into a collection filter silently returns
-nothing. It is papered over with different placeholder text; merging the views
-makes it the centrepiece instead of a corner.
+**One input box needs one language — ✅ done.** Recorded here as the real
+blocker: the box sent free text to Scryfall but compiled it to
+`c.name LIKE '%…%'` for a collection, so `t:creature` silently matched nothing.
+The option taken was *Scryfall syntax everywhere*, which is why the deferred
+query language came back. `collections.ts:154` now runs `compileQuery` over the
+same string the universe branch sends to Scryfall, and unsupported terms raise
+`QueryError` rather than quietly matching nothing.
+
+Residual, not blocking: the dialects are not equal. `is:` and friends compile
+remotely but not locally, so a collection-only query can fail where All Magic
+answers. Wants a *"this term needs All Magic"* affordance eventually.
 
 Options:
 
@@ -1204,10 +1236,9 @@ the pool panel can reuse. Best done before more views exist, not after.
 
 ### Format support ⭐
 
-The app is **Commander-first but must not be Commander-only**. Today the
-`decks.format` column exists and nothing reads it: every rule, count and label is
-hardcoded to Commander. Generalising this is a prerequisite for the panel work,
-since the pool panel scopes itself by format.
+The app is **Commander-first but must not be Commander-only**. `decks.format`
+is read by the pool's format scope and the commander-zone affordance; rule
+checks, counts, zones and labels are all still hardcoded to Commander.
 
 - ⬜ Format registry — deck size, sideboard size, copies allowed, whether a
       commander zone exists, whether colour identity constrains the deck
