@@ -15,6 +15,7 @@ migration. See the reasoning in git history.
 ## Campaigns
 
 The `###` sections below are the breakdowns. Open-item counts are rough.
+What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 
 | Campaign | State | Sections |
 | --- | --- | --- |
