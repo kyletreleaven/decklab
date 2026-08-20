@@ -48,14 +48,12 @@ collection from decks…" is a dialog, a sum, and a write.
    than useless. Printing still matters for what a trade is *worth* — a
    different question, and not this one.
 3. ✅ Clicking a card states my counts in the card panel, scoped to my binder.
-4. 🐛 `+` adds a copy **to mine**, not to his. Regressed when the collection
-   view's destination was wired to the collection being *viewed* rather than to
-   the target.
+4. ✅ `+` adds a copy **to mine**, not to his — the destination follows the
+   target, which alt-click leaves pointed at my binder.
 5. ✅ The view updates immediately.
 6. ✅ "Mine is partial" is fine — nothing blocks recording a card that was never
    entered.
 
 **Gap:** step 2 is the same *roll counts up to oracle grain* primitive that is
 the last open piece of the unified-panel campaign. Two unrelated journeys wanting
-it is good evidence it is the right primitive. Step 4 is a regression, not a
-feature.
+it is good evidence it is the right primitive.
