@@ -481,27 +481,6 @@ export default function App() {
     };
   }, [currentDeck?.id, refreshKey]);
 
-  /** Per-printing counts for the collection on screen, for its oracle-grain rows. */
-  const [collectionContents, setCollectionContents] = useState<
-    Record<string, number>
-  >({});
-
-  useEffect(() => {
-    if (!currentCollection) {
-      setCollectionContents({});
-      return;
-    }
-    let alive = true;
-    collectionsApi
-      .collectionQuantitiesByPrinting(currentCollection.id)
-      .then((rows) => {
-        if (alive) setCollectionContents(rows);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [currentCollection?.id, refreshKey]);
-
   useEffect(() => {
     if (!target) {
       setTargetContents({});
@@ -757,16 +736,20 @@ export default function App() {
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
-            destination={{
-              name: currentCollection.name,
-              quantities: collectionContents,
-              add: (card) => addToCollection(card, currentCollection.id),
-              remove: (card) =>
-                collectionsApi
-                  .adjustCollectionQuantity(currentCollection.id, card, -1)
-                  .then(reloadCollections)
-                  .then(bump),
-            }}
+            // The target, not the collection on screen. Opening a collection
+            // normally touches it, so the two coincide — but alt-click opens
+            // without retargeting, which is exactly how you browse someone
+            // else's binder while `+` keeps filling your own.
+            destination={
+              target
+                ? {
+                    name: target.name,
+                    quantities: targetContents,
+                    add: addToTarget,
+                    remove: (card) => adjustTarget(card, -1),
+                  }
+                : null
+            }
             activeCollection={activeCollection}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
