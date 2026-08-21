@@ -37,7 +37,6 @@ export function DeckView({
   onSetZone,
   onRename,
   onDelete,
-  onAddCards,
   onImport,
   onExport,
   onReloadEntries,
@@ -62,7 +61,6 @@ export function DeckView({
   onSetZone: (entry: DeckEntry, zone: DeckEntry["zone"]) => void;
   onRename: (name: string) => void;
   onDelete: () => void;
-  onAddCards: () => void;
   onImport: () => void;
   onExport: () => void;
   onReloadEntries: () => Promise<void>;
@@ -266,12 +264,15 @@ export function DeckView({
         <button
           className={poolOn ? "primary" : ""}
           onClick={onTogglePool}
-          title="Show a pool of candidate cards above the deck"
+          title={
+            poolOn
+              ? "Hide the candidate-card pool"
+              : "Open a pool of candidate cards above the deck"
+          }
         >
-          {poolOn ? "Hide pool" : "Show pool"}
-        </button>
-        <button className="ghost" onClick={onAddCards}>
-          ＋ Add cards
+          {/* Asymmetric on purpose: closed, it should name what you get;
+              open, it should name what the click does. */}
+          {poolOn ? "Hide pool" : "＋ Add cards"}
         </button>
         <button className="ghost" onClick={onImport}>
           Import

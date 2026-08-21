@@ -314,6 +314,12 @@ export default function App() {
     bump();
   }
 
+  async function adjustCollection(collectionId: string, card: Card, delta: number) {
+    await collectionsApi.adjustCollectionQuantity(collectionId, card, delta);
+    await reloadCollections();
+    bump();
+  }
+
   async function adjustTarget(card: Card, delta: number) {
     if (!target) return;
     if (target.kind === "deck") await adjustDeck(target.id, card, delta);
@@ -482,6 +488,27 @@ export default function App() {
     };
   }, [currentDeck?.id, refreshKey]);
 
+  /** Per-printing counts for the collection on screen, for a pool attached to it. */
+  const [collectionContents, setCollectionContents] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    if (!currentCollection) {
+      setCollectionContents({});
+      return;
+    }
+    let alive = true;
+    collectionsApi
+      .collectionQuantitiesByPrinting(currentCollection.id)
+      .then((rows) => {
+        if (alive) setCollectionContents(rows);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [currentCollection?.id, refreshKey]);
+
   useEffect(() => {
     if (!target) {
       setTargetContents({});
@@ -500,38 +527,17 @@ export default function App() {
     };
   }, [target?.kind, target?.id, refreshKey]);
 
-  /** Put the candidate-card pool above a deck view when the pool is showing. */
-  function withPool(node: ReactNode): ReactNode {
-    if (!showPool || !currentDeck) return node;
+  /**
+   * Put a candidate-card pool above a container view.
+   *
+   * The pool fills what it is attached to — the deck in a deck view, the
+   * collection in a collection view — which is why it is worth having at all:
+   * adding without navigating away from the thing you are filling.
+   */
+  function withPool(pool: ReactNode, node: ReactNode, storageKey: string): ReactNode {
+    if (!showPool) return node;
     return (
-      <SplitPane
-        storageKey="decklab.deck-pool-split"
-        defaultRatio={0.5}
-        top={
-          <PoolPanel
-            // Remount per deck, like the collection view: the retained slot is
-            // read once at mount, so switching decks without remounting would
-            // seed the new pool from the previous deck's results.
-            key={currentDeck.id}
-            selectedId={selectedCard?.id ?? null}
-            onSelect={setSelectedCard}
-            onHoverCard={hoverCard}
-            stateKey={`deck-pool:${currentDeck.id}`}
-            destination={{
-              name: currentDeck.name,
-              quantities: deckContents,
-              add: (card) => addToDeck(card, currentDeck.id, false),
-              remove: (card) => adjustDeck(currentDeck.id, card, -1),
-            }}
-            activeCollection={activeCollection}
-            scopes={deckScopes}
-            refreshKey={refreshKey}
-            activePrintings={activePrintings}
-            compact
-          />
-        }
-        bottom={node}
-      />
+      <SplitPane storageKey={storageKey} defaultRatio={0.5} top={pool} bottom={node} />
     );
   }
 
@@ -648,6 +654,27 @@ export default function App() {
         {error && <div className="status error">{error}</div>}
 
         {view.kind === "deck" && currentDeck && withPool(
+          <PoolPanel
+            // Remount per deck, like the collection view: the retained slot is
+            // read once at mount, so switching decks without remounting would
+            // seed the new pool from the previous deck's results.
+            key={currentDeck.id}
+            stateKey={`deck-pool:${currentDeck.id}`}
+            selectedId={selectedCard?.id ?? null}
+            onSelect={setSelectedCard}
+            onHoverCard={hoverCard}
+            destination={{
+              name: currentDeck.name,
+              quantities: deckContents,
+              add: (card) => addToDeck(card, currentDeck.id, false),
+              remove: (card) => adjustDeck(currentDeck.id, card, -1),
+            }}
+            activeCollection={activeCollection}
+            scopes={deckScopes}
+            refreshKey={refreshKey}
+            activePrintings={activePrintings}
+            compact
+          />,
           <DeckView
             deck={currentDeck}
             entries={entries}
@@ -683,7 +710,6 @@ export default function App() {
               setView(UNIVERSE_VIEW);
               forget("deck", currentDeck.id);
             }}
-            onAddCards={() => setView(UNIVERSE_VIEW)}
             onReloadEntries={() => reloadEntries(currentDeck.id)}
             onImport={() =>
               setImportTarget({
@@ -702,6 +728,7 @@ export default function App() {
             poolOn={showPool}
             onTogglePool={() => setShowPool((v) => !v)}
           />,
+          "decklab.deck-pool-split",
         )}
 
         {viewingUniverse && (
@@ -735,7 +762,28 @@ export default function App() {
           />
         )}
 
-        {view.kind === "collection" && currentCollection && (
+        {view.kind === "collection" && currentCollection && withPool(
+          <PoolPanel
+            key={`pool-${currentCollection.id}`}
+            stateKey={`collection-pool:${currentCollection.id}`}
+            selectedId={selectedCard?.id ?? null}
+            onSelect={setSelectedCard}
+            onHoverCard={hoverCard}
+            // Fills what it is attached to, like the deck pool.
+            destination={{
+              name: currentCollection.name,
+              quantities: collectionContents,
+              add: (card) => addToCollection(card, currentCollection.id),
+              remove: (card) => adjustCollection(currentCollection.id, card, -1),
+            }}
+            // No comparison set: dimming against the collection below would
+            // shade exactly the cards you already have, which is the one thing
+            // the pane underneath already tells you.
+            activeCollection={null}
+            activePrintings={activePrintings}
+            refreshKey={refreshKey}
+            compact
+          />,
           <PoolPanel
             // Remount per collection: the panel derives its initial state from
             // the subject (collection-only by default), which an update alone
@@ -745,20 +793,16 @@ export default function App() {
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
-            // The target, not the collection on screen. Opening a collection
-            // normally touches it, so the two coincide — but alt-click opens
-            // without retargeting, which is exactly how you browse someone
-            // else's binder while `+` keeps filling your own.
-            destination={
-              target
-                ? {
-                    name: target.name,
-                    quantities: targetContents,
-                    add: addToTarget,
-                    remove: (card) => adjustTarget(card, -1),
-                  }
-                : null
-            }
+            // The collection on screen, like the deck pool: an attached pool
+            // fills what it is attached to. Unused while every row here is
+            // printing grain — those steppers edit the entry directly — and
+            // live as soon as this view gains a pool of its own.
+            destination={{
+              name: currentCollection.name,
+              quantities: collectionContents,
+              add: (card) => addToCollection(card, currentCollection.id),
+              remove: (card) => adjustCollection(currentCollection.id, card, -1),
+            }}
             activeCollection={activeCollection}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
@@ -805,7 +849,9 @@ export default function App() {
                 });
               },
             }}
-          />
+            poolToggle={{ on: showPool, onToggle: () => setShowPool((v) => !v) }}
+          />,
+          "decklab.collection-pool-split",
         )}
 
       </main>

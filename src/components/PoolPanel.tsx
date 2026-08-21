@@ -69,6 +69,7 @@ export function PoolPanel({
   onSelect,
   onHoverCard,
   stateKey,
+  poolToggle = null,
   destination,
   activeCollection,
   scopes = [],
@@ -117,6 +118,11 @@ export function PoolPanel({
    * Scryfall side must not re-fetch just because you added a card.
    */
   refreshKey?: number;
+  /**
+   * Show/hide the pool attached to this view. Rendered in the subject header,
+   * so it only exists where there is a container to fill.
+   */
+  poolToggle?: { on: boolean; onToggle: () => void } | null;
   /**
    * Identity of this panel for retained state — `"universe"`, `"deck:<id>"`,
    * `"collection:<id>"`. Two panels sharing a key share their place.
@@ -596,6 +602,20 @@ export function PoolPanel({
           )}
           <span className="spacer" />
 
+          {poolToggle && (
+            <button
+              className={poolToggle.on ? "primary" : ""}
+              onClick={poolToggle.onToggle}
+              title={
+                poolToggle.on
+                  ? "Hide the candidate-card pool"
+                  : `Open a pool of candidate cards above ${subject.name}`
+              }
+            >
+              {poolToggle.on ? "Hide pool" : "＋ Add cards"}
+            </button>
+          )}
+
           <button className="ghost" onClick={subject.onImport}>
             Import
           </button>
@@ -756,11 +776,16 @@ export function PoolPanel({
                 onMouseEnter={() => onHoverCard?.(card)}
                 onMouseLeave={() => onHoverCard?.(null)}
                 onDoubleClick={() => step?.inc()}
-                title={`${card.name}${
-                  activeCollection && !isIn
-                    ? ` — not in ${activeCollection.name}`
-                    : ""
-                }`}
+                title={[
+                  card.name,
+                  activeCollection && !isIn && `not in ${activeCollection.name}`,
+                  // Double-click adds, which is otherwise undiscoverable — and
+                  // where it lands is exactly the thing that differs between
+                  // this grid and the card panel.
+                  step && `double-click to add to ${step.name}`,
+                ]
+                  .filter(Boolean)
+                  .join(" — ")}
               >
                 <CardImage card={card} size="small" />
                 {step && (
@@ -840,7 +865,10 @@ export function PoolPanel({
                     {/* Drop the entry outright, rather than stepping to zero —
                         only meaningful for a row that *is* an entry. */}
                     {step.drop && (
-                      <button title="Remove this printing" onClick={step.drop}>
+                      <button
+                        title={`Remove this printing from ${step.name} entirely`}
+                        onClick={step.drop}
+                      >
                         ×
                       </button>
                     )}

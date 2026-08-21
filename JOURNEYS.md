@@ -48,8 +48,13 @@ collection from decks…" is a dialog, a sum, and a write.
    than useless. Printing still matters for what a trade is *worth* — a
    different question, and not this one.
 3. ✅ Clicking a card states my counts in the card panel, scoped to my binder.
-4. ✅ `+` adds a copy **to mine**, not to his — the destination follows the
-   target, which alt-click leaves pointed at my binder.
+4. ✅ Adding a copy **to mine** works from the *card panel's* `±`, which follows
+   the target — alt-click left that pointed at my binder.
+
+   Not from the grid: a row of his binder is a printing-grain entry, and its
+   `±` edits that entry, so `+` there adds to *his*. That is right — the grid
+   edits what you are looking at, the card panel edits your target — but the two
+   controls mean different things on one screen, which is worth watching.
 5. ✅ The view updates immediately.
 6. ✅ "Mine is partial" is fine — nothing blocks recording a card that was never
    entered.
