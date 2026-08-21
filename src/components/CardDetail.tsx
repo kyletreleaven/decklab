@@ -5,6 +5,7 @@ import { printingLabel, variantTraits } from "../lib/printings";
 import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
 import type { Card } from "../lib/types";
+import { hasBack } from "../lib/images";
 import { CardImage } from "./CardImage";
 import { ManaCost } from "./ManaCost";
 
@@ -74,6 +75,13 @@ export function CardDetail({
 }) {
   const [printings, setPrintings] = useState<Card[]>([]);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  /**
+   * Which face of a double-faced card is showing.
+   *
+   * Reset whenever the printing changes: the new printing may not even have a
+   * back, and a stuck "back" would silently fall through to the front anyway.
+   */
+  const [face, setFace] = useState<"front" | "back">("front");
   const [ownedQty, setOwnedQty] = useState<Record<string, number>>({});
   /**
    * Which printings the carousel steps through. A preference, so it persists as
@@ -155,6 +163,10 @@ export function CardDetail({
   useEffect(() => {
     setPrintingId(card?.id ?? null);
   }, [card?.id]);
+
+  useEffect(() => {
+    setFace("front");
+  }, [printingId]);
 
   const choosePrinting = useCallback(
     (printing: Card) => {
@@ -315,7 +327,25 @@ export function CardDetail({
         {/* The image is the carousel viewport: stepping changes the printing
             and everything printing-level below follows it. */}
         <div className="carousel">
-          <CardImage key={shown.id} card={shown} size="normal" className="art" />
+          <CardImage
+            key={shown.id}
+            card={shown}
+            size="normal"
+            face={face}
+            className="art"
+          />
+
+          {/* Only for cards that actually have a second image. Split and
+              aftermath cards keep both halves on one image and get no button. */}
+          {hasBack(shown) && (
+            <button
+              className="flip"
+              onClick={() => setFace((f) => (f === "front" ? "back" : "front"))}
+              title={face === "front" ? "Show back face" : "Show front face"}
+            >
+              ⟳
+            </button>
+          )}
 
           {/* Controls overlay the art rather than sitting above it, matching the
               wall tiles. Hover-only, and bottom-centre so they clear the

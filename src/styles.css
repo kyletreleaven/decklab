@@ -704,6 +704,28 @@ textarea:focus {
   right: 6px;
 }
 
+/* Top-right: the side arrows own the middle edges and the +/- own the bottom
+   centre, so this is the one free corner. */
+.flip {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.62);
+  border-color: var(--border-strong);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.carousel:hover .flip {
+  opacity: 1;
+}
+
 /* Controls overlay the art, revealed on hover — the same idiom as the wall
    tiles. Bottom-centre so they clear the carousel arrows at the side edges. */
 .art-controls {

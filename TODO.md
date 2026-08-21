@@ -60,6 +60,14 @@ only which fields you are reading, which is worse than not having it.
 
 - ⬜ The cleared state still has to show *an* image. Use the newest cached
       printing, and label it so it is not mistaken for a selection.
+- ✅ **Flip toggle for double-faced cards**, in the card panel. Keyed on the
+      face having its own `image_uris`, read from the raw payload in `data` — so
+      no migration and no refetch. Split and aftermath cards keep both halves on
+      one image and correctly get no button, as do meld cards, whose back really
+      is a separate card and so has no `card_faces` at all.
+- ⬜ Flip on grid tiles too, if it turns out to be missed there. Left out on
+      purpose: a control on every tile is clutter for something that applies to
+      a small fraction of cards.
 
 ### Active slots and hover — mostly done
 
