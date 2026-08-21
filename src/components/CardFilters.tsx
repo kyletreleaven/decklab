@@ -134,9 +134,12 @@ export function CardFilters({
       {active > 0 && (
         <button
           className="ghost"
-          // Clears the facets only — contextual toggles belong to whatever
-          // supplied them and are not this component's to reset.
-          onClick={() => onChange({})}
+          // Facets only, which is what the label promises and what the count
+          // beside it counts. The query lives in the same object, so clearing
+          // it wholesale would wipe the search box from a control that never
+          // said it would. Contextual toggles belong to whoever supplied them
+          // and are not this component's to reset either.
+          onClick={() => onChange({ query: filter.query })}
         >
           Clear all
         </button>

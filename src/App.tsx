@@ -15,6 +15,7 @@ import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import * as collectionsApi from "./lib/collections";
 import { UNIVERSE_ID, UNIVERSE_NAME } from "./lib/collections";
+import { forgetPanel } from "./lib/panelState";
 import { COLLECTION_KINDS } from "./lib/collections";
 import { commanderIdentityOf } from "./lib/deckstats";
 import { exportCollection, exportDeck, type ExportFormat } from "./lib/decklist";
@@ -508,9 +509,14 @@ export default function App() {
         defaultRatio={0.5}
         top={
           <PoolPanel
+            // Remount per deck, like the collection view: the retained slot is
+            // read once at mount, so switching decks without remounting would
+            // seed the new pool from the previous deck's results.
+            key={currentDeck.id}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
+            stateKey={`deck-pool:${currentDeck.id}`}
             destination={{
               name: currentDeck.name,
               quantities: deckContents,
@@ -673,6 +679,7 @@ export default function App() {
             onDelete={async () => {
               await decksApi.deleteDeck(currentDeck.id);
               await reloadDecks();
+              forgetPanel(`deck-pool:${currentDeck.id}`);
               setView(UNIVERSE_VIEW);
               forget("deck", currentDeck.id);
             }}
@@ -700,6 +707,7 @@ export default function App() {
         {viewingUniverse && (
           <PoolPanel
             key={UNIVERSE_ID}
+            stateKey="universe"
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
@@ -733,6 +741,7 @@ export default function App() {
             // the subject (collection-only by default), which an update alone
             // would not re-run.
             key={currentCollection.id}
+            stateKey={`collection:${currentCollection.id}`}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
@@ -772,6 +781,7 @@ export default function App() {
               onDelete: async () => {
                 await collectionsApi.deleteCollection(currentCollection.id);
                 await reloadCollections();
+                forgetPanel(`collection:${currentCollection.id}`);
                 setView(UNIVERSE_VIEW);
                 forget("collection", currentCollection.id);
                 bump();

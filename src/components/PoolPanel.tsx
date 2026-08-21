@@ -5,6 +5,7 @@ import {
   toScryfallQuery,
   type CardFilter,
 } from "../lib/filters";
+import { retain, retained, useRetained } from "../lib/panelState";
 import { isSuperseded } from "../lib/scheduler";
 import {
   availableSorts,
@@ -30,6 +31,17 @@ import { ManaCost } from "./ManaCost";
  * One rendered row, at oracle grain (a card) or printing grain (a held item).
  * The grain follows the stream, not a setting — see `rows`.
  */
+/** The derived half of a panel's retained slot — never the only copy of anything. */
+interface PoolResults {
+  heldItems: CollectionItem[];
+  universeCards: Card[];
+  shown: number;
+  total: number;
+  nextPage: number | null;
+  /** What these results answer. Refetch unless the question is unchanged. */
+  signature: string;
+}
+
 type Row =
   | { kind: "card"; key: string; card: Card }
   | { kind: "item"; key: string; card: Card; item: CollectionItem };
@@ -56,6 +68,7 @@ export function PoolPanel({
   selectedId,
   onSelect,
   onHoverCard,
+  stateKey,
   destination,
   activeCollection,
   scopes = [],
@@ -105,6 +118,11 @@ export function PoolPanel({
    */
   refreshKey?: number;
   /**
+   * Identity of this panel for retained state — `"universe"`, `"deck:<id>"`,
+   * `"collection:<id>"`. Two panels sharing a key share their place.
+   */
+  stateKey: string;
+  /**
    * The container this panel is *presenting*, when it is presenting one.
    *
    * Absent for the deck-attached strip and for All Magic — capability by
@@ -145,9 +163,9 @@ export function PoolPanel({
    */
   compact?: boolean;
 }) {
-  const [filter, setFilter] = useState<CardFilter>({});
-  const [showFilters, setShowFilters] = useState(false);
-  const [scopesOff, setScopesOff] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useRetained<CardFilter>(stateKey, "filter", {});
+  const [showFilters, setShowFilters] = useRetained(stateKey, "showFilters", false);
+  const [scopesOff, setScopesOff] = useRetained<Set<string>>(stateKey, "scopesOff", () => new Set());
   /**
    * Whether cards outside the active collection appear, shadowed.
    *
@@ -159,9 +177,9 @@ export function PoolPanel({
   // off by default there and on everywhere else. Initial state only: the panel
   // is remounted per view, so switching collections re-derives it rather than
   // carrying your last toggle across.
-  const [showOutside, setShowOutside] = useState(!subject);
-  const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
-  const [layout, setLayout] = useState<"wall" | "list">("wall");
+  const [showOutside, setShowOutside] = useRetained(stateKey, "showOutside", !subject);
+  const [sort, setSort] = useRetained<SortKey>(stateKey, "sort", DEFAULT_SORT);
+  const [layout, setLayout] = useRetained<"wall" | "list">(stateKey, "layout", "wall");
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(subject?.name ?? "");
 
@@ -185,13 +203,26 @@ export function PoolPanel({
    * both — est. value has to pick `usd_foil` over `usd` for a foil copy. Only
    * ever populated in collection-only mode; the universe has no such thing.
    */
-  const [heldItems, setHeldItems] = useState<CollectionItem[]>([]);
+  /**
+   * Results are seeded as one blob rather than field by field: a page of cards
+   * with someone else's `nextPage` would page into the wrong stream, so they
+   * are only ever restored together with the signature they were fetched for.
+   */
+  const cached = useRef(retained(stateKey) as Partial<PoolResults>);
+
+  const [heldItems, setHeldItems] = useState<CollectionItem[]>(
+    () => cached.current.heldItems ?? [],
+  );
   const heldCards = useMemo(() => heldItems.map((i) => i.card), [heldItems]);
-  const [universeCards, setUniverseCards] = useState<Card[]>([]);
+  const [universeCards, setUniverseCards] = useState<Card[]>(
+    () => cached.current.universeCards ?? [],
+  );
   const [inCollection, setInCollection] = useState<Set<string>>(new Set());
-  const [shown, setShown] = useState(PAGE);
-  const [total, setTotal] = useState(0);
-  const [nextPage, setNextPage] = useState<number | null>(null);
+  const [shown, setShown] = useState(() => cached.current.shown ?? PAGE);
+  const [total, setTotal] = useState(() => cached.current.total ?? 0);
+  const [nextPage, setNextPage] = useState<number | null>(
+    () => cached.current.nextPage ?? null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -239,6 +270,22 @@ export function PoolPanel({
   const localSourceId = subject?.id ?? activeCollection?.id;
 
   /**
+   * What the results in hand answer. Retained results are reusable only while
+   * this is unchanged; anything else and the question has moved on.
+   */
+  const signature = JSON.stringify([
+    localSourceId,
+    includeOutside,
+    effectiveKey,
+    sort,
+    // Must match the fetch effect's deps exactly, or the skip swallows changes
+    // the effect would have caught: edit a collection while its panel is
+    // unmounted, come back, and the stale rows would look current. Zero for the
+    // remote branch — a local write cannot change what Scryfall returns.
+    includeOutside ? 0 : refreshKey,
+  ]);
+
+  /**
    * Which sorts are offerable, and the current one's remote spelling.
    *
    * Keyed on whether a Scryfall stream is involved, not on which source is
@@ -253,7 +300,20 @@ export function PoolPanel({
     if (!sorts.some((s) => s.key === sort)) setSort(DEFAULT_SORT);
   }, [sorts, sort]);
 
+  /**
+   * Results restored from the slot are already the answer to this question, so
+   * the first run after a remount is skipped. Consumed once: any later change
+   * of signature is a real question and must fetch.
+   */
+  const restored = useRef(cached.current.signature);
+
   useEffect(() => {
+    if (restored.current !== undefined) {
+      const reusable = restored.current === signature;
+      restored.current = undefined;
+      if (reusable) return;
+    }
+
     const id = ++requestId.current;
 
     const run = async () => {
@@ -407,6 +467,24 @@ export function PoolPanel({
     };
   }
 
+  /**
+   * Results are written as one object, never field by field: a page of cards
+   * paired with another query's `nextPage` would fetch the wrong continuation.
+   * Skipped while a request is in flight, so a half-updated view is never
+   * mistaken for a finished one.
+   */
+  useEffect(() => {
+    if (loading) return;
+    retain(stateKey, {
+      heldItems,
+      universeCards,
+      shown,
+      total,
+      nextPage,
+      signature,
+    } satisfies PoolResults);
+  }, [stateKey, loading, heldItems, universeCards, shown, total, nextPage, signature]);
+
   async function loadMore() {
     const next = shown + PAGE;
     setShown(next);
@@ -468,6 +546,26 @@ export function PoolPanel({
   // Counts what is *narrowing* the list: active facets and enabled scopes. The
   // outside toggle is deliberately absent — it is a view control, not a filter.
   const activeFilters = countActiveFilters(filter) + activeScopes.length;
+
+  /**
+   * Whether anything has been narrowed away from the defaults.
+   *
+   * Includes the query text, which `countActiveFilters` does not count — and
+   * which is precisely the state that survives navigation without leaving a
+   * mark on the badge. Now that panels remember where you were, a filter set
+   * ten minutes ago in another view needs a way back.
+   */
+  const narrowed =
+    (filter.query ?? "").trim().length > 0 ||
+    countActiveFilters(filter) > 0 ||
+    scopesOff.size > 0;
+
+  function clearFilters() {
+    // Filters only. Sort and layout are view preferences, and resetting them
+    // here would make one control quietly do two jobs.
+    setFilter({});
+    setScopesOff(new Set());
+  }
 
   return (
     <div className="pool">
@@ -547,6 +645,18 @@ export function PoolPanel({
             Show not in {activeCollection.name}
           </label>
         )}
+
+        {/* Always present, disabled when there is nothing to clear: a control
+            that appears and disappears shifts the toolbar under the pointer,
+            and its absence is a worse signal than its greyed presence. */}
+        <button
+          className="ghost"
+          onClick={clearFilters}
+          disabled={!narrowed}
+          title={narrowed ? "Clear the search and all filters" : "Nothing to clear"}
+        >
+          Clear
+        </button>
 
         {!compact && (
           <div className="segmented">

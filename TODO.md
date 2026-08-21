@@ -28,8 +28,8 @@ What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 | **7. Gaps and polish** | ongoing | Deck builder gaps · Collection gaps · Deck database · Version control · Polish · Known debt |
 
 **Campaign 1 is the one just finished.** What is left of it is small and named:
-roll counts up to oracle grain (the last wrong thing on screen), the active-
-printing carousel, and panel state retention.
+roll counts up to oracle grain (the last wrong thing on screen), the
+active-printing carousel, and scroll restoration.
 
 **Campaigns 3 and 5 are the big bets**, and both are still prose rather than
 tasks. Campaign 2's migration 004 is the one piece of work that touches real
@@ -103,26 +103,48 @@ The rule matters because it says *which* state needs rescuing. Two concrete jobs
 - ✅ **Moved `ownedOnly` out of the per-card reset.** It sat in the same effect
       that resets the selected printing, so switching it on and then changing
       card silently switched it off.
-### Panel state retention ⬜
+### Panel state retention ✅
 
-Panels are conditionally rendered, so navigating unmounts them and loses
-everything. Sharpest case: search, click a deck to add a card, come back to an
-empty box.
+Panels are conditionally rendered, so navigating used to unmount them and lose
+everything: search, click a deck to add a card, come back to an empty box.
 
-| Panel | **Lift** (preference) | **Cache** (derived) | **Leave** (object-bound) |
-| --- | --- | --- | --- |
-| `PoolPanel` | `filter`, `showFilters`, `scopeOn`, `showUnowned` | `ownedCards`, `universeCards`, `owned`, `total`, `nextPage` | `shown`, `loading`, `error` |
-| `CollectionView` | `layout`, `sort`, `filter`, `showFilters` | `items` | `editingName`, `draftName`, `queryError` |
-| `DeckView` | `layout`, `against` | `ownership`, `piles` | `editingName`, `draftName` |
+State moved out of the component instead of the component staying alive.
+`src/lib/panelState.ts` is a module-level store keyed by panel identity
+(`universe`, `deck-pool:<id>`, `collection:<id>`), with a `useRetained` hook that
+behaves like `useState` but seeds from the slot and writes through. Rejected, as
+planned: keeping panels mounted and toggling visibility — a grid of DOM per
+visited panel, all of them re-querying on every mutation.
 
-Rejected: keeping panels mounted and toggling visibility. Nearly free, but hidden
-panels keep querying, and it preserves state indiscriminately rather than forcing
-the classification — which is what stops these bugs recurring.
+The classification held up, with one refinement — the two halves are written
+differently:
 
-- ⬜ Do this **after** slices 2 and 3; merging `CollectionView` into `PoolPanel`
-      deletes a column.
-- ⬜ `DeckView.against` may be absorbed by selection-as-scope entirely — check
-      before lifting it.
+| | Written | Why |
+| --- | --- | --- |
+| **Lift** — `filter`, `showFilters`, `scopesOff`, `showOutside`, `sort`, `layout` | field by field | independent of each other |
+| **Cache** — `heldItems`, `universeCards`, `shown`, `total`, `nextPage` | one object, with a signature | cards from one query plus another's `nextPage` would page the wrong stream |
+| **Leave** — `loading`, `error`, `editingName`, `draftName` | not at all | restoring `loading: true` with no request in flight is a lie the store cannot back |
+
+**Staleness is pulled, not pushed.** The signature is
+`[source, includeOutside, filter, sort, refreshKey]` — deliberately identical to
+the fetch effect's deps, so a mutation made while a panel is unmounted still
+invalidates it on return. Push-invalidation from `App` would be the `bump()` trap
+again: a convention with nothing enforcing it. The one thing `App` must push is
+`forgetPanel` on delete, which no panel can detect for itself.
+
+- ✅ **A `Clear` in the toolbar**, which retention made necessary: a filter set
+      ten minutes ago in another view now survives, and the query text is
+      exactly what the *More filters (n)* badge does not count. Clears search +
+      facets + scopes; leaves sort and layout, which are view preferences.
+      Always present and greyed when there is nothing to clear — a button that
+      comes and goes reflows the toolbar under the pointer.
+      This also exposed that the facet bar's *Clear all* replaced the whole
+      filter object, wiping the search box despite a comment claiming it cleared
+      "facets only". Now genuinely facets-only, so the two controls differ.
+- ⬜ Scroll position. DOM state, so it dies with the element and this does not
+      restore it — needs an explicit capture and a layout effect after the rows
+      render. Half of "come back to where I was".
+- ⬜ Slots are never evicted, only forgotten on delete. Fine at tens of panels;
+      revisit if it ever holds many pages of results each.
 
 **Carousel `+/-`.** ✅ Adjusts the quantity of the *shown printing* in the
 current target, with the count between the buttons.
@@ -144,11 +166,6 @@ current target, with the count between the buttons.
       the stepper meaning something different.
 - ⬜ Choosing *which* zone the `±` writes to. Needs zones to be addressable,
       which is exactly the open container question.
-
-**Panel state retention** — deck, collection and search panels keeping their
-internal state across navigation — is a larger, separable piece spread across
-four components. The carousel needs none of it: it is never navigated away from,
-so its state is purely object-bound.
 
 ### Universe as a collection — merge card search into collections ⭐
 
