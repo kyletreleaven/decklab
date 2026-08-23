@@ -25,6 +25,7 @@ export function CardDetail({
   activeDeck,
   deckQuantities,
   activeCollection,
+  swatch,
   collectionQuantities,
   onChoosePrinting,
   refreshKey,
@@ -65,6 +66,21 @@ export function CardDetail({
   /** Per-printing counts in `activeCollection`, keyed by printing id. */
   collectionQuantities: Record<string, number>;
   /** Bumped by the parent when collections change, to refetch owned copies. */
+  /**
+   * Foreground and background as two named slots, after Photoshop's swatches.
+   *
+   * Here rather than in a pool toolbar because the background is app-level: it
+   * is copied in one view and consulted in the next, and a per-panel control
+   * would render once per panel while editing one shared value. This rail
+   * already carries the other "what is currently selected" rows.
+   */
+  swatch?: {
+    set: { id: string; name: string } | null;
+    foreground: { id: string; name: string } | null;
+    onCopyForeground: () => void;
+    onSwitch: () => void;
+    onClear: () => void;
+  };
   /**
    * Fired when a printing is chosen from the carousel. Lifts the choice out of
    * this panel so the pool can render the same printing — and so `+` writes it
@@ -275,6 +291,40 @@ export function CardDetail({
             and burying them under the reference data meant scrolling past two
             screenfuls to add a card. */}
         <div className="ops">
+          {swatch?.foreground && (
+            <div className="swatch">
+              <span className="slot" title={`Showing ${swatch.foreground.name}`}>
+                {swatch.foreground.name}
+              </span>
+              <button
+                onClick={swatch.onCopyForeground}
+                title={`Put ${swatch.foreground.name} behind whatever you look at next`}
+              >
+                ↓
+              </button>
+              <button
+                onClick={swatch.onSwitch}
+                disabled={!swatch.set}
+                title={
+                  swatch.set
+                    ? `Go to ${swatch.set.name}, with ${swatch.foreground.name} behind`
+                    : "Nothing to swap with"
+                }
+              >
+                ⇄
+              </button>
+              <span
+                className={`slot ${swatch.set ? "" : "muted"}`}
+                title="Drawn behind, shadowed"
+              >
+                {swatch.set?.name ?? "All Magic"}
+              </span>
+              <button onClick={swatch.onClear} disabled={!swatch.set} title="Back to All Magic">
+                ×
+              </button>
+            </div>
+          )}
+
           {/* The two active slots and how many of *this printing* each holds.
               The target is marked, so it is visible which one ± drives without
               needing separate text saying so. */}

@@ -4,6 +4,7 @@ import {
   collectionOracleIds,
   QueryError,
   UNIVERSE_ID,
+  UNIVERSE_NAME,
 } from "../lib/collections";
 import {
   countActiveFilters,
@@ -87,6 +88,7 @@ export function PoolPanel({
   foreground,
   scopes = [],
   refreshKey = 0,
+  background = null,
   manage = null,
   activePrintings = {},
   compact = false,
@@ -141,6 +143,16 @@ export function PoolPanel({
    * `"collection:<id>"`. Two panels sharing a key share their place.
    */
   stateKey: string;
+  /**
+   * The wider set drawn behind the foreground. `null` means All Magic — "no
+   * particular background" and "everything" are the same thing, so unset needs
+   * no separate value.
+   *
+   * Read-only here: it is app-level state, chosen from the card panel, because
+   * it is copied in one view and consulted in the next. A control in this
+   * toolbar would render once per panel and edit one shared value.
+   */
+  background?: { id: string; name: string } | null;
   /**
    * Editing the foreground, when it is a collection you own rather than a
    * search result or All Magic.
@@ -302,6 +314,21 @@ export function PoolPanel({
   const drawingBackground =
     !foreground || foregroundIsUniverse || showBackground;
 
+  /**
+   * All Magic on either side collapses the union: it contains every other set,
+   * so drawing both would be drawing All Magic twice — and worse, it would
+   * *duplicate*, since a collection holds printing X while `unique=cards`
+   * returns printing Y of the same card and dedupe-by-printing cannot see it.
+   *
+   * This is the only containment we get for free. Deciding it in general is as
+   * expensive as merging, so every other pair merges.
+   */
+  const backgroundIsUniverse = !background || background.id === UNIVERSE_ID;
+  const unionCollapses = foregroundIsUniverse || backgroundIsUniverse;
+
+  /** Whether Scryfall is one of the sources — what the sort menu turns on. */
+  const usesRemote = foregroundIsUniverse || (drawingBackground && unionCollapses);
+
   /** The collection the local branch reads: the foreground, when it is drawn. */
   const localSourceId = foreground?.id;
 
@@ -332,7 +359,7 @@ export function PoolPanel({
    * "selected": the constraint is that every stream in the answer must be able
    * to produce the ordering.
    */
-  const sorts = useMemo(() => availableSorts(drawingBackground), [drawingBackground]);
+  const sorts = useMemo(() => availableSorts(usesRemote), [usesRemote]);
   const scryfallSort = remoteSort(sort, sortFlipped);
 
   // Turning outside cards back on can strand a sort the universe cannot do.
@@ -367,7 +394,38 @@ export function PoolPanel({
         const sources: SortedSource<Row>[] = [];
         let known: number | null = null;
 
-        if (drawingBackground) {
+        /** A collection, read whole and locally — printing grain. */
+        const localSource = async (collectionId: string) => {
+          const items = await collectionItems(
+            collectionId,
+            effective,
+            sort,
+            sortFlipped,
+          );
+          return {
+            count: items.length,
+            source: fromArray(
+              items.map((item): Row => ({
+                kind: "item",
+                key: item.id,
+                card: item.card,
+                item,
+              })),
+            ),
+          };
+        };
+
+        if (drawingBackground && !unionCollapses) {
+          // Two sets, neither containing the other, so both are drawn and
+          // merged. Foreground first, so it wins ties and its row — the one
+          // carrying your quantity — is the one that survives dedupe.
+          const fg = await localSource(localSourceId!);
+          const bg = await localSource(background!.id);
+          if (requestId.current !== id) return;
+          sources.push(fg.source, bg.source);
+          // Not the sum: the two may overlap, and dedupe happens downstream.
+          known = null;
+        } else if (drawingBackground) {
           const query = toScryfallQuery(effective) || EVERYTHING;
           sources.push(
             fromPages(async (page) => {
@@ -384,24 +442,10 @@ export function PoolPanel({
             }),
           );
         } else {
-          const items = await collectionItems(
-            localSourceId!,
-            effective,
-            sort,
-            sortFlipped,
-          );
+          const fg = await localSource(localSourceId!);
           if (requestId.current !== id) return;
-          known = items.length;
-          sources.push(
-            fromArray(
-              items.map((item): Row => ({
-                kind: "item",
-                key: item.id,
-                card: item.card,
-                item,
-              })),
-            ),
-          );
+          known = fg.count;
+          sources.push(fg.source);
         }
 
         const stream = mergeSorted<Row>(
@@ -696,20 +740,6 @@ export function PoolPanel({
         {/* Shadowed or absent — the same axis as the dimming, so it lives in
             the open rather than behind "More filters" with the constraints
             that join with the search query. */}
-        {foreground && !foregroundIsUniverse && !manage && (
-          <label
-            className="toggle"
-            title={`Also draw All Magic behind ${foreground.name}, shadowed`}
-          >
-            <input
-              type="checkbox"
-              checked={showBackground}
-              onChange={(e) => setShowBackground(e.target.checked)}
-            />
-            Show not in {foreground.name}
-          </label>
-        )}
-
         {/* Always present, disabled when there is nothing to clear: a control
             that appears and disappears shifts the toolbar under the pointer,
             and its absence is a worse signal than its greyed presence. */}
@@ -739,6 +769,25 @@ export function PoolPanel({
               List
             </button>
           </div>
+        )}
+
+        {/* Wherever there is a foreground to hold something against. This was
+            once hidden in a collection view on the grounds that "also show All
+            Magic" duplicated the All Magic view — but it does not: there
+            everything is lit, here your collection is lit and the rest recedes.
+            Different question, different answer. */}
+        {foreground && !foregroundIsUniverse && (
+          <label
+            className="toggle"
+            title={`Also draw ${background?.name ?? UNIVERSE_NAME} behind ${foreground.name}, shadowed`}
+          >
+            <input
+              type="checkbox"
+              checked={showBackground}
+              onChange={(e) => setShowBackground(e.target.checked)}
+            />
+            Show {background?.name ?? "not in " + foreground.name}
+          </label>
         )}
 
         <label className="toggle" title="Order the pool">

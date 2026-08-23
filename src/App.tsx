@@ -175,6 +175,18 @@ export default function App() {
    * printing its own stream produced.
    */
   const [activePrintings, setActivePrintings] = useState<Record<string, Card>>({});
+
+  /**
+   * The set drawn behind whatever you are looking at. `null` is All Magic.
+   *
+   * App-level rather than per panel: it is copied in one view and consulted in
+   * the next — open Paper, copy it to the background, navigate to a friend's
+   * binder — so panel state would reset on arrival and the gesture would be
+   * impossible.
+   */
+  const [background, setBackground] = useState<{ id: string; name: string } | null>(
+    null,
+  );
   const bump = useCallback(() => setRefreshKey((n) => n + 1), []);
 
   const reloadDecks = useCallback(async () => {
@@ -468,6 +480,33 @@ export default function App() {
   }, [activeCollection?.id, shownCard?.oracleId, refreshKey]);
 
   /**
+   * Foreground/background controls for a panel showing `fg`.
+   *
+   * Switch navigates, because the foreground *is* what is rendered: making the
+   * old background the foreground means going there. It carries the old
+   * foreground back in the other slot, so the pair swaps rather than one
+   * overwriting the other.
+   */
+  const swatch = {
+    set: background,
+    /** The active collection is the foreground the card panel already names. */
+    foreground: activeCollection,
+    onCopyForeground: () => setBackground(activeCollection),
+    onSwitch: () => {
+      if (!background) return;
+      setBackground(activeCollection);
+      openCollectionById(background.id);
+    },
+    onClear: () => setBackground(null),
+  };
+
+  function openCollectionById(id: string) {
+    const found = collections.find((c) => c.id === id);
+    if (found) openCollection(found);
+    else setView({ kind: "collection", id });
+  }
+
+  /**
    * Contents of the deck under the pool, and of the current target — one query
    * each, so a grid of results costs no per-card lookups.
    */
@@ -672,6 +711,7 @@ export default function App() {
             // Your collection lights up; All Magic is drawn behind it, which is
             // what makes this a candidate pool rather than a list of what you own.
             foreground={activeCollection}
+            background={background}
             scopes={deckScopes}
             refreshKey={refreshKey}
             activePrintings={activePrintings}
@@ -803,6 +843,7 @@ export default function App() {
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
             foreground={{ id: currentCollection.id, name: currentCollection.name }}
+            background={background}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
             manage={{
@@ -877,6 +918,7 @@ export default function App() {
         activeCollection={activeCollection}
         collectionQuantities={collectionQuantities}
         onAdjustTarget={adjustTarget}
+        swatch={swatch}
         onChoosePrinting={(printing) =>
           setActivePrintings((prev) => ({ ...prev, [printing.oracleId]: printing }))
         }

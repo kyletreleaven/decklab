@@ -1445,15 +1445,32 @@ it must be merged. That puts the visible part last.
    other. `NULLS LAST` is now unconditional — SQLite puts NULL first ascending,
    so priceless cards used to lead an ascending price list. The asc/desc control
    is now mostly wiring.
-3. ⬜ **The k-way merge**, over streams ordered by that key. Greedy, no page
-   re-sorting, and the merged stream needs no cursor of its own — see
-   [`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md) for why,
-   and for the open question of how much ordering the result can claim (today:
-   the sort field only, because we do not share Scryfall's alphabetical order).
+3. ✅ **The k-way merge.** `merge.ts` — greedy, streaming, deduping by printing
+   id, with sources as `AsyncIterable` so a bounded local list and a paginated
+   Scryfall search are the same shape. `sort.ts` gained a JS `comparator`
+   mirroring `orderBySql`, since the merge compares rows that never went through
+   SQLite. Why no page re-sorting is needed, and what ordering the result may
+   claim, is in
+   [`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md).
+   Two bugs worth remembering: `NULLS LAST` was applied inside the direction
+   sign, so reversing the price sort dragged priceless cards to the top; and
+   `take()` used `for await` with a `break`, which calls `return()` on the
+   generator and **closes** it — the pool stopped dead after one screen. Both
+   now pinned by tests.
 
-4. ⬜ **The swatch** — copy to bg, switch, clear. First step where anything new
-   appears on screen; doing it earlier puts three buttons up that cannot change
-   what you see.
+4. ✅ **The swatch** — `Paper ↓ ⇄ All Magic ×`, at the top of the **card
+   panel**, not the pool toolbar: the background is app-level, so a per-panel
+   control rendered twice while editing one value. It sits with the other
+   "what is currently selected" rows, and names the active collection as the
+   foreground. Slots are fixed-width so switching does not slide ⇄ out from
+   under the pointer.
+   The union collapses only when All Magic is on one side — the one containment
+   known for free; deciding it in general costs as much as merging. Everything
+   else merges, foreground first so its row survives dedupe.
+   Also corrected here: the background toggle had been hidden in collection
+   views on the grounds that "also show All Magic" duplicated the All Magic
+   view. It does not — there everything is lit, here your collection is lit and
+   the rest recedes.
 
 **Not on this path: paginating the local side.** A complete bounded stream is a
 valid stream, so the merge needs one of each and nothing more. It matters only
