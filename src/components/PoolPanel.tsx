@@ -10,10 +10,18 @@ import {
   toScryfallQuery,
   type CardFilter,
 } from "../lib/filters";
+import {
+  fromArray,
+  fromPages,
+  mergeSorted,
+  take,
+  type SortedSource,
+} from "../lib/merge";
 import { retain, retained, useRetained } from "../lib/panelState";
 import { isSuperseded } from "../lib/scheduler";
 import {
   availableSorts,
+  comparator,
   DEFAULT_SORT,
   direction,
   remoteSort,
@@ -39,11 +47,10 @@ import { ManaCost } from "./ManaCost";
  */
 /** The derived half of a panel's retained slot — never the only copy of anything. */
 interface PoolResults {
-  heldItems: CollectionItem[];
-  universeCards: Card[];
+  rows: Row[];
   shown: number;
   total: number;
-  nextPage: number | null;
+  exhausted: boolean;
   /** What these results answer. Refetch unless the question is unchanged. */
   signature: string;
 }
@@ -226,20 +233,24 @@ export function PoolPanel({
    */
   const cached = useRef(retained(stateKey) as Partial<PoolResults>);
 
-  const [heldItems, setHeldItems] = useState<CollectionItem[]>(
-    () => cached.current.heldItems ?? [],
-  );
-  const heldCards = useMemo(() => heldItems.map((i) => i.card), [heldItems]);
-  const [universeCards, setUniverseCards] = useState<Card[]>(
-    () => cached.current.universeCards ?? [],
-  );
+  const [rows, setRows] = useState<Row[]>(() => cached.current.rows ?? []);
   const [inCollection, setInCollection] = useState<Set<string>>(new Set());
   const [shown, setShown] = useState(() => cached.current.shown ?? PAGE);
   const [total, setTotal] = useState(() => cached.current.total ?? 0);
-  const [nextPage, setNextPage] = useState<number | null>(
-    () => cached.current.nextPage ?? null,
-  );
+  const [exhausted, setExhausted] = useState(() => cached.current.exhausted ?? false);
   const [loading, setLoading] = useState(false);
+
+  /**
+   * The merged stream still being drawn from, for `loadMore`.
+   *
+   * A ref because it is not renderable state, and because a generator cannot be
+   * retained — restoring a panel gives back rows but no stream. See the cursor
+   * note in `docs/merging-sorted-sources.md`.
+   */
+  const pending = useRef<AsyncGenerator<Row> | null>(null);
+
+  const compare = useMemo(() => comparator(sort, sortFlipped), [sort, sortFlipped]);
+
   const [error, setError] = useState<string | null>(null);
 
   // Guards against a slow early request landing after a later one.
@@ -348,34 +359,66 @@ export function PoolPanel({
     const run = async () => {
       setLoading(true);
       setError(null);
-      setShown(PAGE);
       try {
+        // One source today — the background is always All Magic, which contains
+        // every foreground, so their union collapses. Built as a list anyway so
+        // that a selectable background is a second entry here rather than a
+        // rewrite of everything downstream.
+        const sources: SortedSource<Row>[] = [];
+        let known: number | null = null;
+
         if (drawingBackground) {
-          // All of Magic is the base set, a page at a time. What you own does
-          // not decide what appears here — it only decides what is un-dimmed,
-          // which comes from the oracle-id set loaded separately. Querying the
-          // collection as well and merging would truncate the universe behind
-          // however many of your own cards happened to match.
-          setHeldItems([]);
-          const page = await scryfall.search(
-            toScryfallQuery(effective) || EVERYTHING,
-            1,
-            scryfallSort,
+          const query = toScryfallQuery(effective) || EVERYTHING;
+          sources.push(
+            fromPages(async (page) => {
+              const result = await scryfall.search(query, page, scryfallSort);
+              // Scryfall knows its own total; a merged total would not be
+              // knowable without draining every source.
+              if (page === 1) known = result.totalCards;
+              return {
+                items: result.cards.map(
+                  (card): Row => ({ kind: "card", key: card.oracleId, card }),
+                ),
+                next: result.nextPage,
+              };
+            }),
+          );
+        } else {
+          const items = await collectionItems(
+            localSourceId!,
+            effective,
+            sort,
+            sortFlipped,
           );
           if (requestId.current !== id) return;
-          setUniverseCards(page.cards);
-          setNextPage(page.nextPage);
-          setTotal(page.totalCards);
-        } else {
-          // Cards outside the collection are unwanted, so the whole answer is
-          // local — and complete, since nothing here is paged by Scryfall.
-          const items = await collectionItems(localSourceId!, effective, sort, sortFlipped);
-          if (requestId.current !== id) return;
-          setHeldItems(items);
-          setUniverseCards([]);
-          setNextPage(null);
-          setTotal(items.length);
+          known = items.length;
+          sources.push(
+            fromArray(
+              items.map((item): Row => ({
+                kind: "item",
+                key: item.id,
+                card: item.card,
+                item,
+              })),
+            ),
+          );
         }
+
+        const stream = mergeSorted<Row>(
+          sources,
+          (a, b) => compare(a.card, b.card),
+          // By printing id, which the sort key ends with — so duplicates are
+          // adjacent and a single-element lookahead is enough to spot them.
+          (row) => row.card.id,
+        );
+        pending.current = stream;
+
+        const first = await take(stream, PAGE);
+        if (requestId.current !== id) return;
+
+        setRows(first);
+        setExhausted(first.length < PAGE);
+        setTotal(known ?? first.length);
       } catch (err) {
         if (requestId.current !== id) return;
         if (isSuperseded(err)) return;
@@ -384,10 +427,9 @@ export function PoolPanel({
         // previous results on screen rather than blanking the grid — which
         // would be indistinguishable from "nothing matched".
         if (!(err instanceof QueryError)) {
-          setHeldItems([]);
-          setUniverseCards([]);
+          setRows([]);
           setTotal(0);
-          setNextPage(null);
+          setExhausted(true);
         }
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -410,48 +452,24 @@ export function PoolPanel({
   ]);
 
   /**
-   * Exactly one of the two lanes is populated — All Magic when outside cards
-   * are shown, the collection when they are not — so this is a concatenation in
-   * practice. The dedupe by *oracle* id is kept because a collection holds
-   * printings while a search returns one printing per card, and the two lanes
-   * may yet be mixed.
-   */
-  const merged = useMemo(() => {
-    const seen = new Set(heldCards.map((c) => c.oracleId));
-    return [
-      ...heldCards,
-      ...universeCards.filter((c) => !seen.has(c.oracleId)),
-    ];
-  }, [heldCards, universeCards]);
-
-  /**
-   * Rows, at whichever grain the stream produces.
+   * One page of the merged stream at a time, so the rhythm is the same whether
+   * the rows came from disk, the network, or both.
    *
-   * The local branch yields collection *items* — a specific printing in a
-   * specific finish, which is what you actually hold — while Scryfall yields
-   * one arbitrary printing per card. Rendering both as "cards" would collide:
-   * a foil and a nonfoil of the same printing share a `card.id`, so they would
-   * fight over the same React key and appear as one row.
+   * The active printing is substituted here rather than when fetching, so
+   * picking one in the card panel re-renders instead of re-querying. Oracle
+   * grain only: a printing-grain row already *is* a specific printing, and
+   * swapping it would misreport what is held.
    */
-  const rows = useMemo<Row[]>(
+  const visible = useMemo(
     () =>
-      drawingBackground
-        ? merged.map((card) => ({
-            kind: "card" as const,
-            // Keyed on the oracle id, not the printing: swapping the printing
-            // must update the row in place rather than unmount and remount it,
-            // or the tile flickers and loses hover.
-            key: card.oracleId,
-            card: activePrintings[card.oracleId] ?? card,
-          }))
-        : heldItems.map((item) => ({
-            kind: "item" as const,
-            key: item.id,
-            card: item.card,
-            item,
-          })),
-    [drawingBackground, merged, heldItems, activePrintings],
+      rows.slice(0, shown).map((row) =>
+        row.kind === "card" && activePrintings[row.card.oracleId]
+          ? { ...row, card: activePrintings[row.card.oracleId] }
+          : row,
+      ),
+    [rows, shown, activePrintings],
   );
+  const hasMore = shown < rows.length || !exhausted;
 
   /**
    * Cards / unique / estimated value.
@@ -465,16 +483,20 @@ export function PoolPanel({
     if (drawingBackground) return null;
     let cards = 0;
     let value = 0;
-    for (const item of heldItems) {
-      cards += item.quantity;
+    let unique = 0;
+    for (const row of rows) {
+      if (row.kind !== "item") continue;
+      unique++;
+      cards += row.item.quantity;
       const price = Number.parseFloat(
-        (item.finish === "foil" ? item.card.prices.usd_foil : item.card.prices.usd) ??
-          "",
+        (row.item.finish === "foil"
+          ? row.card.prices.usd_foil
+          : row.card.prices.usd) ?? "",
       );
-      if (Number.isFinite(price)) value += price * item.quantity;
+      if (Number.isFinite(price)) value += price * row.item.quantity;
     }
-    return { cards, unique: heldItems.length, value };
-  }, [drawingBackground, heldItems]);
+    return { cards, unique, value };
+  }, [drawingBackground, rows]);
 
   /**
    * What a row's `±` acts on, which depends on its grain.
@@ -512,30 +534,27 @@ export function PoolPanel({
   useEffect(() => {
     if (loading) return;
     retain(stateKey, {
-      heldItems,
-      universeCards,
+      rows,
       shown,
       total,
-      nextPage,
+      exhausted,
       signature,
     } satisfies PoolResults);
-  }, [stateKey, loading, heldItems, universeCards, shown, total, nextPage, signature]);
+  }, [stateKey, loading, rows, shown, total, exhausted, signature]);
 
   async function loadMore() {
     const next = shown + PAGE;
     setShown(next);
 
-    // Pull another page only once the merged list runs dry.
-    if (next <= rows.length || nextPage === null) return;
+    // Only reach for the stream once what is already loaded runs out.
+    const stream = pending.current;
+    if (next <= rows.length || !stream || exhausted) return;
+
     setLoading(true);
     try {
-      const page = await scryfall.search(
-        toScryfallQuery(effective) || EVERYTHING,
-        nextPage,
-        scryfallSort,
-      );
-      setUniverseCards((prev) => [...prev, ...page.cards]);
-      setNextPage(page.nextPage);
+      const more = await take(stream, PAGE);
+      setRows((prev) => [...prev, ...more]);
+      if (more.length < PAGE) setExhausted(true);
     } catch (err) {
       if (isSuperseded(err)) return;
       setError(err instanceof Error ? err.message : String(err));
@@ -543,11 +562,6 @@ export function PoolPanel({
       setLoading(false);
     }
   }
-
-  // The union is chopped to a page so the rhythm stays the same whether the
-  // cards came from disk, the network, or both.
-  const visible = useMemo(() => rows.slice(0, shown), [rows, shown]);
-  const hasMore = shown < rows.length || nextPage !== null;
 
   /**
    * Contextual *constraints*, expressed as toggle groups for the filter bar.
@@ -750,8 +764,8 @@ export function PoolPanel({
         <span className="hint">
           {loading
             ? "Searching…"
-            : merged.length
-              ? `${visible.length} of ${total || merged.length}`
+            : rows.length
+              ? `${visible.length} of ${total || rows.length}`
               : ""}
         </span>
       </div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   availableSorts,
+  comparator,
   DEFAULT_SORT,
   direction,
   orderBySql,
@@ -86,6 +87,44 @@ describe("sort vocabulary", () => {
     // within tie groups for no reason, and the merge depends on one fixed
     // total order.
     expect(orderBySql("value", true).endsWith("c.name ASC, c.id ASC")).toBe(true);
+  });
+
+  it("orders the same way in JS as in SQL", () => {
+    // The two run on different rows of the same merge, so a disagreement shows
+    // up as cards out of order exactly where the streams interleave.
+    const card = (id: string, name: string, cmc: number, usd: string | null) => ({
+      id,
+      name,
+      cmc,
+      prices: { usd },
+    });
+
+    const cheap = card("a", "Cheap", 1, "0.10");
+    const dear = card("b", "Dear", 1, "40.00");
+    expect(comparator("value")(dear, cheap)).toBeLessThan(0);
+    expect(comparator("value", true)(cheap, dear)).toBeLessThan(0);
+
+    const light = card("c", "Light", 1, null);
+    const heavy = card("d", "Heavy", 6, null);
+    expect(comparator("mv")(light, heavy)).toBeLessThan(0);
+  });
+
+  it("keeps priceless cards last in both directions", () => {
+    // Matching NULLS LAST. Treating an absent price as zero would file such
+    // cards among the cheapest, where they look like real data.
+    const priced = { id: "a", name: "Priced", cmc: 1, prices: { usd: "1.00" } };
+    const priceless = { id: "b", name: "Priceless", cmc: 1, prices: { usd: null } };
+    expect(comparator("value")(priced, priceless)).toBeLessThan(0);
+    expect(comparator("value", true)(priced, priceless)).toBeLessThan(0);
+  });
+
+  it("tiebreaks by name then id, and does not flip the tiebreaker", () => {
+    // One total order underlies both directions, which is what lets a reversed
+    // sort still merge correctly.
+    const a = { id: "1", name: "Aaa", cmc: 2, prices: { usd: "1.00" } };
+    const b = { id: "2", name: "Bbb", cmc: 2, prices: { usd: "1.00" } };
+    expect(comparator("mv")(a, b)).toBeLessThan(0);
+    expect(comparator("mv", true)(a, b)).toBeLessThan(0);
   });
 
   it("falls back rather than throwing on an unknown key", () => {
