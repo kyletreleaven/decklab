@@ -669,7 +669,9 @@ export default function App() {
               add: (card) => addToDeck(card, currentDeck.id, false),
               remove: (card) => adjustDeck(currentDeck.id, card, -1),
             }}
-            activeCollection={activeCollection}
+            // Your collection lights up; All Magic is drawn behind it, which is
+            // what makes this a candidate pool rather than a list of what you own.
+            foreground={activeCollection}
             scopes={deckScopes}
             refreshKey={refreshKey}
             activePrintings={activePrintings}
@@ -751,11 +753,9 @@ export default function App() {
                   }
                 : null
             }
-            // No comparison set: All Magic is the thing being shown, so there
-            // is nothing to hold it against and nothing recedes. This also
-            // removes the "Show not in …" toggle, since narrowing to a
-            // collection would stop the view being what it claims to be.
-            activeCollection={null}
+            // All Magic *is* the foreground here, which is why nothing recedes:
+            // lighting a set that contains everything lights the grid.
+            foreground={{ id: UNIVERSE_ID, name: UNIVERSE_NAME }}
             activePrintings={activePrintings}
             scopes={deckScopes}
             refreshKey={refreshKey}
@@ -776,10 +776,9 @@ export default function App() {
               add: (card) => addToCollection(card, currentCollection.id),
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
-            // No comparison set: dimming against the collection below would
-            // shade exactly the cards you already have, which is the one thing
-            // the pane underneath already tells you.
-            activeCollection={null}
+            // All Magic, undimmed: shading against the collection below would
+            // mark exactly what the lower pane already shows you.
+            foreground={{ id: UNIVERSE_ID, name: UNIVERSE_NAME }}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
             compact
@@ -803,12 +802,10 @@ export default function App() {
               add: (card) => addToCollection(card, currentCollection.id),
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
-            activeCollection={activeCollection}
+            foreground={{ id: currentCollection.id, name: currentCollection.name }}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
-            subject={{
-              id: currentCollection.id,
-              name: currentCollection.name,
+            manage={{
               onSetItemQuantity: async (item, quantity) => {
                 await collectionsApi.setCollectionItemQuantity(item.id, quantity);
                 bump();

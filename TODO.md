@@ -1420,11 +1420,15 @@ foreground, so there is no cheap slice where it is selectable but the merge is
 not needed: with the toggle off it is not drawn and does nothing, and with it on
 it must be merged. That puts the visible part last.
 
-1. ⬜ **Refactor the panel to speak fg/bg**, background pinned to All Magic.
-   `subject` becomes the foreground, `includeOutside` becomes "draw the
-   background", `activeCollection` folds in. Zero behaviour change, so it is
-   verifiable by clicking — and the three rows of the table above should fall
-   out rather than being written individually.
+1. ✅ **The panel speaks fg/bg**, background still pinned to All Magic.
+   `activeCollection` became `foreground`, `subject` split into `foreground` +
+   `manage` (identity and editability being different questions — the deck pool
+   has a foreground it must not offer to rename), and `includeOutside` became
+   `drawingBackground`. No behaviour change.
+   The model fits: each call site is now one line naming its foreground, and the
+   two `activeCollection={null}` hacks are gone — All Magic passes *itself* as
+   the foreground, and nothing recedes because lighting a set that contains
+   everything lights the grid.
 2. ⬜ **Make the sort key total** — `(name, id)`, not `name`, or ties across a
    page boundary duplicate or drop rows once streams are merged. Shares the
    `SORT_SQL` split with the asc/desc control.

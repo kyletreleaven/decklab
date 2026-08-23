@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collectionItems, collectionOracleIds, QueryError } from "../lib/collections";
+import {
+  collectionItems,
+  collectionOracleIds,
+  QueryError,
+  UNIVERSE_ID,
+} from "../lib/collections";
 import {
   countActiveFilters,
   toScryfallQuery,
@@ -71,10 +76,10 @@ export function PoolPanel({
   stateKey,
   poolToggle = null,
   destination,
-  activeCollection,
+  foreground,
   scopes = [],
   refreshKey = 0,
-  subject = null,
+  manage = null,
   activePrintings = {},
   compact = false,
 }: {
@@ -98,14 +103,14 @@ export function PoolPanel({
     remove: (card: Card) => void;
   } | null;
   /**
-   * The set this pool is compared against: its members stay lit, everything
-   * else recedes. Dimming is a set difference, so this is just the other
-   * operand — `null` means no comparison, and nothing dims.
+   * The set you are looking at. Always rendered, always lit.
    *
-   * Follows the selection rather than being chosen from a list, so there is one
-   * notion of which collection is current.
+   * `null` means there is no set of yours in play — the pool then draws the
+   * background alone and nothing recedes, because there is nothing to contrast
+   * with. All Magic as the foreground behaves the same way: it contains
+   * everything, so lighting it lights the grid.
    */
-  activeCollection: { id: string; name: string } | null;
+  foreground: { id: string; name: string } | null;
   /**
    * Contextual constraints, each independently toggleable. Separate rather than
    * bundled because a single "deck-legal" switch can only reach two corners of a
@@ -119,7 +124,7 @@ export function PoolPanel({
    */
   refreshKey?: number;
   /**
-   * Show/hide the pool attached to this view. Rendered in the subject header,
+   * Show/hide the pool attached to this view. Rendered in the manage header,
    * so it only exists where there is a container to fill.
    */
   poolToggle?: { on: boolean; onToggle: () => void } | null;
@@ -129,16 +134,14 @@ export function PoolPanel({
    */
   stateKey: string;
   /**
-   * The container this panel is *presenting*, when it is presenting one.
+   * Editing the foreground, when it is a collection you own rather than a
+   * search result or All Magic.
    *
-   * Absent for the deck-attached strip and for All Magic — capability by
-   * absence, like `destination`: nothing is passed, so nothing renders, rather
-   * than a flag saying "you have this but hide it". Note there is no "Add
-   * cards": it navigated to the search view, and this panel is the search view.
+   * Separate from `foreground` because identity and editability are different
+   * questions: the deck-attached pool has a foreground it must not offer to
+   * rename. Capability by absence, like `destination`.
    */
-  subject?: {
-    id: string;
-    name: string;
+  manage?: {
     /**
      * Item-level edits, which only exist at printing grain. Separate from
      * `destination` because they address a *specific* row — this foil, this
@@ -183,23 +186,27 @@ export function PoolPanel({
   // off by default there and on everywhere else. Initial state only: the panel
   // is remounted per view, so switching collections re-derives it rather than
   // carrying your last toggle across.
-  const [showOutside, setShowOutside] = useRetained(stateKey, "showOutside", !subject);
+  const [showBackground, setShowBackground] = useRetained(
+    stateKey,
+    "showBackground",
+    !manage,
+  );
   const [sort, setSort] = useRetained<SortKey>(stateKey, "sort", DEFAULT_SORT);
   const [layout, setLayout] = useRetained<"wall" | "list">(stateKey, "layout", "wall");
   const [editingName, setEditingName] = useState(false);
-  const [draftName, setDraftName] = useState(subject?.name ?? "");
+  const [draftName, setDraftName] = useState(foreground?.name ?? "");
 
   // Follow a rename made elsewhere, and reset a half-typed draft on navigation.
   useEffect(() => {
-    setDraftName(subject?.name ?? "");
+    setDraftName(foreground?.name ?? "");
     setEditingName(false);
-  }, [subject?.name]);
+  }, [foreground?.name]);
 
   function commitName() {
     setEditingName(false);
     const next = draftName.trim();
-    if (next && next !== subject?.name) subject?.onRename(next);
-    else setDraftName(subject?.name ?? "");
+    if (next && next !== foreground?.name) manage?.onRename(next);
+    else setDraftName(foreground?.name ?? "");
   }
 
   /**
@@ -249,46 +256,58 @@ export function PoolPanel({
   const effectiveKey = JSON.stringify(effective);
 
   /**
-   * Oracle ids held by the collection this pool is scoped to — the un-dimming
-   * set. Keyed on `refreshKey` as well as the collection, so adding a card to
-   * the collection lights its tile up immediately.
+   * All Magic as the foreground is not a set of yours to contrast against — it
+   * contains everything — so it lights the grid rather than dimming it.
    */
-  useEffect(() => {
-    collectionOracleIds(activeCollection ? [activeCollection.id] : undefined).then(
-      setInCollection,
-    );
-  }, [activeCollection?.id, refreshKey]);
+  const foregroundIsUniverse = foreground?.id === UNIVERSE_ID;
 
   /**
-   * Whether the universe is the source.
-   *
-   * Never when presenting a collection: you navigated to Paper to see Paper,
-   * and "all of Magic, dimmed against Paper" is a view that already exists in
-   * the sidebar. Offering it here as a checkbox would be a second route to
-   * somewhere you can already go, and it would quietly change the grain
-   * underfoot.
+   * Oracle ids in the foreground — the lit set. Keyed on `refreshKey` too, so
+   * adding a card to it lights its tile immediately.
    */
-  const includeOutside = subject
-    ? false
-    : !activeCollection || showOutside;
+  useEffect(() => {
+    // Nothing to contrast with, so nothing to fetch.
+    if (!foreground || foregroundIsUniverse) {
+      setInCollection(new Set());
+      return;
+    }
+    collectionOracleIds([foreground.id]).then(setInCollection);
+  }, [foreground?.id, foregroundIsUniverse, refreshKey]);
 
-  /** The collection the local branch reads — the one presented, if any. */
-  const localSourceId = subject?.id ?? activeCollection?.id;
+  /**
+   * Whether the background is what gets drawn.
+   *
+   * Three ways to end up there: nothing of yours is in play, the foreground is
+   * All Magic (which *is* the background), or you asked for it. Otherwise the
+   * foreground is drawn alone, from the local query.
+   *
+   * The background is All Magic and nothing else for now. Once it can be any
+   * set this stops being a branch and becomes a union — which needs the two
+   * streams merged, since neither would contain the other.
+   */
+  const drawingBackground =
+    !foreground || foregroundIsUniverse || showBackground;
+
+  /** The collection the local branch reads: the foreground, when it is drawn. */
+  const localSourceId = foreground?.id;
 
   /**
    * What the results in hand answer. Retained results are reusable only while
    * this is unchanged; anything else and the question has moved on.
    */
+  /** Nothing recedes without a set of yours to recede *from*. */
+  const dims = !!foreground && !foregroundIsUniverse;
+
   const signature = JSON.stringify([
     localSourceId,
-    includeOutside,
+    drawingBackground,
     effectiveKey,
     sort,
     // Must match the fetch effect's deps exactly, or the skip swallows changes
     // the effect would have caught: edit a collection while its panel is
     // unmounted, come back, and the stale rows would look current. Zero for the
     // remote branch — a local write cannot change what Scryfall returns.
-    includeOutside ? 0 : refreshKey,
+    drawingBackground ? 0 : refreshKey,
   ]);
 
   /**
@@ -298,7 +317,7 @@ export function PoolPanel({
    * "selected": the constraint is that every stream in the answer must be able
    * to produce the ordering.
    */
-  const sorts = useMemo(() => availableSorts(includeOutside), [includeOutside]);
+  const sorts = useMemo(() => availableSorts(drawingBackground), [drawingBackground]);
   const remoteSort = sortOption(sort).remote ?? { order: "name", dir: "asc" as const };
 
   // Turning outside cards back on can strand a sort the universe cannot do.
@@ -327,7 +346,7 @@ export function PoolPanel({
       setError(null);
       setShown(PAGE);
       try {
-        if (includeOutside) {
+        if (drawingBackground) {
           // All of Magic is the base set, a page at a time. What you own does
           // not decide what appears here — it only decides what is un-dimmed,
           // which comes from the oracle-id set loaded separately. Querying the
@@ -377,7 +396,7 @@ export function PoolPanel({
     // The mutation counter matters only while the list itself is local. Adding
     // it unconditionally would re-run a Scryfall search on every `+`, which is
     // exactly the traffic the scheduler exists to avoid.
-  }, [localSourceId, includeOutside, effectiveKey, sort, includeOutside ? 0 : refreshKey]);
+  }, [localSourceId, drawingBackground, effectiveKey, sort, drawingBackground ? 0 : refreshKey]);
 
   /**
    * Exactly one of the two lanes is populated — All Magic when outside cards
@@ -405,7 +424,7 @@ export function PoolPanel({
    */
   const rows = useMemo<Row[]>(
     () =>
-      includeOutside
+      drawingBackground
         ? merged.map((card) => ({
             kind: "card" as const,
             // Keyed on the oracle id, not the printing: swapping the printing
@@ -420,7 +439,7 @@ export function PoolPanel({
             card: item.card,
             item,
           })),
-    [includeOutside, merged, heldItems, activePrintings],
+    [drawingBackground, merged, heldItems, activePrintings],
   );
 
   /**
@@ -432,7 +451,7 @@ export function PoolPanel({
    * subtotal of the page in hand would look like a fact about the search.
    */
   const totals = useMemo(() => {
-    if (includeOutside) return null;
+    if (drawingBackground) return null;
     let cards = 0;
     let value = 0;
     for (const item of heldItems) {
@@ -444,7 +463,7 @@ export function PoolPanel({
       if (Number.isFinite(price)) value += price * item.quantity;
     }
     return { cards, unique: heldItems.length, value };
-  }, [includeOutside, heldItems]);
+  }, [drawingBackground, heldItems]);
 
   /**
    * What a row's `±` acts on, which depends on its grain.
@@ -455,13 +474,13 @@ export function PoolPanel({
    * copy instead, since the two share a printing id.
    */
   function stepperFor(row: Row) {
-    if (row.kind === "item" && subject) {
+    if (row.kind === "item" && manage) {
       const { item } = row;
       return {
-        name: subject.name,
-        dec: () => subject.onSetItemQuantity(item, item.quantity - 1),
-        inc: () => subject.onSetItemQuantity(item, item.quantity + 1),
-        drop: () => subject.onRemoveItem(item),
+        name: foreground?.name ?? "",
+        dec: () => manage.onSetItemQuantity(item, item.quantity - 1),
+        inc: () => manage.onSetItemQuantity(item, item.quantity + 1),
+        drop: () => manage.onRemoveItem(item),
       };
     }
     if (!destination) return null;
@@ -575,7 +594,7 @@ export function PoolPanel({
 
   return (
     <div className="pool">
-      {subject && (
+      {manage && foreground && (
         <div className="toolbar">
           {editingName ? (
             <input
@@ -587,7 +606,7 @@ export function PoolPanel({
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitName();
                 if (e.key === "Escape") {
-                  setDraftName(subject.name);
+                  setDraftName(foreground.name);
                   setEditingName(false);
                 }
               }}
@@ -597,7 +616,7 @@ export function PoolPanel({
               onDoubleClick={() => setEditingName(true)}
               title="Double-click to rename"
             >
-              {subject.name}
+              {foreground.name}
             </h1>
           )}
           <span className="spacer" />
@@ -609,23 +628,23 @@ export function PoolPanel({
               title={
                 poolToggle.on
                   ? "Hide the candidate-card pool"
-                  : `Open a pool of candidate cards above ${subject.name}`
+                  : `Open a pool of candidate cards above ${foreground.name}`
               }
             >
               {poolToggle.on ? "Hide pool" : "＋ Add cards"}
             </button>
           )}
 
-          <button className="ghost" onClick={subject.onImport}>
+          <button className="ghost" onClick={manage.onImport}>
             Import
           </button>
-          <button className="ghost" onClick={subject.onExport}>
+          <button className="ghost" onClick={manage.onExport}>
             Export
           </button>
           <button className="ghost" onClick={() => setEditingName(true)}>
             Rename
           </button>
-          <button className="ghost" onClick={subject.onDelete}>
+          <button className="ghost" onClick={manage.onDelete}>
             Delete
           </button>
         </div>
@@ -652,17 +671,17 @@ export function PoolPanel({
         {/* Shadowed or absent — the same axis as the dimming, so it lives in
             the open rather than behind "More filters" with the constraints
             that join with the search query. */}
-        {activeCollection && !subject && (
+        {foreground && !foregroundIsUniverse && !manage && (
           <label
             className="toggle"
-            title={`Show cards not in ${activeCollection.name}, shadowed`}
+            title={`Also draw All Magic behind ${foreground.name}, shadowed`}
           >
             <input
               type="checkbox"
-              checked={showOutside}
-              onChange={(e) => setShowOutside(e.target.checked)}
+              checked={showBackground}
+              onChange={(e) => setShowBackground(e.target.checked)}
             />
-            Show not in {activeCollection.name}
+            Show not in {foreground.name}
           </label>
         )}
 
@@ -768,7 +787,7 @@ export function PoolPanel({
                   selectedId === card.id ? "selected" : "",
                   // Arena's convention: cards outside the active collection
                   // stay visible but recede.
-                  activeCollection && !isIn ? "dim" : "",
+                  dims && !isIn ? "dim" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
@@ -778,7 +797,7 @@ export function PoolPanel({
                 onDoubleClick={() => step?.inc()}
                 title={[
                   card.name,
-                  activeCollection && !isIn && `not in ${activeCollection.name}`,
+                  dims && !isIn && `not in ${foreground.name}`,
                   // Double-click adds, which is otherwise undiscoverable — and
                   // where it lands is exactly the thing that differs between
                   // this grid and the card panel.
@@ -830,7 +849,7 @@ export function PoolPanel({
                 className={[
                   "row",
                   selectedId === card.id ? "selected" : "",
-                  activeCollection && !isIn ? "dim" : "",
+                  dims && !isIn ? "dim" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
