@@ -15,6 +15,7 @@ import { isSuperseded } from "../lib/scheduler";
 import {
   availableSorts,
   DEFAULT_SORT,
+  direction,
   remoteSort,
   type SortKey,
 } from "../lib/sort";
@@ -192,6 +193,8 @@ export function PoolPanel({
     !manage,
   );
   const [sort, setSort] = useRetained<SortKey>(stateKey, "sort", DEFAULT_SORT);
+  /** Inverts the sort's useful default rather than forcing ascending. */
+  const [sortFlipped, setSortFlipped] = useRetained(stateKey, "sortFlipped", false);
   const [layout, setLayout] = useRetained<"wall" | "list">(stateKey, "layout", "wall");
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(foreground?.name ?? "");
@@ -303,6 +306,7 @@ export function PoolPanel({
     drawingBackground,
     effectiveKey,
     sort,
+    sortFlipped,
     // Must match the fetch effect's deps exactly, or the skip swallows changes
     // the effect would have caught: edit a collection while its panel is
     // unmounted, come back, and the stale rows would look current. Zero for the
@@ -318,7 +322,7 @@ export function PoolPanel({
    * to produce the ordering.
    */
   const sorts = useMemo(() => availableSorts(drawingBackground), [drawingBackground]);
-  const scryfallSort = remoteSort(sort);
+  const scryfallSort = remoteSort(sort, sortFlipped);
 
   // Turning outside cards back on can strand a sort the universe cannot do.
   useEffect(() => {
@@ -365,7 +369,7 @@ export function PoolPanel({
         } else {
           // Cards outside the collection are unwanted, so the whole answer is
           // local — and complete, since nothing here is paged by Scryfall.
-          const items = await collectionItems(localSourceId!, effective, sort);
+          const items = await collectionItems(localSourceId!, effective, sort, sortFlipped);
           if (requestId.current !== id) return;
           setHeldItems(items);
           setUniverseCards([]);
@@ -396,7 +400,14 @@ export function PoolPanel({
     // The mutation counter matters only while the list itself is local. Adding
     // it unconditionally would re-run a Scryfall search on every `+`, which is
     // exactly the traffic the scheduler exists to avoid.
-  }, [localSourceId, drawingBackground, effectiveKey, sort, drawingBackground ? 0 : refreshKey]);
+  }, [
+    localSourceId,
+    drawingBackground,
+    effectiveKey,
+    sort,
+    sortFlipped,
+    drawingBackground ? 0 : refreshKey,
+  ]);
 
   /**
    * Exactly one of the two lanes is populated — All Magic when outside cards
@@ -725,6 +736,15 @@ export function PoolPanel({
               </option>
             ))}
           </select>
+          {/* Arrow shows the direction it is *in*, not the one clicking gives —
+              a control that displays its own outcome reads as a prediction. */}
+          <button
+            className="ghost"
+            onClick={() => setSortFlipped((f) => !f)}
+            title={`${direction(sort, sortFlipped) === "asc" ? "Ascending" : "Descending"} — click to reverse`}
+          >
+            {direction(sort, sortFlipped) === "asc" ? "↑" : "↓"}
+          </button>
         </label>
 
         <span className="hint">

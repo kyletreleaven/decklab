@@ -146,6 +146,7 @@ export async function collectionItems(
   collectionId: string,
   filter: CollectionFilter = {},
   sort: CollectionSort = "name",
+  flipped = false,
 ): Promise<CollectionItem[]> {
   const params: unknown[] = [collectionId];
   const clauses: string[] = [];
@@ -236,7 +237,7 @@ export async function collectionItems(
        FROM collection_items ci
        JOIN cards c ON c.id = ci.card_id
       WHERE ci.collection_id = $1${where}
-      ORDER BY ${orderBySql(sort)}`,
+      ORDER BY ${orderBySql(sort, flipped)}`,
     params,
   );
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   availableSorts,
   DEFAULT_SORT,
+  direction,
   orderBySql,
   remoteSort,
   SORTS,
@@ -59,6 +60,32 @@ describe("sort vocabulary", () => {
     // cards that have no price.
     expect(orderBySql("value")).toContain("NULLS LAST");
     expect(orderBySql("name")).toContain("NULLS LAST");
+  });
+
+  it("flips each sort's own default rather than forcing ascending", () => {
+    // Choosing "Price" must still open most-expensive-first; the toggle inverts
+    // that. Forcing asc would make the flip mean different things per key.
+    expect(direction("value", false)).toBe("desc");
+    expect(direction("value", true)).toBe("asc");
+    expect(direction("name", false)).toBe("asc");
+    expect(direction("name", true)).toBe("desc");
+  });
+
+  it("flips both sides together", () => {
+    for (const option of SORTS) {
+      const flipped = direction(option.key, true);
+      expect(orderBySql(option.key, true)).toContain(
+        flipped === "desc" ? "DESC" : "ASC",
+      );
+      if (option.remote) expect(remoteSort(option.key, true).dir).toBe(flipped);
+    }
+  });
+
+  it("keeps the tiebreaker ascending when the sort is reversed", () => {
+    // Only the primary key flips. Reversing the tiebreaker too would reorder
+    // within tie groups for no reason, and the merge depends on one fixed
+    // total order.
+    expect(orderBySql("value", true).endsWith("c.name ASC, c.id ASC")).toBe(true);
   });
 
   it("falls back rather than throwing on an unknown key", () => {

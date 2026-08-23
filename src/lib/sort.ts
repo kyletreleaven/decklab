@@ -64,10 +64,23 @@ export const SORTS: SortOption[] = [
  */
 export const TIEBREAK_SQL = "c.name ASC, c.id ASC";
 
+/**
+ * The direction a sort actually runs in.
+ *
+ * `SortOption.dir` is the *useful default* per key — price descends, name
+ * ascends — and flipping inverts that rather than forcing ascending, so
+ * choosing "Price" still opens most-expensive-first.
+ */
+export function direction(key: SortKey, flipped: boolean): Direction {
+  const base = sortOption(key).dir;
+  if (!flipped) return base;
+  return base === "asc" ? "desc" : "asc";
+}
+
 /** `ORDER BY` clause for a sort, direction and tiebreaker included. */
-export function orderBySql(key: SortKey): string {
+export function orderBySql(key: SortKey, flipped = false): string {
   const option = sortOption(key);
-  const dir = option.dir === "desc" ? "DESC" : "ASC";
+  const dir = direction(key, flipped) === "desc" ? "DESC" : "ASC";
   // SQLite sorts NULL first ascending and last descending; pin it either way so
   // priceless cards do not lead the price list.
   return `${option.sql} ${dir} NULLS LAST, ${TIEBREAK_SQL}`;
@@ -80,12 +93,15 @@ export function sortOption(key: SortKey): SortOption {
 }
 
 /** How a sort is spelled for Scryfall: `order=` plus an explicit `dir=`. */
-export function remoteSort(key: SortKey): { order: string; dir: Direction } {
+export function remoteSort(
+  key: SortKey,
+  flipped = false,
+): { order: string; dir: Direction } {
   const option = sortOption(key);
   // Falls back rather than throwing: the panel resets a stranded sort, and a
   // request that arrives first should still be ordered, not ordered wrongly.
-  if (!option.remote) return { order: "name", dir: "asc" };
-  return { order: option.remote.order, dir: option.dir };
+  if (!option.remote) return { order: "name", dir: direction("name", flipped) };
+  return { order: option.remote.order, dir: direction(key, flipped) };
 }
 
 /**

@@ -332,15 +332,15 @@ rather than as scaffolding.
       whichever printing the row stands for, not the card's first appearance —
       "newest reprints" and "newest cards" are different questions and only the
       first falls out for free.
-- ⬜ **Asc/desc control** — shares the `SORT_SQL` split with step 2 of
-      *Foreground and background*, so do them together. Free remotely
-      (`dir` is already threaded), but
-      `SORT_SQL` hardcodes direction inside each string
-      (`"ci.quantity DESC, c.name"`), so it must first split into expression +
-      direction + tiebreaker. Worth doing once, with the merge in mind: the
-      tiebreaker is what makes the key **total**, so keep it fixed ascending
-      rather than flipping it with the primary key. The control flips the
-      per-key default (price stays descending on open) rather than forcing asc.
+- ✅ **Asc/desc control.** An arrow beside the sort picker, showing the
+      direction it is *in* rather than the one clicking would give — a control
+      that displays its own outcome reads as a prediction. It **inverts each
+      sort's useful default** rather than forcing ascending, so picking "Price"
+      still opens most-expensive-first and the flip means the same thing for
+      every key. The tiebreaker stays ascending: only the primary key reverses,
+      since the merge depends on one fixed total order. Direction is retained
+      per panel alongside the sort itself.
+
 - ⬜ **Merging returns when the sets stop being nested** — step 3 of *Foreground
       and background*, which is what makes it a prerequisite rather than a
       someday item. Today background ⊇
