@@ -62,3 +62,35 @@ collection from decks…" is a dialog, a sum, and a write.
 **Gap:** step 2 is the same *roll counts up to oracle grain* primitive that is
 the last open piece of the unified-panel campaign. Two unrelated journeys wanting
 it is good evidence it is the right primitive.
+
+---
+
+## C. Save a search — a query becomes a collection
+
+> I have refined a Scryfall search until it is exactly the pool I want to brew
+> from. I want to keep it.
+
+1. ✅ Search in All Magic until the results are right — query, facets and sort
+   all already work, and the panel remembers them if I navigate away.
+2. ⬜ **Save as collection…**, defaulting the name to the query text.
+3. ⬜ It saves *all* matches, not the page in hand. The grid shows 175 at a
+   time; a query matching two thousand cards must page the whole set. That is
+   real traffic, so it wants a visible count, a cancel, and a guard above some
+   size — `scheduledFetch` will space the requests, but spacing is not consent.
+4. ⬜ **Static.** A snapshot, not a live query: it must not shift when Scryfall
+   reprints something. A live saved search is a different feature, and calling
+   this one "static" is what makes the difference explicit rather than accidental.
+5. ✅ Afterwards it is an ordinary collection — browsable, usable as a deck
+   pool's comparison set, exportable.
+
+**Open:** which printing, and at what quantity. One copy of `unique=cards`'s
+choice is the obvious default, but this is a *pool to brew from* rather than
+cards you own, which is the first case where a collection means "these are
+available to me" rather than "these are mine". Worth noticing before it becomes
+an assumption.
+
+**Note the family.** This and journey A are the same shape: a collection built
+from something else — a union of decks there, a query here. Both materialised,
+both wanting a "New collection from…" entry point rather than two unrelated
+buttons.
+

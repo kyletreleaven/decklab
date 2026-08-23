@@ -21,7 +21,7 @@ What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 | --- | --- | --- |
 | **1. One panel for every card source** | ~done | Universe as a collection · Card panel layout · Active slots and hover · Panel state retention |
 | **2. Storage and fetching** | partly done | Mixed-grain storage (004) · Card data fetching · Local query parser ✅ · Printings TTL ✅ · Compact printing rows |
-| **3. Card-set algebra** ⭐⭐⭐ | design only | Card-set algebra · Set operations |
+| **3. Card-set algebra** ⭐⭐⭐ | design only | Card-set algebra · Foreground and background · Set operations |
 | **4. Formats beyond Commander** ⭐ | not started | Format support |
 | **5. Multi-panel workspace** ⭐ | not started | Multi-panel workspace |
 | **6. Analytics and intelligence** | sketched | Statistics · Card intelligence · Discovery · Suggestions · Playtesting |
@@ -1339,6 +1339,94 @@ is a scratch list), but cross-zone duplicates go unnoticed entirely.
       commander-zone copy when there is one. `setCommander()` already moves
       rather than duplicates, so new data cannot get into this state — but
       existing decks and imports can.
+
+### Foreground and background — the pool as two sets ⭐
+
+Today's panel has both already, unnamed:
+
+- **Foreground** — the set you are looking at. Always rendered, always lit.
+- **Background** — the wider context behind it. Rendered *only* when
+  "Show not in <foreground>" is checked, and dimmed when it is.
+
+**Rendered = foreground ∪ background when the toggle is on, foreground alone
+when it is off.** The toggle is therefore a choice of operand, not a visibility
+flag — and its existing label already says exactly this.
+
+The one-off behaviours all become instances:
+
+| Panel today | Foreground | Background |
+| --- | --- | --- |
+| Collection view | that collection | All Magic, toggle off |
+| Deck-attached pool | your active collection | All Magic, toggle on |
+| All Magic view | All Magic | none |
+
+Letting each be any card set is the whole generalisation. Note it is the
+*background* that is currently hardcoded — always All Magic, never chosen.
+
+**Choosing them — promote, do not pick.** Modelled on Photoshop's foreground /
+background swatches: two named slots and small buttons between them, rather than
+a chooser.
+
+- ⬜ **Copy to bg** — the background is *promoted from the foreground*, never
+      selected from a list. Journey B is then: open Paper, copy to bg, navigate
+      to Dave's binder. No picker, and it is meaningful from the very first
+      state, which a swap alone is not.
+- ⬜ **Switch** — swap the two. Viewing his binder against yours becomes yours
+      against his in one click: the "what could I offer him" view, which
+      otherwise means navigating away and back.
+- ⬜ **Clear bg**, back to All Magic. "No particular background" and "everything"
+      are the same thing, so unset needs no separate value — and with bg at All
+      Magic, switch is correctly dead, since promoting it would light every card
+      and say nothing.
+- ⬜ Navigation sets the foreground, so no new gesture is needed for that half.
+      **Switch therefore navigates** — it moves you to the old background with
+      the old foreground behind you — and that is fine rather than a compromise.
+- ⬜ The foreground need not be a saved collection. An in-flight search is one
+      too: All Magic plus a query is already a page you can be on. So "copy to
+      bg" from a search means *compare these results against that set* without
+      saving anything, and journey C's "save as collection" is the durable
+      version of the same gesture.
+- ⬜ The background, by contrast, is **one app-level value**, not per panel:
+      journey B copies it in Paper and then navigates to Dave's binder, so panel
+      state would reset on arrival and the journey would be impossible.
+
+**Selection and rendering stay separate controls.** *Which* set is behind you and
+*whether you are looking at it* are different questions: the collection view
+wants "background is All Magic, just do not draw it", which is not the same as
+having no background. So the existing show/hide toggle survives alongside the
+slot pair rather than being folded into it.
+
+**Lit ⟺ in the foreground.** Nothing else, and no distinction *among* the lit:
+whether the background also has a card is not something the grid says. Dimming
+answers exactly one question — *is this in my set?* — so the display stays
+two-toned however unrelated the two sets are.
+
+| Region | Journey B reading | Treatment |
+| --- | --- | --- |
+| foreground ∩ background | he has it, I have it | lit |
+| foreground ∖ background | I have it, he does not | lit, indistinguishably |
+| background ∖ foreground | he has it, I do not | dimmed |
+
+Whether the first two should ever be told apart — "could I offer this in trade"
+is a fair question — is left open rather than planned. If it is wanted it has to
+be a *positive* mark, since dimming already means the other thing.
+
+**This makes the k-way merge a prerequisite, not a someday item.** It is free
+today only because the background is always All Magic, which contains every
+foreground — so the union collapses to one stream. The moment a background is a
+collection the two are not nested, and rendering their union means merging two
+ordered streams by a total key — regardless of how the results are shaded.
+
+- ⬜ `subject` and `includeOutside` largely dissolve: the first becomes
+      "foreground = X", the second is the toggle deciding whether the background
+      joins in.
+- ⬜ Falls out for free: "add to Paper from Cube" — foreground Paper, background
+      Cube — which the collection pool cannot express today, since its background
+      is hardcoded to All Magic; and chop shop's back half, where a deck pool
+      over the union collection is the same gesture as one over All Magic.
+- ⬜ Grain still follows the stream: printing grain from a collection, oracle
+      grain from Scryfall. With both operands in play a union can mix them, which
+      is the same question the merge has to answer anyway.
 
 ### Set operations — surfacing the algebra
 
