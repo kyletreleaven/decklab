@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { availableSorts, DEFAULT_SORT, SORTS, sortOption } from "./sort";
+import {
+  availableSorts,
+  DEFAULT_SORT,
+  orderBySql,
+  remoteSort,
+  SORTS,
+  sortOption,
+} from "./sort";
 
 describe("sort vocabulary", () => {
   it("offers every sort when the answer is purely local", () => {
@@ -22,18 +29,36 @@ describe("sort vocabulary", () => {
     }
   });
 
-  it("gives every remote sort an explicit direction", () => {
-    // Scryfall's default direction varies by key — cmc ascends, usd descends —
-    // so an omitted `dir` gets the price list backwards. Pinned live by the
-    // "defaults direction per sort key" contract test.
+  it("gives every sort one direction, used by both sides", () => {
+    // These used to disagree by construction: Scryfall's default varies by key
+    // and the SQL had its direction baked into a string.
     for (const option of SORTS) {
-      if (option.remote) expect(["asc", "desc"]).toContain(option.remote.dir);
+      expect(["asc", "desc"]).toContain(option.dir);
+      if (option.remote) expect(remoteSort(option.key).dir).toBe(option.dir);
     }
   });
 
   it("sorts prices most-expensive first", () => {
     // The one place the useful direction is not the default reading order.
-    expect(sortOption("value").remote).toEqual({ order: "usd", dir: "desc" });
+    expect(remoteSort("value")).toEqual({ order: "usd", dir: "desc" });
+    expect(orderBySql("value")).toContain("DESC");
+  });
+
+  it("ends every ordering with a unique tiebreaker", () => {
+    // Totality is what makes streams mergeable: with ties broken arbitrarily a
+    // card can land on both sides of a page boundary — duplicated in one page,
+    // missing from the next. Printings share a name, so the id is the only
+    // column that can finish the job.
+    for (const option of SORTS) {
+      expect(orderBySql(option.key).endsWith("c.name ASC, c.id ASC")).toBe(true);
+    }
+  });
+
+  it("keeps nulls last whichever way the sort runs", () => {
+    // SQLite puts NULL first ascending, which would lead the price list with
+    // cards that have no price.
+    expect(orderBySql("value")).toContain("NULLS LAST");
+    expect(orderBySql("name")).toContain("NULLS LAST");
   });
 
   it("falls back rather than throwing on an unknown key", () => {

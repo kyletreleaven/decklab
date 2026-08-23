@@ -1,7 +1,7 @@
 import { CardRow, execute, newId, now, rowToCard, select } from "./db";
 import type { CardFilter } from "./filters";
 import { compileQuery } from "./query";
-import type { SortKey } from "./sort";
+import { orderBySql, type SortKey } from "./sort";
 
 /**
  * A free-text query that could not be compiled — a syntax error, or a term we
@@ -134,13 +134,6 @@ export type CollectionFilter = CardFilter;
 /** Kept as an alias so existing call sites read naturally. */
 export type CollectionSort = SortKey;
 
-const SORT_SQL: Record<CollectionSort, string> = {
-  name: "c.name",
-  mv: "c.cmc, c.name",
-  quantity: "ci.quantity DESC, c.name",
-  value: "CAST(json_extract(c.prices, '$.usd') AS REAL) DESC NULLS LAST, c.name",
-};
-
 /**
  * Items in a collection, filtered and sorted.
  *
@@ -243,7 +236,7 @@ export async function collectionItems(
        FROM collection_items ci
        JOIN cards c ON c.id = ci.card_id
       WHERE ci.collection_id = $1${where}
-      ORDER BY ${SORT_SQL[sort]}`,
+      ORDER BY ${orderBySql(sort)}`,
     params,
   );
 

@@ -325,6 +325,13 @@ rather than as scaffolding.
       shortcut made the pool silently collection-only for any query a
       decent-sized collection could satisfy, and the merge it protected also
       handed *ordering* to whichever side happened to be non-empty.
+- ⬜ **Release date as a sort.** Both sides can already express it: `released_at`
+      has been a column since migration 001 and orders the printings carousel,
+      and Scryfall takes `order=released`. Newest-first is the useful default,
+      like price. Note it is a *printing* fact, so at oracle grain it dates
+      whichever printing the row stands for, not the card's first appearance —
+      "newest reprints" and "newest cards" are different questions and only the
+      first falls out for free.
 - ⬜ **Asc/desc control** — shares the `SORT_SQL` split with step 2 of
       *Foreground and background*, so do them together. Free remotely
       (`dir` is already threaded), but
@@ -1429,10 +1436,20 @@ it must be merged. That puts the visible part last.
    two `activeCollection={null}` hacks are gone — All Magic passes *itself* as
    the foreground, and nothing recedes because lighting a set that contains
    everything lights the grid.
-2. ⬜ **Make the sort key total** — `(name, id)`, not `name`, or ties across a
-   page boundary duplicate or drop rows once streams are merged. Shares the
-   `SORT_SQL` split with the asc/desc control.
+2. ✅ **The sort key is total** — `<field> <dir> NULLS LAST, c.name ASC,
+   c.id ASC`. Name before id so a tie group still reads alphabetically; the
+   printing id finishes the job, since printings share a name and that is
+   exactly what lets a card land on both sides of a page boundary.
+   `SORT_SQL` is gone: sorts live once in `sort.ts` and serve both sides, so
+   direction has one source rather than a string on one side and a field on the
+   other. `NULLS LAST` is now unconditional — SQLite puts NULL first ascending,
+   so priceless cards used to lead an ascending price list. The asc/desc control
+   is now mostly wiring.
 3. ⬜ **The k-way merge**, over streams ordered by that key.
+   **Settle first:** Scryfall will not take our tiebreaker, so its stream is
+   total by *its* rules, not `(name, id)`. That cannot drop or duplicate rows —
+   each stream is consumed in its own order — but it can misorder within a tie
+   group. Decide whether each arriving page is re-sorted locally before merging.
 4. ⬜ **The swatch** — copy to bg, switch, clear. First step where anything new
    appears on screen; doing it earlier puts three buttons up that cannot change
    what you see.

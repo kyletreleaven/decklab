@@ -15,7 +15,7 @@ import { isSuperseded } from "../lib/scheduler";
 import {
   availableSorts,
   DEFAULT_SORT,
-  sortOption,
+  remoteSort,
   type SortKey,
 } from "../lib/sort";
 import * as scryfall from "../lib/scryfall";
@@ -318,7 +318,7 @@ export function PoolPanel({
    * to produce the ordering.
    */
   const sorts = useMemo(() => availableSorts(drawingBackground), [drawingBackground]);
-  const remoteSort = sortOption(sort).remote ?? { order: "name", dir: "asc" as const };
+  const scryfallSort = remoteSort(sort);
 
   // Turning outside cards back on can strand a sort the universe cannot do.
   useEffect(() => {
@@ -356,7 +356,7 @@ export function PoolPanel({
           const page = await scryfall.search(
             toScryfallQuery(effective) || EVERYTHING,
             1,
-            remoteSort,
+            scryfallSort,
           );
           if (requestId.current !== id) return;
           setUniverseCards(page.cards);
@@ -521,7 +521,7 @@ export function PoolPanel({
       const page = await scryfall.search(
         toScryfallQuery(effective) || EVERYTHING,
         nextPage,
-        remoteSort,
+        scryfallSort,
       );
       setUniverseCards((prev) => [...prev, ...page.cards]);
       setNextPage(page.nextPage);
