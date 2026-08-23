@@ -25,12 +25,14 @@ import type {
   CollectionItem,
   CollectionKind,
   OwnershipRow,
+  QuantityKind,
 } from "./types";
 
 interface CollectionRow {
   id: string;
   name: string;
   kind: CollectionKind;
+  quantity_kind: QuantityKind;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -41,6 +43,9 @@ function rowToCollection(row: CollectionRow): Collection {
     id: row.id,
     name: row.name,
     kind: row.kind,
+    // Rows written before migration 004 predate the column; the default makes
+    // them natural, which is what they were.
+    quantityKind: row.quantity_kind ?? "natural",
     notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -76,23 +81,27 @@ export async function listCollections(): Promise<Collection[]> {
 export async function createCollection(
   name: string,
   kind: CollectionKind = "paper",
+  quantityKind: QuantityKind = "natural",
 ): Promise<Collection> {
   const collection: Collection = {
     id: newId(),
     name: name.trim() || "Untitled collection",
     kind,
+    quantityKind,
     notes: "",
     createdAt: now(),
     updatedAt: now(),
   };
 
   await execute(
-    `INSERT INTO collections (id, name, kind, notes, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT INTO collections
+       (id, name, kind, quantity_kind, notes, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       collection.id,
       collection.name,
       collection.kind,
+      collection.quantityKind,
       collection.notes,
       collection.createdAt,
       collection.updatedAt,
@@ -284,6 +293,35 @@ export async function addCardToCollection(
     now(),
     collectionId,
   ]);
+}
+
+/**
+ * Change what a collection's quantities mean. **Destructive one way.**
+ *
+ * Becoming binary normalises every quantity to 1: the type is a fact about the
+ * collection, not a lens over it, so the counts genuinely go. Leaving them in
+ * place while ignoring them would create rows whose stored quantity is not
+ * their quantity, and the first operation to read the column directly would cap
+ * real holdings at a placeholder.
+ *
+ * Callers must confirm before calling this — see `docs/card-set-types.md`. The
+ * non-destructive want, *view this collection as membership*, is a derived set
+ * rather than a conversion.
+ */
+export async function setQuantityKind(
+  collectionId: string,
+  quantityKind: QuantityKind,
+): Promise<void> {
+  if (quantityKind === "binary") {
+    await execute(
+      "UPDATE collection_items SET quantity = 1 WHERE collection_id = $1",
+      [collectionId],
+    );
+  }
+  await execute(
+    "UPDATE collections SET quantity_kind = $1, updated_at = $2 WHERE id = $3",
+    [quantityKind, now(), collectionId],
+  );
 }
 
 /**

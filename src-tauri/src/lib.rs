@@ -114,6 +114,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/003_oracle_fetches.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "collection quantity kind",
+            sql: include_str!("../migrations/004_quantity_kind.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

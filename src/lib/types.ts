@@ -88,10 +88,22 @@ export type CollectionKind =
   | "loaned"
   | "wishlist";
 
+/**
+ * Whether a collection's quantities are counts or mere membership.
+ *
+ * Not decoration: intersection is `min`, so reading a binary set's placeholder
+ * as a real count caps genuine holdings. See `docs/card-set-types.md`.
+ *
+ * Independent of grain (oracle vs printing), which is a property of an item.
+ */
+export type QuantityKind = "natural" | "binary";
+
 export interface Collection {
   id: string;
   name: string;
   kind: CollectionKind;
+  /** `binary` collections report membership only — a saved search, not a shelf. */
+  quantityKind: QuantityKind;
   notes: string;
   createdAt: string;
   updatedAt: string;
