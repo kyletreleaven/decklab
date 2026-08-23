@@ -269,6 +269,16 @@ export async function addCardToCollection(
   finish = "nonfoil",
   condition = "NM",
 ): Promise<void> {
+  // A binary collection records membership, so adding something already in it
+  // is a no-op rather than a second copy. Enforced here rather than only in the
+  // UI: a type that holds solely while the buttons behave is not a type, and a
+  // stray quantity of 2 would later be read as a real count by `min`.
+  const kinds = await select<{ quantity_kind: QuantityKind }>(
+    "SELECT quantity_kind FROM collections WHERE id = $1",
+    [collectionId],
+  );
+  const binary = kinds[0]?.quantity_kind === "binary";
+
   const existing = await select<{ id: string; quantity: number }>(
     `SELECT id, quantity FROM collection_items
       WHERE collection_id = $1 AND card_id = $2 AND finish = $3 AND condition = $4`,
@@ -276,16 +286,18 @@ export async function addCardToCollection(
   );
 
   if (existing.length) {
-    await execute("UPDATE collection_items SET quantity = $1 WHERE id = $2", [
-      existing[0].quantity + quantity,
-      existing[0].id,
-    ]);
+    if (!binary) {
+      await execute("UPDATE collection_items SET quantity = $1 WHERE id = $2", [
+        existing[0].quantity + quantity,
+        existing[0].id,
+      ]);
+    }
   } else {
     await execute(
       `INSERT INTO collection_items
          (id, collection_id, card_id, quantity, finish, condition, notes, added_at)
        VALUES ($1, $2, $3, $4, $5, $6, '', $7)`,
-      [newId(), collectionId, card.id, quantity, finish, condition, now()],
+      [newId(), collectionId, card.id, binary ? 1 : quantity, finish, condition, now()],
     );
   }
 

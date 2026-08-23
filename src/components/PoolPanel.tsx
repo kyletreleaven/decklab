@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collectionItems,
   collectionOracleIds,
+  collectionQuantitiesByPrinting,
   QueryError,
   UNIVERSE_ID,
   UNIVERSE_NAME,
@@ -18,8 +19,9 @@ import {
   take,
   type SortedSource,
 } from "../lib/merge";
-import { retain, retained, useRetained } from "../lib/panelState";
+import { retained, useRetained } from "../lib/panelState";
 import { MAX_CARDS } from "../lib/saveSearch";
+import { stepperCase, STEPPER_CONTROLS } from "../lib/stepper";
 import { isSuperseded } from "../lib/scheduler";
 import {
   availableSorts,
@@ -57,9 +59,29 @@ interface PoolResults {
   signature: string;
 }
 
+/**
+ * What a row's `±` acts on. One shape across all cases so a caller can ask
+ * `step.inc` without the branch it came from changing the answer's type —
+ * binary rows have no stepper, only removal.
+ */
+interface Stepper {
+  name: string;
+  dec: (() => void) | null;
+  inc: (() => void) | null;
+  drop: (() => void) | null;
+  /** Whether the wall shows the drop, or leaves it to the list. */
+  dropOnWall: boolean;
+}
+
 type Row =
   | { kind: "card"; key: string; card: Card }
-  | { kind: "item"; key: string; card: Card; item: CollectionItem };
+  /**
+   * An entry, tagged with the collection it came from. When a background
+   * collection is drawn both sources yield entries, and without `from` the
+   * background's rows were treated as the foreground's — taking its quantity
+   * kind and offering edits that wrote to the wrong set.
+   */
+  | { kind: "item"; key: string; card: Card; item: CollectionItem; from: string };
 
 /** How many cards a page shows, so the union pages at a steady rhythm. */
 const PAGE = 175;
@@ -111,6 +133,8 @@ export function PoolPanel({
     name: string;
     /** Copies held, keyed by printing id. */
     quantities: Record<string, number>;
+    /** Binary destinations take members, not copies — see `docs/card-set-types.md`. */
+    quantityKind?: QuantityKind;
     add: (card: Card) => void;
     remove: (card: Card) => void;
   } | null;
@@ -257,7 +281,19 @@ export function PoolPanel({
   const cached = useRef(retained(stateKey) as Partial<PoolResults>);
 
   const [rows, setRows] = useState<Row[]>(() => cached.current.rows ?? []);
+  /**
+   * What the foreground holds — the panel's own cache of it.
+   *
+   * Loaded once per foreground and then updated in place. Adding or removing a
+   * card only moves it between the foreground and the background, so the wall
+   * itself never changes; refetching to learn that would shift rows under the
+   * pointer for no new information.
+   *
+   * Both grains, because the two questions differ: dimming asks "do I have this
+   * card" (oracle), the stepper asks "how many of this printing".
+   */
   const [inCollection, setInCollection] = useState<Set<string>>(new Set());
+  const [fgHeld, setFgHeld] = useState<Record<string, number>>({});
   const [shown, setShown] = useState(() => cached.current.shown ?? PAGE);
   const [total, setTotal] = useState(() => cached.current.total ?? 0);
   const [exhausted, setExhausted] = useState(() => cached.current.exhausted ?? false);
@@ -308,8 +344,45 @@ export function PoolPanel({
       setInCollection(new Set());
       return;
     }
-    collectionOracleIds([foreground.id]).then(setInCollection);
+    void Promise.all([
+      collectionOracleIds([foreground.id]),
+      collectionQuantitiesByPrinting(foreground.id),
+    ]).then(([oracles, held]) => {
+      setInCollection(oracles);
+      setFgHeld(held);
+    });
+    // Keyed on `refreshKey` so an edit made *elsewhere* — the card panel, the
+    // pool above — is reflected here too. These are two cheap local queries and
+    // they do not touch the row list, so nothing re-pages.
   }, [foreground?.id, foregroundIsUniverse, refreshKey]);
+
+  /**
+   * Mirror a write we just made, so dimming and the controls agree with it.
+   *
+   * `delta` of `null` removes the printing outright. The oracle stays lit while
+   * any printing of it remains, so removing one printing of a card held in two
+   * does not wrongly dim it.
+   */
+  function noteChange(card: Card, delta: number | null) {
+    setFgHeld((prev) => {
+      const next = { ...prev };
+      const after = delta === null ? 0 : Math.max(0, (next[card.id] ?? 0) + delta);
+      if (after === 0) delete next[card.id];
+      else next[card.id] = after;
+
+      setInCollection((lit) => {
+        const stillHeld = rows.some(
+          (r) => r.card.oracleId === card.oracleId && (next[r.card.id] ?? 0) > 0,
+        );
+        const updated = new Set(lit);
+        if (stillHeld) updated.add(card.oracleId);
+        else updated.delete(card.oracleId);
+        return updated;
+      });
+
+      return next;
+    });
+  }
 
   /**
    * Whether the background is what gets drawn.
@@ -351,13 +424,17 @@ export function PoolPanel({
   const dims = !!foreground && !foregroundIsUniverse;
 
   /**
-   * Whether the rows on screen carry meaningful counts.
+   * Whether the counts on screen mean anything — which depends on *whose*
+   * counts they are.
    *
-   * False for a binary foreground drawn alone. When the background is drawn the
-   * rows come from All Magic, which has no counts either — but the destination's
-   * quantities are still worth showing, so that case stays counted.
+   * Printing-grain rows show the foreground's own quantities. Oracle-grain rows
+   * show the destination's. Reading the foreground in both cases put steppers
+   * back on a binary collection the moment its background was drawn, since the
+   * rows were then All Magic's and the check no longer applied to anything.
    */
-  const counts = drawingBackground || foreground?.quantityKind !== "binary";
+  const counts = drawingBackground
+    ? destination?.quantityKind !== "binary"
+    : foreground?.quantityKind !== "binary";
 
   const signature = JSON.stringify([
     localSourceId,
@@ -365,11 +442,11 @@ export function PoolPanel({
     effectiveKey,
     sort,
     sortFlipped,
-    // Must match the fetch effect's deps exactly, or the skip swallows changes
-    // the effect would have caught: edit a collection while its panel is
-    // unmounted, come back, and the stale rows would look current. Zero for the
-    // remote branch — a local write cannot change what Scryfall returns.
-    drawingBackground ? 0 : refreshKey,
+    // Must match the fetch effect's deps exactly, or the retention skip
+    // swallows a change the effect would have caught. `refreshKey` is in
+    // neither: adding a card moves it between foreground and background, so
+    // the union — and therefore the wall — is unchanged. Membership lives in
+    // the cache above instead.
   ]);
 
   /**
@@ -430,6 +507,7 @@ export function PoolPanel({
                 key: item.id,
                 card: item.card,
                 item,
+                from: collectionId,
               })),
             ),
           };
@@ -512,7 +590,6 @@ export function PoolPanel({
     effectiveKey,
     sort,
     sortFlipped,
-    drawingBackground ? 0 : refreshKey,
   ]);
 
   /**
@@ -574,52 +651,58 @@ export function PoolPanel({
    * card-grained destination would let a `−` on your foil decrement the nonfoil
    * copy instead, since the two share a printing id.
    */
-  function stepperFor(row: Row) {
-    if (row.kind === "item" && manage && !counts) {
-      // Binary: in or out. A `− n +` here would invite you to hold two of
-      // something the set never claimed you held one of.
-      const { item } = row;
-      return {
-        name: foreground?.name ?? "",
-        dec: null,
-        inc: null,
-        drop: () => manage.onRemoveItem(item),
-      };
-    }
-    if (row.kind === "item" && manage) {
-      const { item } = row;
-      return {
-        name: foreground?.name ?? "",
-        dec: () => manage.onSetItemQuantity(item, item.quantity - 1),
-        inc: () => manage.onSetItemQuantity(item, item.quantity + 1),
-        drop: () => manage.onRemoveItem(item),
-      };
-    }
-    if (!destination) return null;
+  /**
+   * The edits a row offers, and the handlers behind them.
+   *
+   * The *decision* lives in `stepper.ts` where it can be tabulated and tested —
+   * three inputs interact and I got it wrong repeatedly by inspection. This
+   * only binds handlers to the case it returns.
+   */
+  /**
+   * The edits a card offers, and the handlers behind them.
+   *
+   * The decision lives in `stepper.ts`, on two inputs: the destination's kind
+   * and whether the card is already in it. Everything here is binding handlers
+   * — which differ by row, since an entry can be adjusted by its own id where a
+   * card has to go through the destination.
+   */
+  /** Whether `+`/`−` write to the foreground itself, as in a collection view. */
+  const destinationIsForeground = !!destination && destination.name === foreground?.name;
+
+  function stepperFor(row: Row): Stepper | null {
+    // From the cache when writing to the foreground, so an edit is reflected
+    // without a refetch; from the destination otherwise, which App refreshes.
+    const held = destinationIsForeground
+      ? (fgHeld[row.card.id] ?? 0)
+      : (destination?.quantities[row.card.id] ?? 0);
+
+    const kind = destination
+      ? (destination.quantityKind ?? "natural")
+      : null;
+
+    const which = stepperCase({ destinationKind: kind, inDestination: held });
+    if (which === "none") return null;
+
+    const controls = STEPPER_CONTROLS[which];
+
+    /** Write, then mirror it locally rather than reloading the wall. */
+    const write = (act: () => void, delta: number | null) => () => {
+      act();
+      if (destinationIsForeground) noteChange(row.card, delta);
+    };
+
     return {
-      name: destination.name,
-      dec: () => destination.remove(row.card),
-      inc: () => destination.add(row.card),
-      drop: null,
+      name: destination?.name ?? "",
+      dropOnWall: controls.dropOnWall,
+      dec: !controls.dec
+        ? null
+        : write(() => destination?.remove(row.card), -1),
+      inc: !controls.inc ? null : write(() => destination?.add(row.card), +1),
+      drop: !controls.drop
+        ? null
+        : write(() => destination?.remove(row.card), null),
     };
   }
-
-  /**
-   * Results are written as one object, never field by field: a page of cards
-   * paired with another query's `nextPage` would fetch the wrong continuation.
-   * Skipped while a request is in flight, so a half-updated view is never
-   * mistaken for a finished one.
-   */
-  useEffect(() => {
-    if (loading) return;
-    retain(stateKey, {
-      rows,
-      shown,
-      total,
-      exhausted,
-      signature,
-    } satisfies PoolResults);
-  }, [stateKey, loading, rows, shown, total, exhausted, signature]);
 
   async function loadMore() {
     const next = shown + PAGE;
@@ -926,10 +1009,13 @@ export function PoolPanel({
             const isIn = inCollection.has(card.oracleId);
             // At printing grain the count is what you hold in *this* row; at
             // oracle grain it is what the destination holds of that card.
-            const count =
-              row.kind === "item"
-                ? row.item.quantity
-                : (destination?.quantities[card.id] ?? 0);
+            // The entry's own count, since `quantities` sums a printing's
+            // finishes and would show a foil and a nonfoil the same total. But
+            // suppressed once the destination no longer holds it, so a removed
+            // card drops its badge without the list being refetched.
+            const count = destinationIsForeground
+              ? (fgHeld[card.id] ?? 0)
+              : (destination?.quantities[card.id] ?? 0);
             const step = stepperFor(row);
             return (
               <div
@@ -959,21 +1045,40 @@ export function PoolPanel({
                   .join(" — ")}
               >
                 <CardImage card={card} size="small" />
-                {step?.dec && step.inc && (
+                {/* Whichever of the three exist. A counted destination offers
+                    `− +`; a binary one offers `×` on a member and `+` on a
+                    non-member, since membership has no states between. */}
+                {step && (step.dec || step.inc || step.drop) && (
                   <span
                     className="tile-controls"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      title={`Remove one from ${step.name}`}
-                      onClick={step.dec}
-                      disabled={!count}
-                    >
-                      −
-                    </button>
-                    <button title={`Add one to ${step.name}`} onClick={step.inc}>
-                      +
-                    </button>
+                    {step.dec && (
+                      <button
+                        title={`Remove one from ${step.name}`}
+                        onClick={step.dec}
+                        disabled={!count}
+                      >
+                        −
+                      </button>
+                    )}
+                    {step.inc && (
+                      <button title={`Add to ${step.name}`} onClick={step.inc}>
+                        +
+                      </button>
+                    )}
+                    {/* Only where it is the *only* edit. Alongside a stepper
+                        this is a shortcut for stepping to zero, and the wall is
+                        too dense to carry a third button for that — the list
+                        offers it there instead. */}
+                    {step.drop && step.dropOnWall && (
+                      <button
+                        title={`Remove from ${step.name}`}
+                        onClick={step.drop}
+                      >
+                        ×
+                      </button>
+                    )}
                   </span>
                 )}
                 {/* How many are already in the destination — distinct from the
@@ -990,10 +1095,13 @@ export function PoolPanel({
           visible.map((row) => {
             const card = row.card;
             const isIn = inCollection.has(card.oracleId);
-            const count =
-              row.kind === "item"
-                ? row.item.quantity
-                : (destination?.quantities[card.id] ?? 0);
+            // The entry's own count, since `quantities` sums a printing's
+            // finishes and would show a foil and a nonfoil the same total. But
+            // suppressed once the destination no longer holds it, so a removed
+            // card drops its badge without the list being refetched.
+            const count = destinationIsForeground
+              ? (fgHeld[card.id] ?? 0)
+              : (destination?.quantities[card.id] ?? 0);
             const step = stepperFor(row);
             return (
               <div
@@ -1025,25 +1133,26 @@ export function PoolPanel({
                 <ManaCost cost={card.manaCost} />
                 {step && (
                   <span className="controls" onClick={(e) => e.stopPropagation()}>
-                    {step.dec && step.inc && (
-                      <>
-                        <button
-                          title={`Remove one from ${step.name}`}
-                          onClick={step.dec}
-                          disabled={!count}
-                        >
-                          −
-                        </button>
-                        <button title={`Add one to ${step.name}`} onClick={step.inc}>
-                          +
-                        </button>
-                      </>
+                    {step.dec && (
+                      <button
+                        title={`Remove one from ${step.name}`}
+                        onClick={step.dec}
+                        disabled={!count}
+                      >
+                        −
+                      </button>
                     )}
-                    {/* Drop the entry outright, rather than stepping to zero —
-                        only meaningful for a row that *is* an entry. */}
+                    {step.inc && (
+                      <button title={`Add to ${step.name}`} onClick={step.inc}>
+                        +
+                      </button>
+                    )}
+                    {/* Removes the row outright rather than stepping to zero:
+                        for a counted entry that is "drop this printing", and
+                        for a member of a binary set it is the only edit. */}
                     {step.drop && (
                       <button
-                        title={`Remove this printing from ${step.name} entirely`}
+                        title={`Remove from ${step.name}`}
                         onClick={step.drop}
                       >
                         ×

@@ -884,6 +884,7 @@ export default function App() {
             destination={{
               name: currentCollection.name,
               quantities: collectionContents,
+              quantityKind: currentCollection.quantityKind,
               add: (card) => addToCollection(card, currentCollection.id),
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
@@ -910,6 +911,7 @@ export default function App() {
             destination={{
               name: currentCollection.name,
               quantities: collectionContents,
+              quantityKind: currentCollection.quantityKind,
               add: (card) => addToCollection(card, currentCollection.id),
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
