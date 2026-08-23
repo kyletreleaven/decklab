@@ -1561,6 +1561,14 @@ purchase links, 12% API self-references, against **4.7%** actual text and stats.
 We store the raw payload in `cards.data`, so ~5,800 printings is ~27 MB where
 compact rows would be ~4 MB.
 
+**And it cannot back a searchable collection.** CSV omits `oracle_text`,
+`colors`, `color_identity`, `keywords`, `power`, `toughness` and `released_at` —
+pinned by a contract test. `compileQuery` filters on most of those, so a
+CSV-backed cache identifies and displays cards but cannot search them. The 20x
+saving is not "the same data without the URLs": it is most of the card removed.
+That rules CSV out for *save a search as a collection*, where the whole point is
+a set you can then filter.
+
 **Why it was deferred.** Migration 003 undercut the bandwidth argument: a print
 run is now fetched once per card per week, so twenty-times-less of an already
 rare request buys little. And CSV cannot populate `cards` as it stands — it

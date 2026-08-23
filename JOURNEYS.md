@@ -73,15 +73,23 @@ it is good evidence it is the right primitive.
 1. ✅ Search in All Magic until the results are right — query, facets and sort
    all already work, and the panel remembers them if I navigate away.
 2. ⬜ **Save as collection…**, defaulting the name to the query text.
-3. ⬜ It saves *all* matches, not the page in hand. The grid shows 175 at a
-   time; a query matching two thousand cards must page the whole set. That is
-   real traffic, so it wants a visible count, a cancel, and a guard above some
-   size — `scheduledFetch` will space the requests, but spacing is not consent.
+3. ⬜ It saves *all* matches, not the page in hand — but **capped at ~10 pages
+   (about 1,750 cards)**, refusing above that with "narrow your search first".
+
+   The budget is requests, not bytes, and no arrangement of the API makes a
+   big walk cheap — see
+   [`docs/fetching-many-cards.md`](docs/fetching-many-cards.md).
 4. ⬜ **Static.** A snapshot, not a live query: it must not shift when Scryfall
    reprints something. A live saved search is a different feature, and calling
    this one "static" is what makes the difference explicit rather than accidental.
 5. ✅ Afterwards it is an ordinary collection — browsable, usable as a deck
    pool's comparison set, exportable.
+
+**Settled:** full JSON, cached as it arrives, so the walk is paid once and
+everything after is local. CSV and stub-row shortcuts were both ruled out; a
+whole-corpus bulk ingest would remove the walk entirely but is a someday option,
+not a prerequisite. Reasoning in
+[`docs/fetching-many-cards.md`](docs/fetching-many-cards.md).
 
 **Open:** which printing, and at what quantity. One copy of `unique=cards`'s
 choice is the obvious default, but this is a *pool to brew from* rather than

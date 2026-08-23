@@ -306,6 +306,32 @@ describe.runIf(ENABLED)("scryfall contract", () => {
       }
     });
 
+    it("cannot answer a local query: CSV omits most searchable fields", async () => {
+      // The reason a CSV-backed cache would only *identify* cards, not let you
+      // search them. `compileQuery` filters on colour identity, oracle text,
+      // power/toughness and keywords — none of which survive the CSV. So the
+      // 20x saving buys a printings index, not a searchable one.
+      const res = await get(
+        `/cards/search?q=oracleid:${SOL_RING_ORACLE}&unique=prints&format=csv`,
+      );
+      const header = (await res.text()).split("\n")[0].split(",");
+
+      for (const present of ["type_line", "cmc", "name", "scryfall_id"]) {
+        expect(header).toContain(present);
+      }
+      for (const absent of [
+        "oracle_text",
+        "colors",
+        "color_identity",
+        "keywords",
+        "power",
+        "toughness",
+        "released_at",
+      ]) {
+        expect(header).not.toContain(absent);
+      }
+    });
+
     it("does NOT provide set_name or frame data in CSV", async () => {
       // Documents the gap: set names come from /sets, and variant traits
       // (border_color, frame_effects, finishes) still need the full object.
