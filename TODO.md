@@ -325,14 +325,18 @@ rather than as scaffolding.
       shortcut made the pool silently collection-only for any query a
       decent-sized collection could satisfy, and the merge it protected also
       handed *ordering* to whichever side happened to be non-empty.
-- ⬜ **Asc/desc control.** Free remotely (`dir` is already threaded), but
+- ⬜ **Asc/desc control** — shares the `SORT_SQL` split with step 2 of
+      *Foreground and background*, so do them together. Free remotely
+      (`dir` is already threaded), but
       `SORT_SQL` hardcodes direction inside each string
       (`"ci.quantity DESC, c.name"`), so it must first split into expression +
       direction + tiebreaker. Worth doing once, with the merge in mind: the
       tiebreaker is what makes the key **total**, so keep it fixed ascending
       rather than flipping it with the primary key. The control flips the
       per-key default (price stays descending on open) rather than forcing asc.
-- ⬜ **Merging returns when the sets stop being nested.** Today background ⊇
+- ⬜ **Merging returns when the sets stop being nested** — step 3 of *Foreground
+      and background*, which is what makes it a prerequisite rather than a
+      someday item. Today background ⊇
       foreground (All Magic contains every collection), so one page of the
       background is the whole answer and un-dimming is a local membership test.
       For sets in no subset relation — "all red cards" against a collection
@@ -1410,6 +1414,24 @@ two-toned however unrelated the two sets are.
 Whether the first two should ever be told apart — "could I offer this in trade"
 is a fair question — is left open rather than planned. If it is wanted it has to
 be a *positive* mark, since dimming already means the other thing.
+
+**Order of work.** The background's only job is to be drawn beside the
+foreground, so there is no cheap slice where it is selectable but the merge is
+not needed: with the toggle off it is not drawn and does nothing, and with it on
+it must be merged. That puts the visible part last.
+
+1. ⬜ **Refactor the panel to speak fg/bg**, background pinned to All Magic.
+   `subject` becomes the foreground, `includeOutside` becomes "draw the
+   background", `activeCollection` folds in. Zero behaviour change, so it is
+   verifiable by clicking — and the three rows of the table above should fall
+   out rather than being written individually.
+2. ⬜ **Make the sort key total** — `(name, id)`, not `name`, or ties across a
+   page boundary duplicate or drop rows once streams are merged. Shares the
+   `SORT_SQL` split with the asc/desc control.
+3. ⬜ **The k-way merge**, over streams ordered by that key.
+4. ⬜ **The swatch** — copy to bg, switch, clear. First step where anything new
+   appears on screen; doing it earlier puts three buttons up that cannot change
+   what you see.
 
 **This makes the k-way merge a prerequisite, not a someday item.** It is free
 today only because the background is always All Magic, which contains every
