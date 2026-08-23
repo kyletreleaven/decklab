@@ -91,11 +91,14 @@ whole-corpus bulk ingest would remove the walk entirely but is a someday option,
 not a prerequisite. Reasoning in
 [`docs/fetching-many-cards.md`](docs/fetching-many-cards.md).
 
-**Open:** which printing, and at what quantity. One copy of `unique=cards`'s
-choice is the obvious default, but this is a *pool to brew from* rather than
-cards you own, which is the first case where a collection means "these are
-available to me" rather than "these are mine". Worth noticing before it becomes
-an assumption.
+**Type:** a search saves as a **binary** collection — membership, not counts —
+since it is a pool to brew from rather than cards you own. Storing quantity 1
+would be a false claim and, worse, would cap real counts to 1 the first time
+anything intersected with it. See
+[`docs/card-set-types.md`](docs/card-set-types.md).
+
+**Open:** which printing. `unique=cards` returns one per card and that is the
+row you were looking at, so it is the natural default.
 
 **Note the family.** This and journey A are the same shape: a collection built
 from something else — a union of decks there, a query here. Both materialised,

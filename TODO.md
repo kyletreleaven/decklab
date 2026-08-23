@@ -940,6 +940,9 @@ The thing panels are views *of*. Maya and Blender give you many viewports onto o
 shared model; here the model is not a mesh but a **graph of card-set
 specifications**. Everything else in this section depends on getting this right.
 
+Quantity kinds and how operations combine them —
+[`docs/card-set-types.md`](docs/card-set-types.md).
+
 A node denotes a (multi)set of cards:
 
 **A spec is a function `card → quantity`,** with quantities in ℕ ∪ {∞}. Every
