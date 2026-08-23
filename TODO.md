@@ -1463,7 +1463,11 @@ thousand-entry binder ships a few MB over the IPC bridge per debounced
 keystroke. Fine at today's sizes.
 
 - ⬜ Write the merge against a *stream* interface — "give me your next element" —
-      not an array, so paging the local side later is not a rewrite.
+      not an array, so paging the local side later is not a rewrite. ✅ done in
+      `merge.ts`.
+- ⬜ Swap the generator interface for explicit per-source cursors, so retention
+      can resume mid-scroll and a refetch is targeted rather than a replay. See
+      the end of [`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md).
 - ⬜ Drop `data` from list queries: independent of paging and probably the bigger
       win. Tiles need name, image URLs, quantity and finish, all real columns;
       `data` is read only by `hasBack` and `variantTraits`, both card-panel

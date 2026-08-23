@@ -90,3 +90,25 @@ survives. Known so far: it is not `localeCompare`, not SQLite byte order, and
 not naive punctuation folding. `Aegis Turtle` before `A-Eiganjo Exemplar` says
 the hyphen is not simply dropped either, since dropping it would sort `AEiganjo`
 before `Aegis`.
+
+## Later: explicit cursors instead of a generator
+
+`mergeSorted` returns an `AsyncGenerator`, which is the clearest way to express
+the greedy pick but the wrong thing to hand out as an interface. A generator
+cannot be serialised or inspected, so panel retention — which restores rows but
+not closures — has nothing to resume from, and re-entering a panel means
+replaying the merge from the start.
+
+The fix, when it matters:
+
+```ts
+interface MergeCursor<T> {
+  sources: { nextPage: number | null; buffer: T[] }[];
+}
+```
+
+`advance(cursor, n)` returns rows plus a new cursor. Per source you can see
+which page is next and what is buffered, so a refetch is targeted rather than a
+replay, and retention can store `{ rows, cursor }` and resume mid-scroll. The
+generator stays as the algorithm underneath.
+
