@@ -331,6 +331,13 @@ textarea:focus {
   color: var(--text);
 }
 
+/* Carries the tooltip for a control that may be disabled. A disabled button
+   dispatches no mouse events, so its own `title` never shows — and that is
+   precisely when the reason matters. */
+.hint-wrap {
+  display: inline-flex;
+}
+
 .search-input {
   flex: 1;
   min-width: 120px;

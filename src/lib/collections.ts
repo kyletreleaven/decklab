@@ -325,6 +325,52 @@ export async function setQuantityKind(
 }
 
 /**
+ * Insert many cards at once.
+ *
+ * `addCardToCollection` costs three round trips per card — a SELECT to find a
+ * duplicate, the INSERT, then a timestamp UPDATE — which is fine for a click
+ * and hopeless for a thousand rows. Here the duplicate check is handed to the
+ * `UNIQUE (collection_id, card_id, finish, condition)` constraint via
+ * `ON CONFLICT DO NOTHING`, so no lookup is needed and the same card appearing
+ * twice in the input is harmless.
+ *
+ * Chunked because SQLite caps host parameters (999 by default) and each row
+ * spends seven.
+ */
+export async function addCardsToCollection(
+  collectionId: string,
+  cards: readonly Card[],
+  quantity = 1,
+): Promise<void> {
+  const PER_ROW = 7;
+  const CHUNK = Math.floor(900 / PER_ROW);
+  const stamp = now();
+
+  for (let start = 0; start < cards.length; start += CHUNK) {
+    const chunk = cards.slice(start, start + CHUNK);
+    const params: unknown[] = [];
+    const tuples = chunk.map((card, i) => {
+      const at = i * PER_ROW;
+      params.push(newId(), collectionId, card.id, quantity, "nonfoil", "NM", stamp);
+      return `($${at + 1}, $${at + 2}, $${at + 3}, $${at + 4}, $${at + 5}, $${at + 6}, $${at + 7})`;
+    });
+
+    await execute(
+      `INSERT INTO collection_items
+         (id, collection_id, card_id, quantity, finish, condition, added_at)
+       VALUES ${tuples.join(", ")}
+       ON CONFLICT (collection_id, card_id, finish, condition) DO NOTHING`,
+      params,
+    );
+  }
+
+  await execute("UPDATE collections SET updated_at = $1 WHERE id = $2", [
+    stamp,
+    collectionId,
+  ]);
+}
+
+/**
  * Move a printing's quantity in a collection by `delta`, returning the new
  * count.
  *

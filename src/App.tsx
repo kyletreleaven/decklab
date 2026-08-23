@@ -15,7 +15,14 @@ import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import * as collectionsApi from "./lib/collections";
 import { UNIVERSE_ID, UNIVERSE_NAME } from "./lib/collections";
+import type { CardFilter } from "./lib/filters";
 import { forgetPanel } from "./lib/panelState";
+import {
+  saveSearchAsCollection,
+  TooManyResults,
+  type SaveProgress,
+} from "./lib/saveSearch";
+import type { SortKey } from "./lib/sort";
 import { COLLECTION_KINDS } from "./lib/collections";
 import { commanderIdentityOf } from "./lib/deckstats";
 import { exportCollection, exportDeck, type ExportFormat } from "./lib/decklist";
@@ -187,6 +194,16 @@ export default function App() {
   const [background, setBackground] = useState<{ id: string; name: string } | null>(
     null,
   );
+
+  /** An in-flight or pending "save this search as a collection". */
+  const [saving, setSaving] = useState<{
+    name: string;
+    filter: CardFilter;
+    sort: SortKey;
+    flipped: boolean;
+    progress: SaveProgress | null;
+    error: string | null;
+  } | null>(null);
   const bump = useCallback(() => setRefreshKey((n) => n + 1), []);
 
   const reloadDecks = useCallback(async () => {
@@ -500,6 +517,50 @@ export default function App() {
     onClear: () => setBackground(null),
   };
 
+  /**
+   * Walk the search and store it. The abort controller is recreated per attempt
+   * so a cancelled save does not poison the next one.
+   */
+  const saveAbort = useRef<AbortController | null>(null);
+
+  async function runSave() {
+    if (!saving || saving.progress) return;
+    const controller = new AbortController();
+    saveAbort.current = controller;
+
+    setSaving((prev) => prev && { ...prev, error: null, progress: { fetched: 0, total: 0 } });
+    try {
+      const collection = await saveSearchAsCollection(
+        saving.name,
+        saving.filter,
+        saving.sort,
+        saving.flipped,
+        (progress) => setSaving((prev) => prev && { ...prev, progress }),
+        controller.signal,
+      );
+      await reloadCollections();
+      setSaving(null);
+      openCollection(collection);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setSaving(null);
+        return;
+      }
+      setSaving((prev) =>
+        prev && {
+          ...prev,
+          progress: null,
+          error:
+            err instanceof TooManyResults
+              ? err.message
+              : err instanceof Error
+                ? err.message
+                : String(err),
+        },
+      );
+    }
+  }
+
   function openCollectionById(id: string) {
     const found = collections.find((c) => c.id === id);
     if (found) openCollection(found);
@@ -799,6 +860,16 @@ export default function App() {
             activePrintings={activePrintings}
             scopes={deckScopes}
             refreshKey={refreshKey}
+            onSaveSearch={(filter, sort, flipped) =>
+              setSaving({
+                name: filter.query?.trim() || "Saved search",
+                filter,
+                sort,
+                flipped,
+                progress: null,
+                error: null,
+              })
+            }
           />
         )}
 
@@ -842,7 +913,11 @@ export default function App() {
               add: (card) => addToCollection(card, currentCollection.id),
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
-            foreground={{ id: currentCollection.id, name: currentCollection.name }}
+            foreground={{
+              id: currentCollection.id,
+              name: currentCollection.name,
+              quantityKind: currentCollection.quantityKind,
+            }}
             background={background}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
@@ -953,6 +1028,60 @@ export default function App() {
           render={exportState.render}
           onClose={() => setExportState(null)}
         />
+      )}
+
+      {saving && (
+        <div className="overlay" onClick={() => !saving.progress && setSaving(null)}>
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Save search as collection</h3>
+            <div className="field">
+              <label>Name</label>
+              <input
+                autoFocus
+                value={saving.name}
+                disabled={!!saving.progress}
+                onChange={(e) =>
+                  setSaving((prev) => prev && { ...prev, name: e.target.value })
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") runSave();
+                  if (e.key === "Escape" && !saving.progress) setSaving(null);
+                }}
+              />
+            </div>
+
+            <p className="hint">
+              A snapshot of what matches now — it records that these cards
+              matched, not that you own them, so it carries no quantities.
+            </p>
+
+            {saving.progress && (
+              <p className="hint">
+                Fetched {saving.progress.fetched.toLocaleString()} of{" "}
+                {saving.progress.total.toLocaleString()}…
+              </p>
+            )}
+            {saving.error && <p className="status error">{saving.error}</p>}
+
+            <div className="dialog-actions">
+              <button
+                onClick={() => {
+                  saveAbort.current?.abort();
+                  setSaving(null);
+                }}
+              >
+                {saving.progress ? "Cancel" : "Close"}
+              </button>
+              <button
+                className="primary"
+                onClick={runSave}
+                disabled={!saving.name.trim() || !!saving.progress}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {dialog && (

@@ -19,6 +19,7 @@ import {
   type SortedSource,
 } from "../lib/merge";
 import { retain, retained, useRetained } from "../lib/panelState";
+import { MAX_CARDS } from "../lib/saveSearch";
 import { isSuperseded } from "../lib/scheduler";
 import {
   availableSorts,
@@ -29,7 +30,7 @@ import {
   type SortKey,
 } from "../lib/sort";
 import * as scryfall from "../lib/scryfall";
-import type { Card, CollectionItem } from "../lib/types";
+import type { Card, CollectionItem, QuantityKind } from "../lib/types";
 
 /** One toggleable contextual constraint, e.g. format legality or colour identity. */
 export interface Scope {
@@ -90,6 +91,7 @@ export function PoolPanel({
   refreshKey = 0,
   background = null,
   manage = null,
+  onSaveSearch,
   activePrintings = {},
   compact = false,
 }: {
@@ -119,8 +121,12 @@ export function PoolPanel({
    * background alone and nothing recedes, because there is nothing to contrast
    * with. All Magic as the foreground behaves the same way: it contains
    * everything, so lighting it lights the grid.
+   *
+   * `quantityKind` decides whether its rows carry counts at all. A binary set —
+   * a saved search — answers membership, so quantities, totals and the stepper
+   * would each be an ownership claim it never made.
    */
-  foreground: { id: string; name: string } | null;
+  foreground: { id: string; name: string; quantityKind?: QuantityKind } | null;
   /**
    * Contextual constraints, each independently toggleable. Separate rather than
    * bundled because a single "deck-legal" switch can only reach two corners of a
@@ -174,6 +180,11 @@ export function PoolPanel({
     onImport: () => void;
     onExport: () => void;
   } | null;
+  /**
+   * Keep the current search as a static collection. Absent where there is no
+   * search to keep — a collection view is already a collection.
+   */
+  onSaveSearch?: (filter: CardFilter, sort: SortKey, flipped: boolean) => void;
   /**
    * The printing each card currently stands for, by oracle id — chosen in the
    * card panel. Consulted only at oracle grain: a printing-grain row already
@@ -338,6 +349,15 @@ export function PoolPanel({
    */
   /** Nothing recedes without a set of yours to recede *from*. */
   const dims = !!foreground && !foregroundIsUniverse;
+
+  /**
+   * Whether the rows on screen carry meaningful counts.
+   *
+   * False for a binary foreground drawn alone. When the background is drawn the
+   * rows come from All Magic, which has no counts either — but the destination's
+   * quantities are still worth showing, so that case stays counted.
+   */
+  const counts = drawingBackground || foreground?.quantityKind !== "binary";
 
   const signature = JSON.stringify([
     localSourceId,
@@ -525,6 +545,10 @@ export function PoolPanel({
    */
   const totals = useMemo(() => {
     if (drawingBackground) return null;
+    // Membership has no copies to count and no value to sum — only how many
+    // cards matched. Reporting "1,750 cards, $4,000" of a search would be an
+    // ownership claim it never made.
+    if (!counts) return { cards: null, unique: rows.length, value: null };
     let cards = 0;
     let value = 0;
     let unique = 0;
@@ -551,6 +575,17 @@ export function PoolPanel({
    * copy instead, since the two share a printing id.
    */
   function stepperFor(row: Row) {
+    if (row.kind === "item" && manage && !counts) {
+      // Binary: in or out. A `− n +` here would invite you to hold two of
+      // something the set never claimed you held one of.
+      const { item } = row;
+      return {
+        name: foreground?.name ?? "",
+        dec: null,
+        inc: null,
+        drop: () => manage.onRemoveItem(item),
+      };
+    }
     if (row.kind === "item" && manage) {
       const { item } = row;
       return {
@@ -740,17 +775,45 @@ export function PoolPanel({
         {/* Shadowed or absent — the same axis as the dimming, so it lives in
             the open rather than behind "More filters" with the constraints
             that join with the search query. */}
+        {/* Present and greyed rather than absent: the reason a save is not on
+            offer is worth reading, and the count that decides it is already in
+            hand from the first page — so refusing here costs nothing, where
+            refusing after the name dialog wastes the typing. */}
+        {onSaveSearch && (
+          // Title on the wrapper, not the button: a disabled control dispatches
+          // no mouse events, so its own tooltip never appears — which is
+          // exactly when the explanation is worth reading.
+          <span
+            className="hint-wrap"
+            title={
+              rows.length === 0
+                ? "Nothing to save"
+                : total > MAX_CARDS
+                  ? `${total.toLocaleString()} cards is more than one save should fetch (limit ${MAX_CARDS.toLocaleString()}) — narrow the search first`
+                  : "Keep these results as a static collection"
+            }
+          >
+            <button
+              className="ghost"
+              onClick={() => onSaveSearch(effective, sort, sortFlipped)}
+              disabled={rows.length === 0 || total > MAX_CARDS}
+            >
+              Save search…
+            </button>
+          </span>
+        )}
+
         {/* Always present, disabled when there is nothing to clear: a control
             that appears and disappears shifts the toolbar under the pointer,
             and its absence is a worse signal than its greyed presence. */}
-        <button
-          className="ghost"
-          onClick={clearFilters}
-          disabled={!narrowed}
+        <span
+          className="hint-wrap"
           title={narrowed ? "Clear the search and all filters" : "Nothing to clear"}
         >
-          Clear
-        </button>
+          <button className="ghost" onClick={clearFilters} disabled={!narrowed}>
+            Clear
+          </button>
+        </span>
 
         {!compact && (
           <div className="segmented">
@@ -824,18 +887,24 @@ export function PoolPanel({
           toolbar hint — a row of dashes would be chrome pretending to be data. */}
       {totals && !compact && (
         <div className="stats">
-          <div className="stat">
-            <span className="label">Cards</span>
-            <span className="value">{totals.cards}</span>
-          </div>
+          {/* Omitted rather than zeroed for a binary set: a blank says "this
+              set does not answer that", where 0 would answer it wrongly. */}
+          {totals.cards !== null && (
+            <div className="stat">
+              <span className="label">Cards</span>
+              <span className="value">{totals.cards}</span>
+            </div>
+          )}
           <div className="stat">
             <span className="label">Unique</span>
             <span className="value">{totals.unique}</span>
           </div>
-          <div className="stat">
-            <span className="label">Est. value</span>
-            <span className="value">${totals.value.toFixed(2)}</span>
-          </div>
+          {totals.value !== null && (
+            <div className="stat">
+              <span className="label">Est. value</span>
+              <span className="value">${totals.value.toFixed(2)}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -877,20 +946,20 @@ export function PoolPanel({
                 onClick={() => onSelect(card)}
                 onMouseEnter={() => onHoverCard?.(card)}
                 onMouseLeave={() => onHoverCard?.(null)}
-                onDoubleClick={() => step?.inc()}
+                onDoubleClick={() => step?.inc?.()}
                 title={[
                   card.name,
                   dims && !isIn && `not in ${foreground.name}`,
                   // Double-click adds, which is otherwise undiscoverable — and
                   // where it lands is exactly the thing that differs between
                   // this grid and the card panel.
-                  step && `double-click to add to ${step.name}`,
+                  step?.inc && `double-click to add to ${step.name}`,
                 ]
                   .filter(Boolean)
                   .join(" — ")}
               >
                 <CardImage card={card} size="small" />
-                {step && (
+                {step?.dec && step.inc && (
                   <span
                     className="tile-controls"
                     onClick={(e) => e.stopPropagation()}
@@ -909,7 +978,7 @@ export function PoolPanel({
                 )}
                 {/* How many are already in the destination — distinct from the
                     dimming, which is about the active collection. */}
-                {count > 0 && <span className="qty-badge">{count}×</span>}
+                {counts && count > 0 && <span className="qty-badge">{count}×</span>}
                 {row.kind === "item" && row.item.finish !== "nonfoil" && (
                   <span className="finish-badge">{row.item.finish}</span>
                 )}
@@ -939,11 +1008,13 @@ export function PoolPanel({
                 onClick={() => onSelect(card)}
                 onMouseEnter={() => onHoverCard?.(card)}
                 onMouseLeave={() => onHoverCard?.(null)}
-                onDoubleClick={() => step?.inc()}
+                onDoubleClick={() => step?.inc?.()}
               >
                 {/* Blank rather than 0× when the destination holds none: a
                     zero would read as a quantity you own. */}
-                <span className="qty">{count > 0 ? `${count}×` : ""}</span>
+                <span className="qty">
+                  {counts && count > 0 ? `${count}×` : ""}
+                </span>
                 <span className="name">{card.name}</span>
                 <span className="meta">
                   {card.setCode.toUpperCase()}
@@ -954,16 +1025,20 @@ export function PoolPanel({
                 <ManaCost cost={card.manaCost} />
                 {step && (
                   <span className="controls" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      title={`Remove one from ${step.name}`}
-                      onClick={step.dec}
-                      disabled={!count}
-                    >
-                      −
-                    </button>
-                    <button title={`Add one to ${step.name}`} onClick={step.inc}>
-                      +
-                    </button>
+                    {step.dec && step.inc && (
+                      <>
+                        <button
+                          title={`Remove one from ${step.name}`}
+                          onClick={step.dec}
+                          disabled={!count}
+                        >
+                          −
+                        </button>
+                        <button title={`Add one to ${step.name}`} onClick={step.inc}>
+                          +
+                        </button>
+                      </>
+                    )}
                     {/* Drop the entry outright, rather than stepping to zero —
                         only meaningful for a row that *is* an entry. */}
                     {step.drop && (
