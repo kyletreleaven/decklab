@@ -1445,14 +1445,34 @@ it must be merged. That puts the visible part last.
    other. `NULLS LAST` is now unconditional — SQLite puts NULL first ascending,
    so priceless cards used to lead an ascending price list. The asc/desc control
    is now mostly wiring.
-3. ⬜ **The k-way merge**, over streams ordered by that key.
-   **Settle first:** Scryfall will not take our tiebreaker, so its stream is
-   total by *its* rules, not `(name, id)`. That cannot drop or duplicate rows —
-   each stream is consumed in its own order — but it can misorder within a tie
-   group. Decide whether each arriving page is re-sorted locally before merging.
+3. ⬜ **The k-way merge**, over streams ordered by that key. Greedy, no page
+   re-sorting, and the merged stream needs no cursor of its own — see
+   [`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md) for why,
+   and for the open question of how much ordering the result can claim (today:
+   the sort field only, because we do not share Scryfall's alphabetical order).
+
 4. ⬜ **The swatch** — copy to bg, switch, clear. First step where anything new
    appears on screen; doing it earlier puts three buttons up that cannot change
    what you see.
+
+**Not on this path: paginating the local side.** A complete bounded stream is a
+valid stream, so the merge needs one of each and nothing more. It matters only
+for performance, and separately: `collectionItems` is `SELECT c.* … ORDER BY …`
+with no `LIMIT`, and `c.*` carries the raw Scryfall payload in `data`, so a
+thousand-entry binder ships a few MB over the IPC bridge per debounced
+keystroke. Fine at today's sizes.
+
+- ⬜ Write the merge against a *stream* interface — "give me your next element" —
+      not an array, so paging the local side later is not a rewrite.
+- ⬜ Drop `data` from list queries: independent of paging and probably the bigger
+      win. Tiles need name, image URLs, quantity and finish, all real columns;
+      `data` is read only by `hasBack` and `variantTraits`, both card-panel
+      concerns. See *Compact printing rows*, which measured it at ~27 MB against
+      ~4 MB compact.
+- ⬜ When paging does arrive, the total key from step 2 makes it **keyset**
+      rather than OFFSET: exact, and correct precisely because ties cannot
+      straddle a page boundary. Price would need its sort value stored rather
+      than computed from JSON.
 
 **This makes the k-way merge a prerequisite, not a someday item.** It is free
 today only because the background is always All Magic, which contains every
