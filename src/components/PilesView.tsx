@@ -24,6 +24,7 @@ export function PilesView({
   onDeletePile,
   onChangeQuantity,
   dimmed,
+  badge,
 }: {
   entries: DeckEntry[];
   piles: DeckPile[];
@@ -41,6 +42,8 @@ export function PilesView({
    * are building from, so a dimmed card is one you would have to acquire.
    */
   dimmed?: (entry: DeckEntry) => boolean;
+  /** The count to show, or `null` for none. Falls back to the plain quantity. */
+  badge?: (entry: DeckEntry) => string | null;
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -119,7 +122,14 @@ export function PilesView({
         title={`${entry.quantity}× ${entry.card.name}`}
       >
         <CardImage card={entry.card} size="small" />
-        {entry.quantity > 1 && <span className="qty-badge">{entry.quantity}×</span>}
+        {(() => {
+          const label = badge
+            ? badge(entry)
+            : entry.quantity > 1
+              ? `${entry.quantity}×`
+              : null;
+          return label && <span className="qty-badge">{label}</span>;
+        })()}
         <span className="tile-controls" onClick={(e) => e.stopPropagation()}>
           <button
             title="Remove one"

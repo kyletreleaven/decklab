@@ -153,24 +153,46 @@ export function DeckView({
   }
 
   /**
-   * Cards you do not hold, shaded — the same rule the pool uses: lit means in
-   * the collection you are building from. Nothing shades without a collection
-   * to check against.
+   * Whether the collection cannot cover what the deck asks for.
+   *
+   * Not "do I hold this at all" — three copies in the deck against two in the
+   * collection is still short, and the deck cannot be sleeved as written.
    */
-  function notHeld(entry: DeckEntry): boolean {
+  function short(entry: DeckEntry): boolean {
     if (!activeCollection) return false;
-    return (ownership.get(entry.cardId)?.playable ?? 0) === 0;
+    const own = ownership.get(entry.cardId);
+    // `exact`, not `playable`: a deck entry names a printing, and the tile
+    // shows that printing. Matching against any printing of the card would
+    // light a tile you cannot actually sleeve.
+    return !!own && own.exact < own.required;
+  }
+
+  /**
+   * The count on a card: how many the deck holds, and — when the collection
+   * cannot cover it — how many you actually have. Deck first, since that is
+   * what the tile is showing.
+   */
+  function badge(entry: DeckEntry): string | null {
+    const own = activeCollection ? ownership.get(entry.cardId) : undefined;
+    // Whenever the collection cannot cover the entry, including `/0` — the
+    // dimming says *that* you are short, this says *by how much*.
+    // `3×/2`, not `3/2×`: the multiplier belongs to the deck's count, which is
+    // what the tile shows. Binding it to the pair would read as "3-of-2 copies".
+    if (own && own.exact < own.required) {
+      return `${own.required}×/${own.exact}`;
+    }
+    return entry.quantity > 1 ? `${entry.quantity}×` : null;
   }
 
   function renderRow(entry: DeckEntry) {
     const own = ownership.get(entry.cardId);
-    const short = own && own.playable < own.required;
+    const isShort = own && own.exact < own.required;
 
     return (
       <div
         key={entry.id}
         className={`row ${selectedCardId === entry.card.id ? "selected" : ""} ${
-          notHeld(entry) ? "dim" : ""
+          short(entry) ? "dim" : ""
         }`}
         onClick={() => onSelectCard(entry.card)}
         onMouseEnter={() => onHoverCard?.(entry.card)}
@@ -179,8 +201,8 @@ export function DeckView({
         <span className="qty">{entry.quantity}×</span>
         <span className="name">{entry.card.name}</span>
         {own && (
-          <span className={`meta ${short ? "missing" : "owned"}`}>
-            {short ? `${own.playable}/${own.required}` : "✓"}
+          <span className={`meta ${isShort ? "missing" : "owned"}`}>
+            {isShort ? `${own.required}×/${own.exact}` : "✓"}
           </span>
         )}
         <ManaCost cost={entry.card.manaCost} />
@@ -369,7 +391,8 @@ export function DeckView({
           onSelectCard={(entry) => onSelectCard(entry.card)}
           onHoverCard={onHoverCard}
           onChangeQuantity={onChangeQuantity}
-          dimmed={notHeld}
+          dimmed={short}
+          badge={badge}
           onMoveEntry={async (entryId, pileId) => {
             await setEntryPile(entryId, deck.id, pileId);
             await onReloadEntries();
