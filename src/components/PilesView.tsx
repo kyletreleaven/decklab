@@ -23,6 +23,7 @@ export function PilesView({
   onRenamePile,
   onDeletePile,
   onChangeQuantity,
+  dimmed,
 }: {
   entries: DeckEntry[];
   piles: DeckPile[];
@@ -35,6 +36,11 @@ export function PilesView({
   onRenamePile: (pileId: string, name: string) => void;
   onDeletePile: (pileId: string) => void;
   onChangeQuantity: (entry: DeckEntry, quantity: number) => void;
+  /**
+   * Cards to shade — the same rule as the pool: lit means in the collection you
+   * are building from, so a dimmed card is one you would have to acquire.
+   */
+  dimmed?: (entry: DeckEntry) => boolean;
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -94,7 +100,7 @@ export function PilesView({
         key={entry.id}
         className={`pile-card ${selectedCardId === entry.card.id ? "selected" : ""} ${
           dragging === entry.id ? "dragging" : ""
-        } ${draggable ? "" : "static"}`}
+        } ${draggable ? "" : "static"} ${dimmed?.(entry) ? "dim" : ""}`}
         style={{ zIndex: index }}
         draggable={draggable}
         onDragStart={(e) => {

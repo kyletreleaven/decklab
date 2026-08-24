@@ -445,6 +445,18 @@ textarea:focus {
   background: var(--bg-raised);
 }
 
+/* Pile tiles shade like wall tiles: a card you do not hold is one you would
+   have to acquire to sleeve this deck. */
+.pile-card.dim img {
+  opacity: 0.32;
+  filter: grayscale(0.55);
+}
+
+.pile-card.dim:hover img {
+  opacity: 0.75;
+  filter: none;
+}
+
 /* Same meaning as the tile dimming — outside the active collection — but rows
    have no artwork to fade, so it lands on the text. Lifted on hover so the row
    stays readable while you are pointing at it. */

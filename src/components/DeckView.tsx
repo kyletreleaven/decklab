@@ -152,6 +152,16 @@ export function DeckView({
     else setDraftName(deck.name);
   }
 
+  /**
+   * Cards you do not hold, shaded — the same rule the pool uses: lit means in
+   * the collection you are building from. Nothing shades without a collection
+   * to check against.
+   */
+  function notHeld(entry: DeckEntry): boolean {
+    if (!activeCollection) return false;
+    return (ownership.get(entry.cardId)?.playable ?? 0) === 0;
+  }
+
   function renderRow(entry: DeckEntry) {
     const own = ownership.get(entry.cardId);
     const short = own && own.playable < own.required;
@@ -159,7 +169,9 @@ export function DeckView({
     return (
       <div
         key={entry.id}
-        className={`row ${selectedCardId === entry.card.id ? "selected" : ""}`}
+        className={`row ${selectedCardId === entry.card.id ? "selected" : ""} ${
+          notHeld(entry) ? "dim" : ""
+        }`}
         onClick={() => onSelectCard(entry.card)}
         onMouseEnter={() => onHoverCard?.(entry.card)}
         onMouseLeave={() => onHoverCard?.(null)}
@@ -357,6 +369,7 @@ export function DeckView({
           onSelectCard={(entry) => onSelectCard(entry.card)}
           onHoverCard={onHoverCard}
           onChangeQuantity={onChangeQuantity}
+          dimmed={notHeld}
           onMoveEntry={async (entryId, pileId) => {
             await setEntryPile(entryId, deck.id, pileId);
             await onReloadEntries();
