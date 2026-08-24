@@ -2,9 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collectionItems,
   collectionOracleIds,
-  collectionQuantitiesByPrinting,
   QueryError,
-  UNIVERSE_ID,
   UNIVERSE_NAME,
 } from "../lib/collections";
 import {
@@ -12,20 +10,13 @@ import {
   toScryfallQuery,
   type CardFilter,
 } from "../lib/filters";
-import {
-  fromArray,
-  fromPages,
-  mergeSorted,
-  take,
-  type SortedSource,
-} from "../lib/merge";
+import { fromArray, fromPages, take } from "../lib/merge";
 import { retained, useRetained } from "../lib/panelState";
 import { MAX_CARDS } from "../lib/saveSearch";
 import { stepperCase, STEPPER_CONTROLS } from "../lib/stepper";
 import { isSuperseded } from "../lib/scheduler";
 import {
   availableSorts,
-  comparator,
   DEFAULT_SORT,
   direction,
   remoteSort,
@@ -73,15 +64,16 @@ interface Stepper {
   dropOnWall: boolean;
 }
 
+/**
+ * A drawn card. `item` rows come from a collection and carry its entry — the
+ * quantity and finish; `card` rows come from Scryfall and carry neither.
+ *
+ * No provenance field: only one set is ever drawn, so every entry row belongs
+ * to it.
+ */
 type Row =
   | { kind: "card"; key: string; card: Card }
-  /**
-   * An entry, tagged with the collection it came from. When a background
-   * collection is drawn both sources yield entries, and without `from` the
-   * background's rows were treated as the foreground's — taking its quantity
-   * kind and offering edits that wrote to the wrong set.
-   */
-  | { kind: "item"; key: string; card: Card; item: CollectionItem; from: string };
+  | { kind: "item"; key: string; card: Card; item: CollectionItem };
 
 /** How many cards a page shows, so the union pages at a steady rhythm. */
 const PAGE = 175;
@@ -108,10 +100,11 @@ export function PoolPanel({
   stateKey,
   poolToggle = null,
   destination,
-  foreground,
+  source,
+  lit = null,
+  narrowable = false,
   scopes = [],
   refreshKey = 0,
-  background = null,
   manage = null,
   onSaveSearch,
   activePrintings = {},
@@ -139,18 +132,20 @@ export function PoolPanel({
     remove: (card: Card) => void;
   } | null;
   /**
-   * The set you are looking at. Always rendered, always lit.
+   * What this pane draws. Exactly one set — never a union.
    *
-   * `null` means there is no set of yours in play — the pool then draws the
-   * background alone and nothing recedes, because there is nothing to contrast
-   * with. All Magic as the foreground behaves the same way: it contains
-   * everything, so lighting it lights the grid.
+   * All Magic contains every collection, so "All Magic with the rest dimmed" is
+   * still a single source. That is what keeps this panel free of merging, row
+   * provenance and membership spread across sources; see
+   * `docs/two-designs.md`.
    *
-   * `quantityKind` decides whether its rows carry counts at all. A binary set —
-   * a saved search — answers membership, so quantities, totals and the stepper
-   * would each be an ownership claim it never made.
+   * `quantityKind` decides whether a collection's rows carry counts at all. A
+   * binary set — a saved search — answers membership, so quantities, totals and
+   * the stepper would each be an ownership claim it never made.
    */
-  foreground: { id: string; name: string; quantityKind?: QuantityKind } | null;
+  source:
+    | { kind: "universe" }
+    | { kind: "collection"; id: string; name: string; quantityKind?: QuantityKind };
   /**
    * Contextual constraints, each independently toggleable. Separate rather than
    * bundled because a single "deck-legal" switch can only reach two corners of a
@@ -174,15 +169,21 @@ export function PoolPanel({
    */
   stateKey: string;
   /**
-   * The wider set drawn behind the foreground. `null` means All Magic — "no
-   * particular background" and "everything" are the same thing, so unset needs
-   * no separate value.
+   * Which cards stay lit. Everything else recedes.
    *
-   * Read-only here: it is app-level state, chosen from the card panel, because
-   * it is copied in one view and consulted in the next. A control in this
-   * toolbar would render once per panel and edit one shared value.
+   * `null` means light everything — a collection viewed on its own has nothing
+   * to contrast against, and All Magic held against your collection is a
+   * browsing view, not a judgement about the universe.
    */
-  background?: { id: string; name: string } | null;
+  lit?: { id: string; name: string } | null;
+  /**
+   * Offer a toggle narrowing the drawn set to `lit`.
+   *
+   * The deck-building pool has it — you build decks from cards you own. The
+   * collection-building pool does not: you are *recording* what you own, so All
+   * Magic is the only sensible source.
+   */
+  narrowable?: boolean;
   /**
    * Editing the foreground, when it is a collection you own rather than a
    * search result or All Magic.
@@ -241,29 +242,32 @@ export function PoolPanel({
   // off by default there and on everywhere else. Initial state only: the panel
   // is remounted per view, so switching collections re-derives it rather than
   // carrying your last toggle across.
-  const [showBackground, setShowBackground] = useRetained(
+  const [narrowToLit, setNarrowToLit] = useRetained(
     stateKey,
-    "showBackground",
+    "narrowToLit",
     !manage,
   );
   const [sort, setSort] = useRetained<SortKey>(stateKey, "sort", DEFAULT_SORT);
   /** Inverts the sort's useful default rather than forcing ascending. */
   const [sortFlipped, setSortFlipped] = useRetained(stateKey, "sortFlipped", false);
   const [layout, setLayout] = useRetained<"wall" | "list">(stateKey, "layout", "wall");
+  /** What this pane is showing, by name. */
+  const sourceName = source.kind === "collection" ? source.name : UNIVERSE_NAME;
+
   const [editingName, setEditingName] = useState(false);
-  const [draftName, setDraftName] = useState(foreground?.name ?? "");
+  const [draftName, setDraftName] = useState(sourceName);
 
   // Follow a rename made elsewhere, and reset a half-typed draft on navigation.
   useEffect(() => {
-    setDraftName(foreground?.name ?? "");
+    setDraftName(sourceName);
     setEditingName(false);
-  }, [foreground?.name]);
+  }, [sourceName]);
 
   function commitName() {
     setEditingName(false);
     const next = draftName.trim();
-    if (next && next !== foreground?.name) manage?.onRename(next);
-    else setDraftName(foreground?.name ?? "");
+    if (next && next !== sourceName) manage?.onRename(next);
+    else setDraftName(sourceName);
   }
 
   /**
@@ -281,39 +285,22 @@ export function PoolPanel({
   const cached = useRef(retained(stateKey) as Partial<PoolResults>);
 
   const [rows, setRows] = useState<Row[]>(() => cached.current.rows ?? []);
-  /**
-   * What the foreground holds — the panel's own cache of it.
-   *
-   * Loaded once per foreground and then updated in place. Adding or removing a
-   * card only moves it between the foreground and the background, so the wall
-   * itself never changes; refetching to learn that would shift rows under the
-   * pointer for no new information.
-   *
-   * Both grains, because the two questions differ: dimming asks "do I have this
-   * card" (oracle), the stepper asks "how many of this printing".
-   */
-  const [inCollection, setInCollection] = useState<Set<string>>(new Set());
-  const [fgHeld, setFgHeld] = useState<Record<string, number>>({});
   const [shown, setShown] = useState(() => cached.current.shown ?? PAGE);
   const [total, setTotal] = useState(() => cached.current.total ?? 0);
   const [exhausted, setExhausted] = useState(() => cached.current.exhausted ?? false);
   const [loading, setLoading] = useState(false);
-
-  /**
-   * The merged stream still being drawn from, for `loadMore`.
-   *
-   * A ref because it is not renderable state, and because a generator cannot be
-   * retained — restoring a panel gives back rows but no stream. See the cursor
-   * note in `docs/merging-sorted-sources.md`.
-   */
-  const pending = useRef<AsyncGenerator<Row> | null>(null);
-
-  const compare = useMemo(() => comparator(sort, sortFlipped), [sort, sortFlipped]);
-
   const [error, setError] = useState<string | null>(null);
 
-  // Guards against a slow early request landing after a later one.
+  /** Guards against a slow early request landing after a later one. */
   const requestId = useRef(0);
+
+  /**
+   * The stream still being drawn from, for `loadMore`.
+   *
+   * A ref because it is not renderable state, and because a generator cannot be
+   * retained — restoring a panel gives back rows but no stream.
+   */
+  const pending = useRef<AsyncGenerator<Row> | null>(null);
 
   const activeScopes = useMemo(
     () => scopes.filter((s) => !scopesOff.has(s.key)),
@@ -327,118 +314,58 @@ export function PoolPanel({
     [filter, activeScopes],
   );
   const effectiveKey = JSON.stringify(effective);
-
   /**
-   * All Magic as the foreground is not a set of yours to contrast against — it
-   * contains everything — so it lights the grid rather than dimming it.
+   * Oracle ids in the lit set — everything else recedes.
+   *
+   * One source of truth for "do I have this", and reloaded on every mutation.
+   * These are two cheap local queries against a set that is never the drawn
+   * one, so nothing re-pages.
    */
-  const foregroundIsUniverse = foreground?.id === UNIVERSE_ID;
+  const [inCollection, setInCollection] = useState<Set<string>>(new Set());
 
-  /**
-   * Oracle ids in the foreground — the lit set. Keyed on `refreshKey` too, so
-   * adding a card to it lights its tile immediately.
-   */
   useEffect(() => {
-    // Nothing to contrast with, so nothing to fetch.
-    if (!foreground || foregroundIsUniverse) {
+    if (!lit) {
       setInCollection(new Set());
       return;
     }
-    void Promise.all([
-      collectionOracleIds([foreground.id]),
-      collectionQuantitiesByPrinting(foreground.id),
-    ]).then(([oracles, held]) => {
-      setInCollection(oracles);
-      setFgHeld(held);
-    });
-    // Keyed on `refreshKey` so an edit made *elsewhere* — the card panel, the
-    // pool above — is reflected here too. These are two cheap local queries and
-    // they do not touch the row list, so nothing re-pages.
-  }, [foreground?.id, foregroundIsUniverse, refreshKey]);
+    collectionOracleIds([lit.id]).then(setInCollection);
+  }, [lit?.id, refreshKey]);
 
   /**
-   * Mirror a write we just made, so dimming and the controls agree with it.
+   * Narrow the drawn set to the lit collection.
    *
-   * `delta` of `null` removes the printing outright. The oracle stays lit while
-   * any printing of it remains, so removing one printing of a card held in two
-   * does not wrongly dim it.
+   * Only offered where it makes sense — a deck pool builds from what you own, a
+   * collection pool records what you own — and only possible when there is a
+   * lit set to narrow to.
    */
-  function noteChange(card: Card, delta: number | null) {
-    setFgHeld((prev) => {
-      const next = { ...prev };
-      const after = delta === null ? 0 : Math.max(0, (next[card.id] ?? 0) + delta);
-      if (after === 0) delete next[card.id];
-      else next[card.id] = after;
+  const canNarrow = narrowable && !!lit;
+  const drawn: "universe" | "collection" =
+    canNarrow && narrowToLit ? "collection" : source.kind;
 
-      setInCollection((lit) => {
-        const stillHeld = rows.some(
-          (r) => r.card.oracleId === card.oracleId && (next[r.card.id] ?? 0) > 0,
-        );
-        const updated = new Set(lit);
-        if (stillHeld) updated.add(card.oracleId);
-        else updated.delete(card.oracleId);
-        return updated;
-      });
+  /** The collection to read locally, when that is what is drawn. */
+  const localSourceId =
+    drawn === "collection"
+      ? source.kind === "collection"
+        ? source.id
+        : lit?.id
+      : undefined;
 
-      return next;
-    });
-  }
+  /** A card lights if it is in the lit set. With no lit set, everything does. */
+  const dims = !!lit;
 
-  /**
-   * Whether the background is what gets drawn.
-   *
-   * Three ways to end up there: nothing of yours is in play, the foreground is
-   * All Magic (which *is* the background), or you asked for it. Otherwise the
-   * foreground is drawn alone, from the local query.
-   *
-   * The background is All Magic and nothing else for now. Once it can be any
-   * set this stops being a branch and becomes a union — which needs the two
-   * streams merged, since neither would contain the other.
-   */
-  const drawingBackground =
-    !foreground || foregroundIsUniverse || showBackground;
-
-  /**
-   * All Magic on either side collapses the union: it contains every other set,
-   * so drawing both would be drawing All Magic twice — and worse, it would
-   * *duplicate*, since a collection holds printing X while `unique=cards`
-   * returns printing Y of the same card and dedupe-by-printing cannot see it.
-   *
-   * This is the only containment we get for free. Deciding it in general is as
-   * expensive as merging, so every other pair merges.
-   */
-  const backgroundIsUniverse = !background || background.id === UNIVERSE_ID;
-  const unionCollapses = foregroundIsUniverse || backgroundIsUniverse;
-
-  /** Whether Scryfall is one of the sources — what the sort menu turns on. */
-  const usesRemote = foregroundIsUniverse || (drawingBackground && unionCollapses);
-
-  /** The collection the local branch reads: the foreground, when it is drawn. */
-  const localSourceId = foreground?.id;
-
-  /**
-   * What the results in hand answer. Retained results are reusable only while
-   * this is unchanged; anything else and the question has moved on.
-   */
-  /** Nothing recedes without a set of yours to recede *from*. */
-  const dims = !!foreground && !foregroundIsUniverse;
-
-  /**
-   * Whether the counts on screen mean anything — which depends on *whose*
-   * counts they are.
-   *
-   * Printing-grain rows show the foreground's own quantities. Oracle-grain rows
-   * show the destination's. Reading the foreground in both cases put steppers
-   * back on a binary collection the moment its background was drawn, since the
-   * rows were then All Magic's and the check no longer applied to anything.
-   */
-  const counts = drawingBackground
-    ? destination?.quantityKind !== "binary"
-    : foreground?.quantityKind !== "binary";
+  /** Whose counts the rows carry, and whether they mean anything. */
+  const drawnKind: QuantityKind =
+    drawn === "collection" && source.kind === "collection"
+      ? (source.quantityKind ?? "natural")
+      : "natural";
+  const counts =
+    drawn === "universe"
+      ? destination?.quantityKind !== "binary"
+      : drawnKind !== "binary";
 
   const signature = JSON.stringify([
     localSourceId,
-    drawingBackground,
+    drawn,
     effectiveKey,
     sort,
     sortFlipped,
@@ -456,7 +383,7 @@ export function PoolPanel({
    * "selected": the constraint is that every stream in the answer must be able
    * to produce the ordering.
    */
-  const sorts = useMemo(() => availableSorts(usesRemote), [usesRemote]);
+  const sorts = useMemo(() => availableSorts(drawn === "universe"), [drawn]);
   const scryfallSort = remoteSort(sort, sortFlipped);
 
   // Turning outside cards back on can strand a sort the universe cannot do.
@@ -484,75 +411,44 @@ export function PoolPanel({
       setLoading(true);
       setError(null);
       try {
-        // One source today — the background is always All Magic, which contains
-        // every foreground, so their union collapses. Built as a list anyway so
-        // that a selectable background is a second entry here rather than a
-        // rewrite of everything downstream.
-        const sources: SortedSource<Row>[] = [];
+        // Exactly one set is drawn, so there is nothing to merge. All Magic
+        // contains every collection, which is why "All Magic with the rest
+        // dimmed" is still a single source — see `docs/two-designs.md`.
+        let stream: AsyncGenerator<Row>;
         let known: number | null = null;
 
-        /** A collection, read whole and locally — printing grain. */
-        const localSource = async (collectionId: string) => {
+        if (drawn === "collection") {
           const items = await collectionItems(
-            collectionId,
+            localSourceId!,
             effective,
             sort,
             sortFlipped,
           );
-          return {
-            count: items.length,
-            source: fromArray(
-              items.map((item): Row => ({
-                kind: "item",
-                key: item.id,
-                card: item.card,
-                item,
-                from: collectionId,
-              })),
-            ),
-          };
-        };
-
-        if (drawingBackground && !unionCollapses) {
-          // Two sets, neither containing the other, so both are drawn and
-          // merged. Foreground first, so it wins ties and its row — the one
-          // carrying your quantity — is the one that survives dedupe.
-          const fg = await localSource(localSourceId!);
-          const bg = await localSource(background!.id);
           if (requestId.current !== id) return;
-          sources.push(fg.source, bg.source);
-          // Not the sum: the two may overlap, and dedupe happens downstream.
-          known = null;
-        } else if (drawingBackground) {
-          const query = toScryfallQuery(effective) || EVERYTHING;
-          sources.push(
-            fromPages(async (page) => {
-              const result = await scryfall.search(query, page, scryfallSort);
-              // Scryfall knows its own total; a merged total would not be
-              // knowable without draining every source.
-              if (page === 1) known = result.totalCards;
-              return {
-                items: result.cards.map(
-                  (card): Row => ({ kind: "card", key: card.oracleId, card }),
-                ),
-                next: result.nextPage,
-              };
-            }),
+          known = items.length;
+          stream = fromArray(
+            items.map((item): Row => ({
+              kind: "item",
+              key: item.id,
+              card: item.card,
+              item,
+            })),
           );
         } else {
-          const fg = await localSource(localSourceId!);
-          if (requestId.current !== id) return;
-          known = fg.count;
-          sources.push(fg.source);
+          const query = toScryfallQuery(effective) || EVERYTHING;
+          stream = fromPages(async (page) => {
+            const result = await scryfall.search(query, page, scryfallSort);
+            // Scryfall knows its own total; a local list knows its length.
+            if (page === 1) known = result.totalCards;
+            return {
+              items: result.cards.map(
+                (card): Row => ({ kind: "card", key: card.oracleId, card }),
+              ),
+              next: result.nextPage,
+            };
+          });
         }
 
-        const stream = mergeSorted<Row>(
-          sources,
-          (a, b) => compare(a.card, b.card),
-          // By printing id, which the sort key ends with — so duplicates are
-          // adjacent and a single-element lookahead is enough to spot them.
-          (row) => row.card.id,
-        );
         pending.current = stream;
 
         const first = await take(stream, PAGE);
@@ -586,10 +482,13 @@ export function PoolPanel({
     // exactly the traffic the scheduler exists to avoid.
   }, [
     localSourceId,
-    drawingBackground,
+    drawn,
     effectiveKey,
     sort,
     sortFlipped,
+    // `refreshKey` is deliberately absent: a write changes what you *hold*, not
+    // which cards match, and the lit set is reloaded separately. Re-paging to
+    // learn nothing would rebuild the grid and lose your place.
   ]);
 
   /**
@@ -621,7 +520,7 @@ export function PoolPanel({
    * subtotal of the page in hand would look like a fact about the search.
    */
   const totals = useMemo(() => {
-    if (drawingBackground) return null;
+    if (drawn === "universe") return null;
     // Membership has no copies to count and no value to sum — only how many
     // cards matched. Reporting "1,750 cards, $4,000" of a search would be an
     // ownership claim it never made.
@@ -641,7 +540,7 @@ export function PoolPanel({
       if (Number.isFinite(price)) value += price * row.item.quantity;
     }
     return { cards, unique, value };
-  }, [drawingBackground, rows]);
+  }, [drawn, counts, rows]);
 
   /**
    * What a row's `±` acts on, which depends on its grain.
@@ -666,41 +565,41 @@ export function PoolPanel({
    * — which differ by row, since an entry can be adjusted by its own id where a
    * card has to go through the destination.
    */
-  /** Whether `+`/`−` write to the foreground itself, as in a collection view. */
-  const destinationIsForeground = !!destination && destination.name === foreground?.name;
-
+  /**
+   * The edits a card offers, and the handlers behind them.
+   *
+   * The decision lives in `stepper.ts`, on two inputs: the destination's kind
+   * and whether the card is already in it. Everything here is binding handlers.
+   */
   function stepperFor(row: Row): Stepper | null {
-    // From the cache when writing to the foreground, so an edit is reflected
-    // without a refetch; from the destination otherwise, which App refreshes.
-    const held = destinationIsForeground
-      ? (fgHeld[row.card.id] ?? 0)
-      : (destination?.quantities[row.card.id] ?? 0);
-
-    const kind = destination
-      ? (destination.quantityKind ?? "natural")
-      : null;
+    // From the destination, which App refreshes on every write — never from the
+    // row, whose entry is frozen at fetch time and would keep claiming to be
+    // held after a removal.
+    const held = destination?.quantities[row.card.id] ?? 0;
+    const kind = destination ? (destination.quantityKind ?? "natural") : null;
 
     const which = stepperCase({ destinationKind: kind, inDestination: held });
     if (which === "none") return null;
 
     const controls = STEPPER_CONTROLS[which];
-
-    /** Write, then mirror it locally rather than reloading the wall. */
-    const write = (act: () => void, delta: number | null) => () => {
-      act();
-      if (destinationIsForeground) noteChange(row.card, delta);
-    };
+    // Editable as an entry only when this pane presents the collection it
+    // belongs to; otherwise the card goes through the destination.
+    const entry = row.kind === "item" && manage && held > 0 ? row.item : null;
 
     return {
       name: destination?.name ?? "",
       dropOnWall: controls.dropOnWall,
       dec: !controls.dec
         ? null
-        : write(() => destination?.remove(row.card), -1),
-      inc: !controls.inc ? null : write(() => destination?.add(row.card), +1),
+        : entry
+          ? () => manage!.onSetItemQuantity(entry, entry.quantity - 1)
+          : () => destination?.remove(row.card),
+      inc: !controls.inc ? null : () => destination?.add(row.card),
       drop: !controls.drop
         ? null
-        : write(() => destination?.remove(row.card), null),
+        : entry
+          ? () => manage!.onRemoveItem(entry)
+          : () => destination?.remove(row.card),
     };
   }
 
@@ -781,7 +680,7 @@ export function PoolPanel({
 
   return (
     <div className="pool">
-      {manage && foreground && (
+      {manage && (
         <div className="toolbar">
           {editingName ? (
             <input
@@ -793,7 +692,7 @@ export function PoolPanel({
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitName();
                 if (e.key === "Escape") {
-                  setDraftName(foreground.name);
+                  setDraftName(sourceName);
                   setEditingName(false);
                 }
               }}
@@ -803,7 +702,7 @@ export function PoolPanel({
               onDoubleClick={() => setEditingName(true)}
               title="Double-click to rename"
             >
-              {foreground.name}
+              {sourceName}
             </h1>
           )}
           <span className="spacer" />
@@ -815,7 +714,7 @@ export function PoolPanel({
               title={
                 poolToggle.on
                   ? "Hide the candidate-card pool"
-                  : `Open a pool of candidate cards above ${foreground.name}`
+                  : `Open a pool of candidate cards above ${sourceName}`
               }
             >
               {poolToggle.on ? "Hide pool" : "＋ Add cards"}
@@ -917,22 +816,20 @@ export function PoolPanel({
           </div>
         )}
 
-        {/* Wherever there is a foreground to hold something against. This was
-            once hidden in a collection view on the grounds that "also show All
-            Magic" duplicated the All Magic view — but it does not: there
-            everything is lit, here your collection is lit and the rest recedes.
-            Different question, different answer. */}
-        {foreground && !foregroundIsUniverse && (
+        {/* Narrows the drawn set to what you own. Offered by the deck pool,
+            where you build from your cards; not by the collection pool, where
+            you are recording them and All Magic is the only source. */}
+        {canNarrow && (
           <label
             className="toggle"
-            title={`Also draw ${background?.name ?? UNIVERSE_NAME} behind ${foreground.name}, shadowed`}
+            title={`Also draw cards not in ${lit!.name}, dimmed`}
           >
             <input
               type="checkbox"
-              checked={showBackground}
-              onChange={(e) => setShowBackground(e.target.checked)}
+              checked={!narrowToLit}
+              onChange={(e) => setNarrowToLit(!e.target.checked)}
             />
-            Show {background?.name ?? "not in " + foreground.name}
+            Show not in {lit!.name}
           </label>
         )}
 
@@ -1013,9 +910,7 @@ export function PoolPanel({
             // finishes and would show a foil and a nonfoil the same total. But
             // suppressed once the destination no longer holds it, so a removed
             // card drops its badge without the list being refetched.
-            const count = destinationIsForeground
-              ? (fgHeld[card.id] ?? 0)
-              : (destination?.quantities[card.id] ?? 0);
+            const count = destination?.quantities[card.id] ?? 0;
             const step = stepperFor(row);
             return (
               <div
@@ -1035,7 +930,7 @@ export function PoolPanel({
                 onDoubleClick={() => step?.inc?.()}
                 title={[
                   card.name,
-                  dims && !isIn && `not in ${foreground.name}`,
+                  dims && !isIn && `not in ${lit!.name}`,
                   // Double-click adds, which is otherwise undiscoverable — and
                   // where it lands is exactly the thing that differs between
                   // this grid and the card panel.
@@ -1099,9 +994,7 @@ export function PoolPanel({
             // finishes and would show a foil and a nonfoil the same total. But
             // suppressed once the destination no longer holds it, so a removed
             // card drops its badge without the list being refetched.
-            const count = destinationIsForeground
-              ? (fgHeld[card.id] ?? 0)
-              : (destination?.quantities[card.id] ?? 0);
+            const count = destination?.quantities[card.id] ?? 0;
             const step = stepperFor(row);
             return (
               <div

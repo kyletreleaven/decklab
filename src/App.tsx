@@ -183,18 +183,6 @@ export default function App() {
    */
   const [activePrintings, setActivePrintings] = useState<Record<string, Card>>({});
 
-  /**
-   * The set drawn behind whatever you are looking at. `null` is All Magic.
-   *
-   * App-level rather than per panel: it is copied in one view and consulted in
-   * the next — open Paper, copy it to the background, navigate to a friend's
-   * binder — so panel state would reset on arrival and the gesture would be
-   * impossible.
-   */
-  const [background, setBackground] = useState<{ id: string; name: string } | null>(
-    null,
-  );
-
   /** An in-flight or pending "save this search as a collection". */
   const [saving, setSaving] = useState<{
     name: string;
@@ -497,27 +485,6 @@ export default function App() {
   }, [activeCollection?.id, shownCard?.oracleId, refreshKey]);
 
   /**
-   * Foreground/background controls for a panel showing `fg`.
-   *
-   * Switch navigates, because the foreground *is* what is rendered: making the
-   * old background the foreground means going there. It carries the old
-   * foreground back in the other slot, so the pair swaps rather than one
-   * overwriting the other.
-   */
-  const swatch = {
-    set: background,
-    /** The active collection is the foreground the card panel already names. */
-    foreground: activeCollection,
-    onCopyForeground: () => setBackground(activeCollection),
-    onSwitch: () => {
-      if (!background) return;
-      setBackground(activeCollection);
-      openCollectionById(background.id);
-    },
-    onClear: () => setBackground(null),
-  };
-
-  /**
    * Walk the search and store it. The abort controller is recreated per attempt
    * so a cancelled save does not poison the next one.
    */
@@ -528,7 +495,9 @@ export default function App() {
     const controller = new AbortController();
     saveAbort.current = controller;
 
-    setSaving((prev) => prev && { ...prev, error: null, progress: { fetched: 0, total: 0 } });
+    setSaving(
+      (prev) => prev && { ...prev, error: null, progress: { fetched: 0, total: 0 } },
+    );
     try {
       const collection = await saveSearchAsCollection(
         saving.name,
@@ -546,26 +515,22 @@ export default function App() {
         setSaving(null);
         return;
       }
-      setSaving((prev) =>
-        prev && {
-          ...prev,
-          progress: null,
-          error:
-            err instanceof TooManyResults
-              ? err.message
-              : err instanceof Error
+      setSaving(
+        (prev) =>
+          prev && {
+            ...prev,
+            progress: null,
+            error:
+              err instanceof TooManyResults
                 ? err.message
-                : String(err),
-        },
+                : err instanceof Error
+                  ? err.message
+                  : String(err),
+          },
       );
     }
   }
 
-  function openCollectionById(id: string) {
-    const found = collections.find((c) => c.id === id);
-    if (found) openCollection(found);
-    else setView({ kind: "collection", id });
-  }
 
   /**
    * Contents of the deck under the pool, and of the current target — one query
@@ -769,10 +734,11 @@ export default function App() {
               add: (card) => addToDeck(card, currentDeck.id, false),
               remove: (card) => adjustDeck(currentDeck.id, card, -1),
             }}
-            // Your collection lights up; All Magic is drawn behind it, which is
-            // what makes this a candidate pool rather than a list of what you own.
-            foreground={activeCollection}
-            background={background}
+            // All Magic, with what you own lit — the deckbuilding view. The
+            // toggle narrows it to your collection alone.
+            source={{ kind: "universe" }}
+            lit={activeCollection}
+            narrowable
             scopes={deckScopes}
             refreshKey={refreshKey}
             activePrintings={activePrintings}
@@ -854,9 +820,9 @@ export default function App() {
                   }
                 : null
             }
-            // All Magic *is* the foreground here, which is why nothing recedes:
-            // lighting a set that contains everything lights the grid.
-            foreground={{ id: UNIVERSE_ID, name: UNIVERSE_NAME }}
+            // Nothing lit against: browsing all of Magic is not a judgement
+            // about which cards you happen to own.
+            source={{ kind: "universe" }}
             activePrintings={activePrintings}
             scopes={deckScopes}
             refreshKey={refreshKey}
@@ -888,9 +854,11 @@ export default function App() {
               add: (card) => addToCollection(card, currentCollection.id),
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
-            // All Magic, undimmed: shading against the collection below would
-            // mark exactly what the lower pane already shows you.
-            foreground={{ id: UNIVERSE_ID, name: UNIVERSE_NAME }}
+            // All Magic and nothing else: you are recording what you own, so
+            // narrowing to what you have already recorded would be circular.
+            // Lit against the collection below, so you can see what is new.
+            source={{ kind: "universe" }}
+            lit={{ id: currentCollection.id, name: currentCollection.name }}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
             compact
@@ -915,12 +883,21 @@ export default function App() {
               add: (card) => addToCollection(card, currentCollection.id),
               remove: (card) => adjustCollection(currentCollection.id, card, -1),
             }}
-            foreground={{
+            source={{
+              kind: "collection",
               id: currentCollection.id,
               name: currentCollection.name,
               quantityKind: currentCollection.quantityKind,
             }}
-            background={background}
+            // Lit by *your* collection when you are looking at someone else's —
+            // alt-click into a friend's binder and it marks what you already
+            // have. Viewing your own lights everything, since holding a set
+            // against itself says nothing.
+            lit={
+              activeCollection && activeCollection.id !== currentCollection.id
+                ? activeCollection
+                : null
+            }
             activePrintings={activePrintings}
             refreshKey={refreshKey}
             manage={{
@@ -995,7 +972,6 @@ export default function App() {
         activeCollection={activeCollection}
         collectionQuantities={collectionQuantities}
         onAdjustTarget={adjustTarget}
-        swatch={swatch}
         onChoosePrinting={(printing) =>
           setActivePrintings((prev) => ({ ...prev, [printing.oracleId]: printing }))
         }
