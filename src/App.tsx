@@ -780,6 +780,21 @@ export default function App() {
               forget("deck", currentDeck.id);
             }}
             onReloadEntries={() => reloadEntries(currentDeck.id)}
+            onRebind={async () => {
+              if (!activeCollection) return;
+              const moved = await decksApi.rebindToCollection(currentDeck.id, [
+                activeCollection.id,
+              ]);
+              await reloadEntries(currentDeck.id);
+              bump();
+              setError(
+                moved
+                  ? `Re-pointed ${moved} card${moved === 1 ? "" : "s"} at printings in ${activeCollection.name}.`
+                  : "Nothing could be matched — no spare copies in " +
+                    activeCollection.name +
+                    ".",
+              );
+            }}
             onImport={() =>
               setImportTarget({
                 kind: "deck",

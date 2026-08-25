@@ -1,4 +1,5 @@
 import { CardRow, execute, newId, now, rowToCard, select } from "./db";
+import { planRebind } from "./rebind";
 import { CATEGORY_ORDER, categoryOf } from "./deckstats";
 import {
   canonicalColors,
@@ -307,6 +308,103 @@ export async function moveDeckEntry(
 ): Promise<void> {
   await execute("UPDATE deck_cards SET zone = $1 WHERE id = $2", [zone, entryId]);
   await touch(deckId);
+}
+
+/**
+ * Re-point deck entries at printings the collection actually holds.
+ *
+ * A deck imported from elsewhere names whatever printings that list did, which
+ * may be none of the ones on your shelf. This swaps entries onto copies you
+ * have, without changing what the deck plays — the oracle card is identical, so
+ * only the art and set move.
+ *
+ * Best effort: an entry it cannot cover keeps what it could not rebind.
+ * Returns how many copies were re-pointed.
+ */
+export async function rebindToCollection(
+  deckId: string,
+  collectionIds: string[],
+): Promise<number> {
+  if (!collectionIds.length) return 0;
+
+  const demands = await select<{
+    id: string;
+    card_id: string;
+    oracle_id: string;
+    quantity: number;
+    zone: string;
+  }>(
+    `SELECT dc.id, dc.card_id, c.oracle_id, dc.quantity, dc.zone
+       FROM deck_cards dc
+       JOIN cards c ON c.id = dc.card_id
+      WHERE dc.deck_id = $1 AND dc.zone IN ('main', 'commander')`,
+    [deckId],
+  );
+  if (!demands.length) return 0;
+
+  const holes = collectionIds.map((_, i) => `$${i + 1}`).join(", ");
+  const supply = await select<{
+    card_id: string;
+    oracle_id: string;
+    quantity: number;
+  }>(
+    `SELECT ci.card_id, c.oracle_id, SUM(ci.quantity) AS quantity
+       FROM collection_items ci
+       JOIN cards c ON c.id = ci.card_id
+      WHERE ci.collection_id IN (${holes})
+      GROUP BY ci.card_id, c.oracle_id`,
+    collectionIds,
+  );
+
+  const plan = planRebind(
+    demands.map((d) => ({
+      entryId: d.id,
+      cardId: d.card_id,
+      oracleId: d.oracle_id,
+      quantity: d.quantity,
+    })),
+    supply.map((s) => ({
+      cardId: s.card_id,
+      oracleId: s.oracle_id,
+      quantity: s.quantity,
+    })),
+  );
+  if (!plan.length) return 0;
+
+  const zoneOf = new Map(demands.map((d) => [d.id, d.zone]));
+  const remaining = new Map(demands.map((d) => [d.id, d.quantity]));
+  let moved = 0;
+
+  for (const step of plan) {
+    const zone = zoneOf.get(step.entryId)!;
+    const left = (remaining.get(step.entryId) ?? 0) - step.quantity;
+    remaining.set(step.entryId, left);
+
+    // The source entry shrinks by what moved, and disappears if all of it did.
+    if (left <= 0) {
+      await execute("DELETE FROM deck_cards WHERE id = $1", [step.entryId]);
+    } else {
+      await execute("UPDATE deck_cards SET quantity = $1 WHERE id = $2", [
+        left,
+        step.entryId,
+      ]);
+    }
+
+    // `UNIQUE (deck_id, card_id, zone)` means the target may already exist, so
+    // fold rather than insert a second row for the same printing.
+    await execute(
+      `INSERT INTO deck_cards (id, deck_id, card_id, quantity, zone, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (deck_id, card_id, zone)
+       DO UPDATE SET quantity = quantity + excluded.quantity`,
+      [newId(), deckId, step.toCardId, step.quantity, zone, now()],
+    );
+
+    moved += step.quantity;
+  }
+
+  await touch(deckId);
+  return moved;
 }
 
 /* ---------- piles ---------- */

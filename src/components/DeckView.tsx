@@ -40,6 +40,7 @@ export function DeckView({
   onImport,
   onExport,
   onReloadEntries,
+  onRebind,
   poolOn,
   onTogglePool,
   refreshKey,
@@ -64,6 +65,8 @@ export function DeckView({
   onImport: () => void;
   onExport: () => void;
   onReloadEntries: () => Promise<void>;
+  /** Re-point entries at printings the active collection holds. */
+  onRebind?: () => void;
   /** Whether the candidate-card pool is showing above this deck. */
   poolOn: boolean;
   onTogglePool: () => void;
@@ -183,6 +186,12 @@ export function DeckView({
     }
     return entry.quantity > 1 ? `${entry.quantity}×` : null;
   }
+
+  /** Whether anything is short — nothing to match otherwise. */
+  const anyShort = useMemo(
+    () => entries.some((entry) => short(entry)),
+    [entries, ownership, activeCollection],
+  );
 
   function renderRow(entry: DeckEntry) {
     const own = ownership.get(entry.cardId);
@@ -308,6 +317,16 @@ export function DeckView({
               open, it should name what the click does. */}
           {poolOn ? "Hide pool" : "＋ Add cards"}
         </button>
+        {onRebind && activeCollection && (
+          <span
+            className="hint-wrap"
+            title={`Swap entries you do not hold onto printings in ${activeCollection.name}, where you have one`}
+          >
+            <button className="ghost" onClick={onRebind} disabled={!anyShort}>
+              Match printings
+            </button>
+          </span>
+        )}
         <button className="ghost" onClick={onImport}>
           Import
         </button>
