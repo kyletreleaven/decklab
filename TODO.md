@@ -25,7 +25,8 @@ What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 | **4. Formats beyond Commander** ⭐ | not started | Format support |
 | **5. Multi-panel workspace** ⭐ | not started | Multi-panel workspace |
 | **6. Analytics and intelligence** | sketched | Statistics · Card intelligence · Discovery · Suggestions · Playtesting |
-| **7. Gaps and polish** | ongoing | Deck builder gaps · Collection gaps · Deck database · Version control · Polish · Known debt |
+| **7. Organising decks and collections** ⭐ | not started | Organising decks and collections |
+| **8. Gaps and polish** | ongoing | Deck builder gaps · Collection gaps · Deck database · Version control · Polish · Known debt |
 
 **Campaign 1 is the one just finished.** What is left of it is small and named:
 roll counts up to oracle grain (the last wrong thing on screen), the
@@ -1526,10 +1527,41 @@ Subsumed by the card-set algebra above; what remains here is the UI over it.
       new collection or deck
 - ⬜ Common operations as one-click presets, so the algebra stays optional
 
+### Organising decks and collections ⭐
+
+The sidebar is a flat list ordered `updated_at DESC`, which rearranges itself as
+you work. Fine at five decks, useless at fifty — and there is nowhere to say
+*this one is retired* or *these three are the Commander pod*.
+
+Every item below is the same mechanism applied to both kinds, so they want doing
+together rather than once for decks and again for collections.
+
+**The decision that gates the rest:** recency ordering and manual ordering
+conflict. Today the deck you just touched jumps to the top, which is genuinely
+useful; the moment you can arrange the list by hand, that has to stop, or the
+layout you chose rearranges itself underneath you. Probably: manual order when
+set, recency as the fallback — but it is a choice, not a detail.
+
+- ⬜ **Drag to reorder.** A `position` column, the same shape `deck_piles`
+      already has, and `ORDER BY position, updated_at DESC` so unpositioned rows
+      still land sensibly. `PilesView` already demonstrates the drag handlers,
+      including the Firefox quirk of needing `setData` or the drag never starts.
+- ⬜ **Folders**, or tags, or both — one grouping mechanism for decks and
+      collections. Tags compose and nest badly; folders nest and compose badly.
+      Worth picking deliberately rather than growing whichever is easier first.
+- ⬜ **Favourites** and **states** (brewing / built / retired). Already sketched
+      under *Deck database* as deck-only; they are the same thing for a
+      collection you have stopped adding to.
+- ⬜ These are all **user metadata**, which the Universe section already argues
+      should be arbitrary keys with affordances for well-known ones rather than
+      a column per idea. Building folders as a bespoke table would contradict
+      that; building them as metadata gets ordering and favourites for free.
+- ⬜ **Collapse and hide.** Fifty decks needs sections that fold, and a way to
+      keep a retired deck without it taking a row.
+
 ### Deck builder gaps
 - ⬜ Undo / redo
 - ⬜ Multiple deck tabs
-- ⬜ Deck folders and tags
 - ⬜ Drag between zones (piles handles within-deck; zone moves are still buttons)
 - ⬜ Curve view as a first-class layout
 - ⬜ Fast keyboard search / focus shortcuts
@@ -1598,8 +1630,9 @@ doing neither.
 
 ### 3. Deck database
 One local library. ⬜
-- ⬜ Favourites, format grouping (Commander / Modern / Pioneer / Legacy)
-- ⬜ Brews / Competitive / Archived states
+- ⬜ Format grouping (Commander / Modern / Pioneer / Legacy). Favourites and
+      brewing/built/retired states moved to *Organising decks and collections*,
+      since they apply to collections too.
 - ⬜ Per-deck notes, tags, history, statistics, playtest notes
       (`decks.notes` column exists; no UI)
 
