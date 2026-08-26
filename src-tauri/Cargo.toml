@@ -14,6 +14,16 @@ edition = "2021"
 name = "decklab_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# `custom-protocol` is what makes a build serve the *bundled* frontend from
+# `frontendDist` rather than the dev server at `devUrl`. Without it defined,
+# `cargo run --no-default-features` — which is what the dev launcher passes —
+# had nothing to switch off, so the app served whatever `dist/` happened to be
+# current when the Rust was last compiled. Since Rust source rarely changes,
+# that meant a frontend frozen at the last rebuild.
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
