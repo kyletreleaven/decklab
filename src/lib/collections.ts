@@ -1,5 +1,5 @@
 import { CardRow, execute, newId, now, rowToCard, select } from "./db";
-import type { CardFilter } from "./filters";
+import { colorQueryFragment, type CardFilter } from "./filters";
 import { compileQuery } from "./query";
 import { orderBySql, type SortKey } from "./sort";
 
@@ -176,17 +176,20 @@ export async function collectionItems(
     }
   }
 
-  if (filter.colors?.length) {
-    const parts: string[] = [];
-    for (const color of filter.colors) {
-      if (color === "C") {
-        parts.push(`c.color_identity = ''`);
-      } else {
-        params.push(`%${color}%`);
-        parts.push(`c.color_identity LIKE ${hole()}`);
-      }
+  // Colours compile from the same fragment the Scryfall path sends, through the
+  // same compiler as free text. Previously this built its own OR chain against
+  // `color_identity` while the remote path emitted `c:` against the card's
+  // colours, so the identical pips answered two different questions.
+  const colors = colorQueryFragment(filter);
+  if (colors) {
+    const compiled = compileQuery(colors, { alias: "c", paramOffset: params.length });
+    if (compiled.error) {
+      throw new QueryError(compiled.error.message, compiled.error.at);
     }
-    clauses.push(`(${parts.join(" OR ")})`);
+    if (compiled.sql) {
+      params.push(...compiled.params);
+      clauses.push(compiled.sql);
+    }
   }
 
   if (filter.types?.length) {

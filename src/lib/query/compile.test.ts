@@ -119,6 +119,19 @@ describe("compile — colours", () => {
     expect(sql("c:m")).toBe("LENGTH(c.colors) > 1");
   });
 
+  it("counts colours when the value is a number", () => {
+    // Scryfall accepts `c>=2` as "two or more colours"; without this the digit
+    // fell into the letter loop and errored, so a query that worked against All
+    // Magic failed against a collection.
+    expect(q("c>=2").sql).toBe("(LENGTH(c.colors) >= $1)");
+    expect(q("c>=2").params).toEqual([2]);
+    expect(q("id<=1").sql).toBe("(LENGTH(c.color_identity) <= $1)");
+  });
+
+  it("reads `:` as equality for a colour count, like the other numerics", () => {
+    expect(q("c:2").sql).toBe("(LENGTH(c.colors) = $1)");
+  });
+
   it("accepts colour names as well as letters", () => {
     expect(sql("c:red")).toBe(sql("c:r"));
   });

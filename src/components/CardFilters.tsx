@@ -1,9 +1,13 @@
 import {
+  COLOR_FIELD_LABELS,
   COLOR_KEYS,
+  COLOR_OP_LABELS,
   countActiveFilters,
   FILTER_RARITIES,
   FILTER_TYPES,
   type CardFilter,
+  type ColorField,
+  type ColorOp,
 } from "../lib/filters";
 
 function toggle(list: string[] | undefined, value: string): string[] {
@@ -11,6 +15,11 @@ function toggle(list: string[] | undefined, value: string): string[] {
   return current.includes(value)
     ? current.filter((v) => v !== value)
     : [...current, value];
+}
+
+/** An empty numeric box means "no bound", which is not the same as zero. */
+function bound(value: string): number | undefined {
+  return value === "" ? undefined : Number(value);
 }
 
 /**
@@ -50,18 +59,89 @@ export function CardFilters({
 
   return (
     <div className="filter-bar">
+      {/* The pips are one set compared against one field, so the field and the
+          operator are part of the same control rather than a separate group. */}
       <div className="filter-group">
-        <span className="filter-label">Colour</span>
+        <select
+          className="filter-select"
+          value={filter.colorField ?? "colors"}
+          onChange={(e) => patch({ colorField: e.target.value as ColorField })}
+        >
+          {(Object.keys(COLOR_FIELD_LABELS) as ColorField[]).map((field) => (
+            <option key={field} value={field}>
+              {COLOR_FIELD_LABELS[field]}
+            </option>
+          ))}
+        </select>
+        <select
+          className="filter-select"
+          value={filter.colorOp ?? "contains"}
+          onChange={(e) => patch({ colorOp: e.target.value as ColorOp })}
+        >
+          {(Object.keys(COLOR_OP_LABELS) as ColorOp[]).map((op) => (
+            <option key={op} value={op}>
+              {COLOR_OP_LABELS[op]}
+            </option>
+          ))}
+        </select>
         {COLOR_KEYS.map((key) => (
           <button
             key={key}
             className={`pip-toggle ${filter.colors?.includes(key) ? "on" : ""}`}
             onClick={() => patch({ colors: toggle(filter.colors, key) })}
-            title={key === "C" ? "Colourless" : key}
+            title={key}
           >
-            <span className={`pip ${key === "C" ? "" : key}`}>{key}</span>
+            <span className={`pip ${key}`}>{key}</span>
           </button>
         ))}
+      </div>
+
+      {/* Colourless is 0–0 here rather than a sixth pip: "contains colourless"
+          would not mean anything, but "has no colours" does. */}
+      <div className="filter-group">
+        <span className="filter-label">Colours</span>
+        <input
+          type="number"
+          min={0}
+          max={5}
+          placeholder="min"
+          value={filter.colorCountMin ?? ""}
+          onChange={(e) => patch({ colorCountMin: bound(e.target.value) })}
+          style={{ width: 62 }}
+        />
+        <span className="filter-label">–</span>
+        <input
+          type="number"
+          min={0}
+          max={5}
+          placeholder="max"
+          value={filter.colorCountMax ?? ""}
+          onChange={(e) => patch({ colorCountMax: bound(e.target.value) })}
+          style={{ width: 62 }}
+        />
+      </div>
+
+      {/* Beside the colour count, so the two numeric ranges read as a pair
+          rather than being separated by the chip rows. */}
+      <div className="filter-group">
+        <span className="filter-label">MV</span>
+        <input
+          type="number"
+          min={0}
+          placeholder="min"
+          value={filter.mvMin ?? ""}
+          onChange={(e) => patch({ mvMin: bound(e.target.value) })}
+          style={{ width: 62 }}
+        />
+        <span className="filter-label">–</span>
+        <input
+          type="number"
+          min={0}
+          placeholder="max"
+          value={filter.mvMax ?? ""}
+          onChange={(e) => patch({ mvMax: bound(e.target.value) })}
+          style={{ width: 62 }}
+        />
       </div>
 
       <div className="filter-group">
@@ -88,31 +168,6 @@ export function CardFilters({
             {rarity}
           </button>
         ))}
-      </div>
-
-      <div className="filter-group">
-        <span className="filter-label">MV</span>
-        <input
-          type="number"
-          min={0}
-          placeholder="min"
-          value={filter.mvMin ?? ""}
-          onChange={(e) =>
-            patch({ mvMin: e.target.value === "" ? undefined : Number(e.target.value) })
-          }
-          style={{ width: 62 }}
-        />
-        <span className="filter-label">–</span>
-        <input
-          type="number"
-          min={0}
-          placeholder="max"
-          value={filter.mvMax ?? ""}
-          onChange={(e) =>
-            patch({ mvMax: e.target.value === "" ? undefined : Number(e.target.value) })
-          }
-          style={{ width: 62 }}
-        />
       </div>
 
       {groups.map((group) => (

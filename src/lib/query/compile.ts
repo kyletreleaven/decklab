@@ -100,14 +100,31 @@ function escapeLike(value: string): string {
 
 /**
  * Parse a colour value into distinct letters.
- * Accepts letters (`rw`), names (`red`), `c` for colourless, `m` for multicolour.
+ * Accepts letters (`rw`), names (`red`), `c` for colourless, `m` for multicolour,
+ * and a bare number, which counts colours rather than naming them.
  */
 function parseColours(
   raw: string,
   at: number,
-): { letters: string[]; colourless: boolean; multicolour: boolean } {
+): {
+  letters: string[];
+  colourless: boolean;
+  multicolour: boolean;
+  count?: number;
+} {
   const value = raw.trim().toLowerCase();
   if (!value) throw new CompileError("colour value is empty", at);
+
+  // `c>=2` is "two or more colours", which is how Scryfall reads it. Checked
+  // before the letter loop, which would otherwise reject the digit.
+  if (/^\d+$/.test(value)) {
+    return {
+      letters: [],
+      colourless: false,
+      multicolour: false,
+      count: Number(value),
+    };
+  }
 
   if (value === "c" || value === "colorless" || value === "colourless") {
     return { letters: [], colourless: true, multicolour: false };
@@ -206,8 +223,14 @@ export function compile(
    * string equality against `'WR'`.
    */
   function colourTerm(column: string, op: Op, value: string, at: number): string {
-    const { letters, colourless, multicolour } = parseColours(value, at);
+    const { letters, colourless, multicolour, count } = parseColours(value, at);
     const c = col(column);
+
+    // The stored string is one letter per colour, so its length is the count.
+    if (count !== undefined) {
+      // `:` means equality for numbers, matching the other numeric fields.
+      return `(LENGTH(${c}) ${op === ":" ? "=" : op} ${p(count)})`;
+    }
 
     if (colourless) {
       return op === "!=" ? `LENGTH(${c}) > 0` : `LENGTH(${c}) = 0`;

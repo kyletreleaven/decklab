@@ -1072,6 +1072,12 @@ textarea:focus {
   margin-right: 2px;
 }
 
+/* Compact enough to sit inline with the pips without stretching the bar. */
+.filter-select {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
 .chip {
   padding: 3px 9px;
   font-size: 11px;

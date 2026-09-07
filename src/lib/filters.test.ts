@@ -16,17 +16,61 @@ describe("toScryfallQuery", () => {
     expect(toScryfallQuery({ query: "o:draw a card" })).toBe("o:draw a card");
   });
 
-  it("emits a single colour clause without parentheses", () => {
-    expect(toScryfallQuery({ colors: ["R"] })).toBe("c:r");
+  it("treats the selection as one set, not a list of alternatives", () => {
+    // `c>=rw` is red AND white, not red OR white. The pips describe one
+    // comparison; asking for either colour is `contains R` with max 1.
+    expect(toScryfallQuery({ colors: ["R"] })).toBe("c>=r");
+    expect(toScryfallQuery({ colors: ["R", "W"] })).toBe("c>=wr");
   });
 
-  it("ORs multiple colours inside parentheses", () => {
-    // Without the parens the OR would bind loosely and swallow later clauses.
-    expect(toScryfallQuery({ colors: ["R", "W"] })).toBe("(c:r or c:w)");
+  it("canonicalises the letters so pip click order cannot change the query", () => {
+    expect(toScryfallQuery({ colors: ["R", "W"] })).toBe(
+      toScryfallQuery({ colors: ["W", "R"] }),
+    );
   });
 
-  it("spells colourless as c:c rather than a letter", () => {
-    expect(toScryfallQuery({ colors: ["C"] })).toBe("c:c");
+  it("switches both the comparison and the count to identity together", () => {
+    expect(
+      toScryfallQuery({ colors: ["G"], colorField: "identity", colorCountMax: 2 }),
+    ).toBe("id>=g id<=2");
+  });
+
+  it("uses <= for contained by, which is the subset test", () => {
+    expect(toScryfallQuery({ colors: ["W", "U"], colorOp: "containedBy" })).toBe(
+      "c<=wu",
+    );
+  });
+
+  it("reads contained by an empty selection as colourless, not as no filter", () => {
+    // The only cards whose colours are a subset of nothing are the colourless
+    // ones. Dropping the clause would silently widen the search to everything.
+    expect(toScryfallQuery({ colorOp: "containedBy" })).toBe("c<=c");
+    expect(toScryfallQuery({ colorOp: "containedBy", colors: [] })).toBe("c<=c");
+    expect(
+      toScryfallQuery({ colorOp: "containedBy", colorField: "identity" }),
+    ).toBe("id<=c");
+  });
+
+  it("reads contains an empty selection as no filter, which is vacuously true", () => {
+    // The asymmetry is the point: every card contains no colours, but only
+    // colourless cards are contained by none.
+    expect(toScryfallQuery({ colorOp: "contains" })).toBe("");
+    expect(toScryfallQuery({ colorOp: "contains", colors: [] })).toBe("");
+  });
+
+  it("spells colourless as a count of zero rather than a sixth pip", () => {
+    // "contains colourless" is not a question; "has no colours" is.
+    expect(toScryfallQuery({ colorCountMax: 0 })).toBe("c<=0");
+  });
+
+  it("expresses exactly-these-colours as contains plus pinned bounds", () => {
+    expect(
+      toScryfallQuery({ colors: ["W", "U"], colorCountMin: 2, colorCountMax: 2 }),
+    ).toBe("c>=wu c>=2 c<=2");
+  });
+
+  it("treats a colour count of zero as a real bound, not absent", () => {
+    expect(toScryfallQuery({ colorCountMin: 0 })).toBe("c>=0");
   });
 
   it("lowercases types", () => {
@@ -73,7 +117,7 @@ describe("toScryfallQuery", () => {
         mvMax: 1,
         legalIn: "modern",
       }),
-    ).toBe("bolt c:r t:instant mv<=1 f:modern");
+    ).toBe("bolt c>=r t:instant mv<=1 f:modern");
   });
 
   it("ignores ownership toggles, which Scryfall cannot answer", () => {
@@ -104,6 +148,26 @@ describe("countActiveFilters", () => {
     expect(
       countActiveFilters({ colors: ["R", "W"], types: ["Instant"], mvMax: 3 }),
     ).toBe(4);
+  });
+
+  it("does not count the colour field, which narrows nothing on its own", () => {
+    expect(countActiveFilters({ colorField: "identity" })).toBe(0);
+    expect(
+      countActiveFilters({ colorField: "identity", colors: ["W"] }),
+    ).toBe(1);
+  });
+
+  it("counts contained-by with an empty selection, which means colourless", () => {
+    // It filters, so the bar must not read as clear — otherwise there is no
+    // Clear all to undo it with.
+    expect(countActiveFilters({ colorOp: "containedBy" })).toBe(1);
+    // With pips selected the operator is already implied by their count.
+    expect(countActiveFilters({ colorOp: "containedBy", colors: ["W"] })).toBe(1);
+    expect(countActiveFilters({ colorOp: "contains" })).toBe(0);
+  });
+
+  it("counts colour bounds", () => {
+    expect(countActiveFilters({ colorCountMin: 2, colorCountMax: 3 })).toBe(2);
   });
 
   it("does not count ownership toggles or deck scoping", () => {
