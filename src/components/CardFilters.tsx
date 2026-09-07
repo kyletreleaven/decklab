@@ -170,6 +170,17 @@ export function CardFilters({
         ))}
       </div>
 
+      <div className="filter-group">
+        <span className="filter-label">Printing</span>
+        <button
+          className={`chip ${filter.paperOnly ? "on" : ""}`}
+          onClick={() => patch({ paperOnly: filter.paperOnly ? undefined : true })}
+          title="Only cards available as a physical card"
+        >
+          Paper
+        </button>
+      </div>
+
       {groups.map((group) => (
         <div className="filter-group" key={group.label}>
           <span className="filter-label">{group.label}</span>

@@ -108,6 +108,13 @@ describe("toScryfallQuery", () => {
     expect(toScryfallQuery({ legalIn: "commander" })).toBe("f:commander");
   });
 
+  it("asks for paper availability rather than negating digital", () => {
+    // `game:paper` and `not:digital` select the same printings, but the
+    // positive form says what is wanted instead of what is not.
+    expect(toScryfallQuery({ paperOnly: true })).toBe("game:paper");
+    expect(toScryfallQuery({ paperOnly: false })).toBe("");
+  });
+
   it("joins several facets with spaces, i.e. AND", () => {
     expect(
       toScryfallQuery({
@@ -168,6 +175,11 @@ describe("countActiveFilters", () => {
 
   it("counts colour bounds", () => {
     expect(countActiveFilters({ colorCountMin: 2, colorCountMax: 3 })).toBe(2);
+  });
+
+  it("counts paper-only, which narrows like any other facet", () => {
+    expect(countActiveFilters({ paperOnly: true })).toBe(1);
+    expect(countActiveFilters({ paperOnly: false })).toBe(0);
   });
 
   it("does not count ownership toggles or deck scoping", () => {

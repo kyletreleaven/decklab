@@ -231,6 +231,13 @@ export async function collectionItems(
     }
   }
 
+  if (filter.paperOnly) {
+    // `digital` is a fact about the printing, not the card, which is the grain
+    // a collection holds: an Arena-only printing is excluded while the paper
+    // printing of the same card stays.
+    clauses.push(`c.digital = 0`);
+  }
+
   if (filter.legalIn) {
     params.push(filter.legalIn);
     clauses.push(`json_extract(c.legalities, '$.' || ${hole()}) IN ('legal', 'restricted')`);

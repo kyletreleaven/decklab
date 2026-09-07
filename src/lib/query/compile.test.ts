@@ -85,6 +85,21 @@ describe("compile — power and toughness", () => {
   });
 });
 
+describe("compile — game availability", () => {
+  it("maps `game:paper` onto the digital column", () => {
+    // `digital` means "not available in paper", so 0 is the physical card.
+    expect(sql("game:paper")).toBe("c.digital = 0");
+    expect(sql("game!=paper")).toBe("c.digital = 1");
+  });
+
+  it("rejects the games the column cannot distinguish", () => {
+    // `digital = 1` covers Arena and MTGO together and cannot separate them,
+    // so answering would be a guess dressed as a result.
+    expect(() => q("game:arena")).toThrow(/only `game:paper` is supported/);
+    expect(() => q("game:mtgo")).toThrow(/only `game:paper` is supported/);
+  });
+});
+
 describe("compile — colours", () => {
   it("`c:rw` means at least those colours", () => {
     const { sql, params } = q("c:rw");

@@ -337,6 +337,21 @@ export function compile(
         : `${col("set_code")} = ${p(v)}`;
     }
 
+    if (key === "game") {
+      const wanted = value.trim().toLowerCase();
+      // `digital` answers paper exactly — it means "not available in paper",
+      // so a printing on MTGO and paper is 0 — but it cannot tell Arena from
+      // MTGO. Reported rather than answered wrongly, like the `is:` family.
+      if (wanted !== "paper") {
+        throw new CompileError(
+          "only `game:paper` is supported in local collections",
+          at,
+          value,
+        );
+      }
+      return op === "!=" ? `${col("digital")} = 1` : `${col("digital")} = 0`;
+    }
+
     if (key === "f" || key === "format" || key === "legal") {
       // Parameterised rather than concatenated into the JSON path, so a format
       // name can never alter the expression.

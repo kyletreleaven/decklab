@@ -79,6 +79,21 @@ export interface CardFilter {
   legalIn?: string;
 
   /**
+   * Restrict to cards available as a physical object.
+   *
+   * Grain-sensitive on purpose. Against Scryfall this asks whether *some*
+   * printing exists in paper; against a collection it asks whether *this*
+   * printing is one. Each is the right question for its stream — a collection
+   * holds printings, the pool pages oracle rows.
+   *
+   * The local column is `digital`, which means "this printing is not available
+   * in paper" rather than "exists in a digital game": a printing on both MTGO
+   * and paper is `digital = 0`. Verified against a 350-printing sample, where
+   * `digital == ('paper' not in games)` held without exception.
+   */
+  paperOnly?: boolean;
+
+  /**
    * Arena-style ownership toggles. Both on (the default) shows everything with
    * unowned cards dimmed rather than hidden.
    *
@@ -121,7 +136,8 @@ export function countActiveFilters(filter: CardFilter): number {
     (filter.types?.length ?? 0) +
     (filter.rarities?.length ?? 0) +
     (filter.mvMin !== undefined ? 1 : 0) +
-    (filter.mvMax !== undefined ? 1 : 0)
+    (filter.mvMax !== undefined ? 1 : 0) +
+    (filter.paperOnly ? 1 : 0)
   );
 }
 
@@ -207,6 +223,8 @@ export function toScryfallQuery(filter: CardFilter): string {
   }
 
   if (filter.legalIn) clauses.push(`f:${quote(filter.legalIn)}`);
+
+  if (filter.paperOnly) clauses.push("game:paper");
 
   return clauses.join(" ");
 }
