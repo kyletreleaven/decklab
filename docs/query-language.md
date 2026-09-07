@@ -99,11 +99,16 @@ Every field in v1 hits a column that already exists on `cards`.
 | `kw:` | `keywords` | JSON array |
 | `layout:` | `layout` | equality |
 | `a:` `ft:` | raw payload | `json_extract(data, '$.artist')` etc. |
+| `game:` | `digital` | `game:paper` only — the column cannot tell Arena from MTGO, so the rest raise rather than guess |
 | `is:` | — | **unsupported in v1**; structured error naming the term |
 
 ### Colour operators
 
-The subtle part, since Scryfall's operators genuinely differ from one another:
+The subtle part, since Scryfall's operators genuinely differ from one another.
+The semantics behind this table — what the two fields mean, why the empty
+selection is asymmetric, and which colour searches Scryfall supports that this
+compiler does not — are in
+[`colour-filtering.md`](colour-filtering.md).
 
 | Query | Means | Compiles to |
 | --- | --- | --- |
@@ -112,6 +117,7 @@ The subtle part, since Scryfall's operators genuinely differ from one another:
 | `c<=rw` | at most — the Commander identity rule | no letter outside the set |
 | `c>rw` | strict superset | contains both, and not exactly two |
 | `c:c` / `c:m` | colourless / multicolour | `LENGTH = 0` / `LENGTH > 1` |
+| `c>=2` `c=1` | a colour *count*, not a colour | `LENGTH(colors) >= 2` |
 
 **Nothing depends on stored colour order.** Colours happen to be stored
 WUBRG-canonical (`"WR"`, not `"RW"`), but expressing equality as *contains each,
@@ -123,6 +129,43 @@ Values are deduped **before** the count is taken, so `c=rr` is mono-red
 
 Accept letters (`rw`), `c` for colourless, `m` for multicolour, and full names
 (`red`). Guild and shard names (`azorius`, `bant`) are out of scope for v1.
+
+### Gotcha: `digital` means "not in paper"
+
+`game:paper` compiles to `digital = 0`, which is correct but not for the reason
+the column name suggests. `digital` does **not** mean "exists in a digital
+game" — it means *this printing is not available in paper*.
+
+Across a 350-printing sample drawn without any digital-related term, 201
+printings were on MTGO or Arena **and** paper, and every one was `digital = 0`:
+
+```
+digital=False  games=mtgo,paper        138
+digital=False  games=paper              92
+digital=False  games=arena,mtgo,paper   63
+digital=True   games=arena              41
+digital=True   games=mtgo               15
+digital=False  games=arena,paper         1
+```
+
+The invariant `digital == ('paper' not in games)` held without exception, so
+`digital = 0` is exactly `game:paper` and not an approximation of it. Confirmed
+against the API from the other direction too: `game:paper` and `not:digital`
+return the same rows at both grains — 32,732 cards, 97,648 printings.
+
+Two consequences:
+
+- The column is per **printing**, which is the grain a collection holds. An
+  Arena-only printing drops out while the paper printing of the same card
+  stays — the right answer for a collection, and the reason this is not
+  something to "fix" into oracle grain.
+- One boolean cannot separate Arena from MTGO, so `game:arena` and `game:mtgo`
+  raise a structured error rather than answering with `digital = 1`, which would
+  be a guess dressed as a result. The `games` array that *would* answer them
+  lives in the `data` JSON.
+
+Prefer the positive spelling in emitted queries: `game:paper` says what is
+wanted, `not:digital` says what is not, and they select the same rows.
 
 ### Gotcha: power and toughness are TEXT
 
