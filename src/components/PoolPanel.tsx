@@ -12,6 +12,8 @@ import {
 } from "../lib/filters";
 import { fromArray, fromPages, take } from "../lib/merge";
 import { retained, useRetained } from "../lib/panelState";
+import { isDimmed } from "../lib/dimming";
+import { fetchSignature } from "../lib/poolFetch";
 import { MAX_CARDS } from "../lib/saveSearch";
 import { stepperCase, STEPPER_CONTROLS } from "../lib/stepper";
 import { isSuperseded } from "../lib/scheduler";
@@ -294,6 +296,9 @@ export function PoolPanel({
   /** Guards against a slow early request landing after a later one. */
   const requestId = useRef(0);
 
+  /** The filter last fetched for, to tell typing from every other change. */
+  const lastFilter = useRef<string | undefined>(undefined);
+
   /**
    * The stream still being drawn from, for `loadMore`.
    *
@@ -339,6 +344,7 @@ export function PoolPanel({
    * lit set to narrow to.
    */
   const canNarrow = narrowable && !!lit;
+  const showNotIn = canNarrow && !narrowToLit;
   const drawn: "universe" | "collection" =
     canNarrow && narrowToLit ? "collection" : source.kind;
 
@@ -350,8 +356,6 @@ export function PoolPanel({
         : lit?.id
       : undefined;
 
-  /** A card lights if it is in the lit set. With no lit set, everything does. */
-  const dims = !!lit;
 
   /** Whose counts the rows carry, and whether they mean anything. */
   const drawnKind: QuantityKind =
@@ -363,18 +367,15 @@ export function PoolPanel({
       ? destination?.quantityKind !== "binary"
       : drawnKind !== "binary";
 
-  const signature = JSON.stringify([
-    localSourceId,
+  // Also the fetch effect's only dependency — see `fetchSignature`.
+  const signature = fetchSignature({
     drawn,
+    localSourceId,
     effectiveKey,
     sort,
     sortFlipped,
-    // Must match the fetch effect's deps exactly, or the retention skip
-    // swallows a change the effect would have caught. `refreshKey` is in
-    // neither: adding a card moves it between foreground and background, so
-    // the union — and therefore the wall — is unchanged. Membership lives in
-    // the cache above instead.
-  ]);
+    refreshKey,
+  });
 
   /**
    * Which sorts are offerable, and the current one's remote spelling.
@@ -451,11 +452,14 @@ export function PoolPanel({
 
         pending.current = stream;
 
-        const first = await take(stream, PAGE);
+        // A local list refetches after every write, so take as much as is on
+        // screen: a grid that snapped back to one page would lose your place.
+        const want = drawn === "collection" ? Math.max(shown, PAGE) : PAGE;
+        const first = await take(stream, want);
         if (requestId.current !== id) return;
 
         setRows(first);
-        setExhausted(first.length < PAGE);
+        setExhausted(first.length < want);
         setTotal(known ?? first.length);
       } catch (err) {
         if (requestId.current !== id) return;
@@ -475,21 +479,15 @@ export function PoolPanel({
       }
     };
 
-    const timer = setTimeout(run, 350);
+    // Debounce typing, and only typing. A write, a sort or a toggle is one
+    // deliberate act, and waiting on it reads as lag (bugs/001).
+    const typing = lastFilter.current !== effectiveKey;
+    lastFilter.current = effectiveKey;
+    const timer = setTimeout(run, typing ? 350 : 0);
     return () => clearTimeout(timer);
-    // The mutation counter matters only while the list itself is local. Adding
-    // it unconditionally would re-run a Scryfall search on every `+`, which is
-    // exactly the traffic the scheduler exists to avoid.
-  }, [
-    localSourceId,
-    drawn,
-    effectiveKey,
-    sort,
-    sortFlipped,
-    // `refreshKey` is deliberately absent: a write changes what you *hold*, not
-    // which cards match, and the lit set is reloaded separately. Re-paging to
-    // learn nothing would rebuild the grid and lose your place.
-  ]);
+    // Everything the query reads is folded into `signature`, including when a
+    // write should re-run it.
+  }, [signature]);
 
   /**
    * One page of the merged stream at a time, so the rhythm is the same whether
@@ -903,7 +901,7 @@ export function PoolPanel({
         <div className="card-grid">
           {visible.map((row) => {
             const card = row.card;
-            const isIn = inCollection.has(card.oracleId);
+            const dimmed = isDimmed(card.oracleId, lit ? inCollection : null, showNotIn);
             // At printing grain the count is what you hold in *this* row; at
             // oracle grain it is what the destination holds of that card.
             // The entry's own count, since `quantities` sums a printing's
@@ -920,7 +918,7 @@ export function PoolPanel({
                   selectedId === card.id ? "selected" : "",
                   // Arena's convention: cards outside the active collection
                   // stay visible but recede.
-                  dims && !isIn ? "dim" : "",
+                  dimmed ? "dim" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
@@ -930,7 +928,7 @@ export function PoolPanel({
                 onDoubleClick={() => step?.inc?.()}
                 title={[
                   card.name,
-                  dims && !isIn && `not in ${lit!.name}`,
+                  dimmed && `not in ${lit!.name}`,
                   // Double-click adds, which is otherwise undiscoverable — and
                   // where it lands is exactly the thing that differs between
                   // this grid and the card panel.
@@ -989,7 +987,7 @@ export function PoolPanel({
         ) : (
           visible.map((row) => {
             const card = row.card;
-            const isIn = inCollection.has(card.oracleId);
+            const dimmed = isDimmed(card.oracleId, lit ? inCollection : null, showNotIn);
             // The entry's own count, since `quantities` sums a printing's
             // finishes and would show a foil and a nonfoil the same total. But
             // suppressed once the destination no longer holds it, so a removed
@@ -1002,7 +1000,7 @@ export function PoolPanel({
                 className={[
                   "row",
                   selectedId === card.id ? "selected" : "",
-                  dims && !isIn ? "dim" : "",
+                  dimmed ? "dim" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}

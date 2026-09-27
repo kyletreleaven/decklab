@@ -871,9 +871,10 @@ export default function App() {
             }}
             // All Magic and nothing else: you are recording what you own, so
             // narrowing to what you have already recorded would be circular.
-            // Lit against the collection below, so you can see what is new.
+            // Nothing lit either — dimming answers "would I need a copy?", a
+            // deck-building question. What is already here shows on the
+            // stepper's count.
             source={{ kind: "universe" }}
-            lit={{ id: currentCollection.id, name: currentCollection.name }}
             activePrintings={activePrintings}
             refreshKey={refreshKey}
             compact
