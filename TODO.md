@@ -377,7 +377,8 @@ rather than as scaffolding.
       already is a different component wearing the same one. Not yet: the
       two-branch fetch, sort, facets, dimming and paging are genuinely shared.
 
-- 🐛 **Reconcile printings between the pool and the containers.** Now that All
+- 🐛 **Reconcile printings between the pool and the containers.** Tracked as
+      [`bugs/002`](bugs/002-stepper-counts-printing-grain.md). Now that All
       Magic is the base set, each tile shows whichever printing Scryfall's
       `unique=cards` happened to return, while decks and collections hold
       *specific* printings. The two grains disagree, and three things sit on the
