@@ -1002,6 +1002,10 @@ Statistical, not necessarily AI.
 ### 10. Polish 🚧
 - ⬜ Command palette (⌘K / ⌘⇧P)
 - ⬜ Global search
+- ⬜ Search-bar suggestions that know card names — WebKit autocorrect is off on
+  the pool search (`PoolPanel.tsx`) because it mangled names and query syntax.
+  Replace it with completion against Scryfall's `/cards/autocomplete` (via
+  `scheduledFetch`) or the loaded pool, not the OS dictionary.
 - ⬜ Split panes
 - ⬜ Keyboard-first navigation
 - ⬜ Plugin support

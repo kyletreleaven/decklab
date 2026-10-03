@@ -740,6 +740,12 @@ export function PoolPanel({
           // The same syntax either way now: passed to Scryfall for the
           // universe, compiled to SQL for a collection.
           placeholder={"Search — t:creature c:r mv<=3"}
+          // WebKit's autocorrect mangles card names and query syntax. Off
+          // until there is a suggester that knows the card pool.
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
+          spellCheck={false}
           value={filter.query ?? ""}
           onChange={(e) => setFilter({ ...filter, query: e.target.value })}
         />
