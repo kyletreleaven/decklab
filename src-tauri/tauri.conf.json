@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DeckLab",
   "version": "0.1.0",
-  "identifier": "com.decklab.app",
+  "identifier": "dev.treleaven.decklab",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

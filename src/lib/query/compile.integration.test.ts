@@ -22,7 +22,7 @@ import { parse } from "./parse";
 
 const DB = join(
   homedir(),
-  "Library/Application Support/com.decklab.app/decklab.db",
+  "Library/Application Support/dev.treleaven.decklab/decklab.db",
 );
 
 const ENABLED = !!process.env.QUERY_SQL && existsSync(DB);

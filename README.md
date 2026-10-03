@@ -12,6 +12,35 @@ Tauri 2 · React 19 + TypeScript · SQLite · card data from
 
 ---
 
+## Build from source
+
+macOS only for now. You need Xcode Command Line Tools, Node 20+, Rust and
+`cargo-audit`; the script checks for all of them and says how to install
+whatever is missing.
+
+```bash
+git clone https://github.com/kyletreleaven/decklab.git
+cd decklab
+./scripts/build-macos.sh
+```
+
+The script audits both dependency trees (`npm audit`, `cargo audit`) and
+reports any known vulnerabilities at the end. It reports them but still builds.
+
+**Expect one Rust vulnerability:** `rsa` (RUSTSEC-2023-0071), which has no fixed
+version yet. It is listed in `Cargo.lock` but never compiled into the app.
+`tauri-plugin-sql` depends on `sqlx`, which lists MySQL support (and with it
+`rsa`) as a possible dependency, and `cargo audit` checks the whole lockfile.
+DeckLab uses only SQLite, and `cargo tree -i rsa --target all` comes back
+empty. Anything else `cargo audit` reports is new.
+
+The app lands in `build/DeckLab.app` — open it from there or drag it wherever
+you like. To update, `git pull` and run the script
+again. Built on your own machine, it opens without the Gatekeeper warning a
+downloaded unsigned app would get.
+
+---
+
 ## Prerequisites
 
 | Tool | Version used | Notes |
@@ -66,7 +95,7 @@ changes to `src-tauri/` need that second command restarted by hand.
 Needs no dev server at all, and shares the same database:
 
 ```bash
-open src-tauri/target/release/bundle/macos/DeckLab.app
+./scripts/build-macos.sh && open build/DeckLab.app
 ```
 
 ---
@@ -107,30 +136,21 @@ npx tsc --noEmit
 
 ---
 
-## Building a release
+## Building a DMG
+
+Not needed to run the app — `scripts/build-macos.sh` builds the `.app` alone. A DMG is
+only for handing someone a download, and an unsigned one is blocked by
+Gatekeeper on their machine.
 
 ```bash
 npm run tauri build
 ```
-
-Produces `src-tauri/target/release/bundle/`:
-
-- `dmg/DeckLab_0.1.0_aarch64.dmg` (~7.5 MB)
-- `macos/DeckLab.app`
 
 **From a non-interactive shell, use `CI=true npm run tauri build`.** The DMG
 bundler runs an AppleScript to prettify the disk-image window, which fails
 without a GUI session and leaves a volume mounted under `/Volumes`. `CI=true`
 makes Tauri pass `--skip-jenkins`, skipping the cosmetics. Note `CI=1` is
 rejected — the CLI maps it to a `--ci` flag that only accepts `true`/`false`.
-
-Current limitations: unsigned (Gatekeeper blocks it on other machines), Apple
-Silicon only, and still using the default Tauri icon. For a universal binary:
-
-```bash
-rustup target add x86_64-apple-darwin
-npm run tauri build -- --target universal-apple-darwin
-```
 
 ---
 
@@ -156,7 +176,7 @@ deck rules, parsing, queries, stats — is TypeScript.
 ### Application data
 
 ```
-~/Library/Application Support/com.decklab.app/
+~/Library/Application Support/dev.treleaven.decklab/
   decklab.db      decks, collections, and the incremental card cache
   images/         downloaded card images
 ```

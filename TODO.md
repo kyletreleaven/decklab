@@ -4,7 +4,7 @@ Legend: ✅ done · 🚧 partial · ⬜ not started
 
 **Stack:** Tauri 2 · React 19 + TypeScript · SQLite (`tauri-plugin-sql`) · Scryfall.
 All logic lives in TypeScript; Rust handles file I/O only (image cache, file
-read/write). Data lives in `~/Library/Application Support/com.decklab.app/`.
+read/write). Data lives in `~/Library/Application Support/dev.treleaven.decklab/`.
 
 **Storage note:** DuckDB was deferred, not rejected. When §7 Discovery arrives with
 corpus-scale data, DuckDB can `ATTACH` the existing SQLite file in place — no
@@ -1080,9 +1080,6 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
   aiming `+` at a deleted id. Fix by deriving: filter `touched` against the live
   `decks`/`collections` arrays, which makes `forget` redundant for correctness.
 - **CSP is `null`.** Fine for local dev; tighten before shipping signed builds.
-- **Bundle identifier ends in `.app`.** `com.decklab.app` triggers a build warning
-  and conflicts with the macOS bundle extension. Changing it moves the database
-  directory, so it gets more expensive the longer it waits.
 - **Builds are unsigned and Apple Silicon only.** Gatekeeper blocks them on other
   machines. Needs an Apple Developer ID + notarization; universal builds need
   `rustup target add x86_64-apple-darwin`.

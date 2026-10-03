@@ -135,7 +135,7 @@ hardcoded to Commander in practice.
 - Versioned SQL migrations, applied on startup
 - Dark theme (there is no light theme)
 - All data in one SQLite file under
-  `~/Library/Application Support/com.decklab.app/`
+  `~/Library/Application Support/dev.treleaven.decklab/`
 - **83 unit tests** over the parser, serialisers, deck analysis, filter
   translation and the scheduler; **25 Scryfall contract tests** run on demand as
   executable documentation of the API behaviour we depend on
