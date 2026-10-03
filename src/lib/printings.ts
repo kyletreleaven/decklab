@@ -39,3 +39,26 @@ export function printingLabel(card: Card): string {
   return traits.length ? `${base} · ${traits.join(", ")}` : base;
 }
 
+
+/**
+ * Scryfall pages for a card, for opening in the browser — one per grain.
+ *
+ * The printing and set pages are read from the raw payload, which every cached
+ * card carries, so no migration and no refetch. Their `utm_source=api` is
+ * Scryfall's own attribution for API clients and is kept on purpose. The
+ * fallbacks build the same pages, for a payload that somehow lacks the field.
+ */
+export function scryfallPages(card: Card): { card: string; set: string; printing: string } {
+  const data = card.data as { scryfall_uri?: string; scryfall_set_uri?: string };
+  const set = encodeURIComponent(card.setCode);
+  return {
+    // Scryfall has no page per card, only per printing. A search for the oracle
+    // id is the nearest, and `unique=prints` matters: a search with exactly one
+    // result redirects to that card's default printing.
+    card: `https://scryfall.com/search?q=${encodeURIComponent(`oracleid:${card.oracleId}`)}&unique=prints`,
+    set: data.scryfall_set_uri ?? `https://scryfall.com/sets/${set}`,
+    printing:
+      data.scryfall_uri ??
+      `https://scryfall.com/card/${set}/${encodeURIComponent(card.collectorNumber)}`,
+  };
+}

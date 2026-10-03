@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { collectionCountsByPrinting } from "../lib/collections";
 import { cachedPrintings } from "../lib/cards";
-import { printingLabel, variantTraits } from "../lib/printings";
+import { printingLabel, scryfallPages, variantTraits } from "../lib/printings";
 import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
 import type { Card } from "../lib/types";
@@ -10,6 +12,23 @@ import { CardImage } from "./CardImage";
 import { ManaCost } from "./ManaCost";
 
 const LEGALITY_FORMATS = ["commander", "modern", "pioneer", "legacy", "vintage"];
+
+/** A link that opens in the browser rather than navigating the app's webview. */
+function External({ href, title, children }: { href: string; title: string; children: React.ReactNode }) {
+  return (
+    <a
+      className="external"
+      href={href}
+      title={title}
+      onClick={(e) => {
+        e.preventDefault();
+        void openUrl(href);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
 
 function money(value: string | null | undefined): string | null {
   const n = Number.parseFloat(value ?? "");
@@ -75,6 +94,13 @@ export function CardDetail({
 }) {
   const [printings, setPrintings] = useState<Card[]>([]);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  /**
+   * A printing highlighted in the picker menu, shown in place of the chosen one
+   * until the menu closes — the app's hover rule (`shown = hovered ?? selected`)
+   * applied within the panel. Local rather than through App's `hoverCard`,
+   * because a new `card` prop would reset the chosen printing.
+   */
+  const [previewId, setPreviewId] = useState<string | null>(null);
   /**
    * Which face of a double-faced card is showing.
    *
@@ -231,7 +257,8 @@ export function CardDetail({
 
   // The carousel selection is what the panel describes and what ops act on, so
   // picking a printing and adding it does the obvious thing.
-  const shown = printings.find((p) => p.id === printingId) ?? card;
+  const shown =
+    printings.find((p) => p.id === (previewId ?? printingId)) ?? card;
   const index = visible.findIndex((p) => p.id === shown.id);
   const usd = money(shown.prices.usd);
   const usdFoil = money(shown.prices.usd_foil);
@@ -401,46 +428,106 @@ export function CardDetail({
 
         </div>
 
-        <div className="carousel-controls">
-          <select
-            value={shown.id}
-            onChange={(e) => {
-              const picked = visible.find((p) => p.id === e.target.value);
-              if (picked) choosePrinting(picked);
-            }}
-            disabled={visible.length === 0}
-            title="Jump to a printing"
-          >
-            {visible.map((printing) => (
-              <option key={printing.id} value={printing.id}>
-                {printingLabel(printing)}
-                {filterQty[printing.id] ? ` — ${filterQty[printing.id]}×` : ""}
-              </option>
-            ))}
-          </select>
+        {/* Which printings to step through. Always shown; each narrowing
+            appears while its slot is active, disabled when the slot holds
+            none, so the row does not reflow as copies come and go. */}
+        <div className="printing-filter" role="radiogroup" title="Which printings to step through">
+          <label>
+            <input
+              type="radio"
+              checked={printingFilter === "all"}
+              onChange={() => setPrintingFilter("all")}
+            />
+            All printings
+          </label>
+          {activeDeck && (
+            <label className={deckTotal === 0 ? "disabled" : undefined}>
+              <input
+                type="radio"
+                checked={printingFilter === "deck"}
+                disabled={deckTotal === 0}
+                onChange={() => setPrintingFilter("deck")}
+              />
+              In {activeDeck.name}
+            </label>
+          )}
+          {activeCollection && (
+            <label className={collectionTotal === 0 ? "disabled" : undefined}>
+              <input
+                type="radio"
+                checked={printingFilter === "collection"}
+                disabled={collectionTotal === 0}
+                onChange={() => setPrintingFilter("collection")}
+              />
+              In {activeCollection.name}
+            </label>
+          )}
+        </div>
 
-          <span className="hint">
-            {visible.length > 1
-              ? `${index === -1 ? 1 : index + 1}/${visible.length}`
-              : ""}
+        <div className="carousel-controls">
+          <span className="printing-label">
+            <External href={scryfallPages(shown).printing} title="This printing on Scryfall">
+              {printingLabel(shown)}
+            </External>
           </span>
 
-          <select
-            value={printingFilter}
-            onChange={(e) =>
-              setPrintingFilter(e.target.value as typeof printingFilter)
-            }
-            title="Which printings to step through"
-          >
-            <option value="all">All printings</option>
-            {/* Only offered when there is something to narrow to. */}
-            {activeDeck && deckTotal > 0 && (
-              <option value="deck">In {activeDeck.name}</option>
-            )}
-            {activeCollection && collectionTotal > 0 && (
-              <option value="collection">In {activeCollection.name}</option>
-            )}
-          </select>
+          {visible.length > 1 && (
+            <span className="hint">
+              {index === -1 ? 1 : index + 1} of {visible.length}
+            </span>
+          )}
+
+          {/* A menu button, not a select: the labels beside it already say
+              which printing and where it sits, so the button shows nothing
+              itself, and the current printing is checked in the menu.
+
+              Radix, because React has no menu button of its own and this one
+              handles keyboard, focus and dismissal for us. It is the common
+              choice (shadcn/ui builds on it), but several of its authors moved
+              on to Base UI, positioned as a successor; worth a look if Radix
+              maintenance ever stalls. A native Tauri menu (`Menu.popup`) was
+              tried first and works, but cannot report hover, which a
+              hover-to-preview list would need. */}
+          <DropdownMenu.Root onOpenChange={(open) => !open && setPreviewId(null)}>
+            <DropdownMenu.Trigger asChild disabled={visible.length < 2}>
+              <button className="printing-menu" title="Choose a printing">
+                ▾
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content className="menu" align="end" sideOffset={4}>
+                <DropdownMenu.RadioGroup
+                  // The chosen printing, not `shown`: the check stays put while
+                  // the highlight previews others.
+                  value={printingId ?? card.id}
+                  onValueChange={(id) => {
+                    const picked = visible.find((p) => p.id === id);
+                    if (picked) choosePrinting(picked);
+                  }}
+                >
+                  {visible.map((printing) => (
+                    <DropdownMenu.RadioItem
+                      key={printing.id}
+                      value={printing.id}
+                      className="menu-item"
+                      // Pointer and keyboard both move the highlight, and
+                      // Radix focuses the highlighted item, so focus covers
+                      // both.
+                      onFocus={() => setPreviewId(printing.id)}
+                    >
+                      <DropdownMenu.ItemIndicator className="menu-check">
+                        ✓
+                      </DropdownMenu.ItemIndicator>
+                      {printingLabel(printing)}
+                      {filterQty[printing.id] ? (
+                        <span className="menu-qty">{filterQty[printing.id]}×</span>
+                      ) : null}
+                    </DropdownMenu.RadioItem>
+                  ))}
+                </DropdownMenu.RadioGroup>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
         </div>
 
         {printingsError && (
@@ -449,7 +536,11 @@ export function CardDetail({
           </div>
         )}
 
-        <h2>{shown.name}</h2>
+        <h2>
+          <External href={scryfallPages(shown).card} title="Every printing on Scryfall">
+            {shown.name}
+          </External>
+        </h2>
         <div className="type">{shown.typeLine}</div>
 
         {shown.manaCost && (
@@ -518,7 +609,18 @@ export function CardDetail({
         <dl className="kv">
           <dt>Set</dt>
           <dd>
-            {shown.setName} ({shown.setCode.toUpperCase()} #{shown.collectorNumber})
+            <External href={scryfallPages(shown).set} title="This set on Scryfall">
+              {shown.setName} ({shown.setCode.toUpperCase()})
+            </External>
+          </dd>
+
+          {/* The printing's own page: a set can hold several printings of one
+              card, and the collector number is what tells them apart. */}
+          <dt>Number</dt>
+          <dd>
+            <External href={scryfallPages(shown).printing} title="This printing on Scryfall">
+              #{shown.collectorNumber}
+            </External>
           </dd>
 
           <dt>Rarity</dt>

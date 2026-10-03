@@ -35,7 +35,7 @@ hardcoded to Commander in practice.
   The stepper adjusts the *shown printing* in whichever deck or collection you
   touched last (a deck's main zone), and is disabled with a hint until you have
   touched one
-- **Printings carousel wrapping the card image**: prev/next arrows, a combo box
+- **Printings carousel wrapping the card image**: prev/next arrows, a menu
   listing every printing, and a picker narrowing it to the printings in the
   active deck or collection. Labels carry the collector
   number and variant traits (borderless, showcase, etched, promo, foil-only),
@@ -43,6 +43,8 @@ hardcoded to Commander in practice.
 - Details **split by grain** — oracle-level facts (type, cost, text, mana value,
   P/T, identity, legality, EDHREC rank) stay put, while printing-level ones (set,
   collector number, rarity, release, price) follow the carousel
+- **Links out to Scryfall**, one per grain: the card name opens every printing,
+  the set opens the set, and the collector number opens this exact printing
 - **Counts named against a scope**: `2 in Paper` rather than a vague `7 owned`,
   with the wider total shown alongside when copies live elsewhere
 - **Hover to preview** any card from any grid or list; the panel updates
