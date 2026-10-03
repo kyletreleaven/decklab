@@ -79,3 +79,10 @@ B is more general, and cost a day of bugs to make visible a region of the displa
 nobody asked to distinguish. A covers every journey with one drawn set per pane.
 Take A now; the union machinery is built and waiting for the case that genuinely
 needs it.
+
+## Outcome
+
+A was taken in `cae2f53`. The `foreground`/`background` props and the swatch
+(`Paper ↓ ⇄ All Magic ×`, at the top of the card panel) were removed, and
+`PoolPanel` now takes one `lit` set. The total sort key and `merge.ts` stayed,
+as planned.

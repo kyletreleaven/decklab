@@ -91,6 +91,23 @@ not naive punctuation folding. `Aegis Turtle` before `A-Eiganjo Exemplar` says
 the hyphen is not simply dropped either, since dropping it would sort `AEiganjo`
 before `Aegis`.
 
+## The local key
+
+`<field> <dir> NULLS LAST, c.name ASC, c.id ASC`, defined once in `sort.ts` and
+used by both sides, with a JS `comparator` mirroring `orderBySql` for rows that
+never pass through SQLite. Name comes before id so a tie group still reads
+alphabetically. The printing id finishes the job, since printings share a name,
+and that is exactly what lets a card land on both sides of a page boundary.
+`NULLS LAST` is unconditional because SQLite puts NULL first when ascending, so
+priceless cards used to lead an ascending price sort.
+
+Two bugs worth remembering, both now pinned by tests:
+
+- `NULLS LAST` was applied inside the direction sign, so reversing the price
+  sort dragged priceless cards to the top.
+- `take()` used `for await` with a `break`, which calls `return()` on the
+  generator and **closes** it. The pool stopped dead after one screen.
+
 ## Later: explicit cursors instead of a generator
 
 `mergeSorted` returns an `AsyncGenerator`, which is the clearest way to express

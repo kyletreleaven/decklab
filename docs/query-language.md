@@ -5,13 +5,10 @@ passed straight through to Scryfall, who parse their own language better than we
 ever will. Against a **local collection** we have to interpret it ourselves —
 that is what this document plans.
 
-**Status: built, not yet wired in.** `src/lib/query/` implements lex → parse →
-compile behind `compileQuery()`, with 115 unit tests and 10 SQL integration
-tests. What remains is calling it from `collectionItems()` — see TODO.md.
-
-> A version of this was written and deleted early on, when scope was cut back to
-> "manage collections and decks". It was never committed, so this is a rewrite,
-> not a recovery.
+**Status: built and wired in.** `src/lib/query/` implements lex → parse →
+compile behind `compileQuery()`. `collectionItems()` compiles the same string
+All Magic sends to Scryfall, and a failure raises `QueryError`, which the pool
+shows in its status line while keeping the previous results on screen.
 
 ---
 
@@ -93,7 +90,7 @@ Every field in v1 hits a column that already exists on `cards`.
 | `id:` | `color_identity` | see colour operators |
 | `mv:` `cmc:` | `cmc` | numeric compare, REAL column |
 | `pow:` `tou:` `loy:` | `power` `toughness` `loyalty` | TEXT — see gotcha |
-| `r:` | `rarity` | equality |
+| `r:` | `rarity` | ranked, so `r>=rare` includes mythic (alphabetically `mythic` < `rare`) |
 | `s:` `set:` `e:` | `set_code` | equality, lowercase |
 | `f:` | `legalities` | `json_extract(legalities, '$.' \|\| ?) IN ('legal','restricted')` — already done for pool scoping |
 | `kw:` | `keywords` | JSON array |
@@ -179,6 +176,13 @@ correct output.
 Every value is parameterised, never interpolated. The compiler returns
 `{ sql, params }` for exactly this reason. Field *names* are chosen from a fixed
 map, so they never come from user input either.
+
+### Errors are returned, not thrown
+
+`compileQuery()` returns an error rather than throwing. Search runs on every
+keystroke, so half-typed input is the normal case, not a failure. A test walks
+every prefix of a realistic query to prove none of it explodes.
+`unsupportedTerms()` lists terms such as `is:` without throwing.
 
 ---
 

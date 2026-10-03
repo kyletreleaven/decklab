@@ -32,6 +32,18 @@ carries whatever printing the stream returned.
 
 ## Fix
 
-Not started. TODO.md's resolution (1): roll counts up to oracle grain for
-display, keep printing grain for writes. Resolution (2), substituting the held
-printing into the tile, also fixes which printing `+` writes.
+Not started. Candidates, cheapest first:
+
+1. **Roll counts up to oracle grain for display**, keep printing grain for
+   writes. Fixes the badge and `−` straight away; `+` still writes whatever
+   printing the stream returned.
+2. **Substitute the held printing in the tile** when the destination holds one.
+   The pool then shows *your* copy, and `+`/`−` land on it. Needs a
+   printing→oracle index over the destination. This is also the default in
+   `TODO.md` → *Card mode needs an active printing*.
+3. **Mixed-grain storage**, `TODO.md` → *Migration 004*. The principled
+   version, and the one the card-set algebra assumes.
+
+Related, already fixed: once you pick a printing in the card panel,
+`activePrintings` substitutes it into the row, so `+` writes what you see. Only
+unpicked cards are affected.
