@@ -14,9 +14,9 @@ Tauri 2 · React 19 + TypeScript · SQLite · card data from
 
 ## Build from source
 
-macOS only for now. You need Xcode Command Line Tools, Node 20+, Rust and
-`cargo-audit`; the script checks for all of them and says how to install
-whatever is missing.
+The script is macOS-only; the app is not (see [Other platforms](#other-platforms)).
+You need Xcode Command Line Tools, Node 20+, Rust and `cargo-audit`; the script
+checks for all of them and says how to install whatever is missing.
 
 ```bash
 git clone https://github.com/kyletreleaven/decklab.git
@@ -39,6 +39,31 @@ you like. To update, `git pull` and run the script
 again. Built on your own machine, it opens without the Gatekeeper warning a
 downloaded unsigned app would get.
 
+### Other platforms
+
+Nothing in the app itself is macOS-specific. The Rust side has no
+platform-conditional code, TLS is `rustls` rather than the system library, and
+every Tauri plugin it uses supports Linux and Windows. What is macOS-only is the
+tooling around it: `scripts/build-macos.sh`, the `DeckLab Dev.command` launcher
+(plain bash, so `./"DeckLab Dev.command"` works anywhere), and maybe some
+configurations in test code.
+
+Xcode Command Line Tools supply the C compiler and linker, and the system
+WebView is built in. Elsewhere you need both of those; on Linux that means
+Tauri's [system dependencies](https://v2.tauri.app/start/prerequisites/#linux),
+including WebKitGTK. On Debian/Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+npm ci
+npx tauri build --bundles deb,appimage   # or: npm run tauri dev
+```
+
+**Untested on Linux.** Linux renders with WebKitGTK rather than WKWebView. The
+CSS should carry over, but HTML5 drag-and-drop has historically been less
+reliable there, so check drag between pool, deck and piles first.
+
 ---
 
 ## Prerequisites
@@ -47,7 +72,7 @@ downloaded unsigned app would get.
 | --- | --- | --- |
 | Node | 24.x | `node --version` |
 | Rust | 1.95 | via `rustup` |
-| Xcode Command Line Tools | — | macOS only, for linking |
+| Xcode Command Line Tools | — | macOS, for linking; on Linux see [Other platforms](#other-platforms) |
 
 ```bash
 npm install
@@ -181,7 +206,9 @@ deck rules, parsing, queries, stats — is TypeScript.
   images/         downloaded card images
 ```
 
-Dev and release builds share this, so your data carries across both. Deleting
+That is the macOS path; on Linux it is `~/.local/share/dev.treleaven.decklab/`,
+on Windows `%APPDATA%\dev.treleaven.decklab\`. Dev and release builds share
+this, so your data carries across both. Deleting
 `decklab.db*` gives a clean first run.
 
 **Schema changes need a new migration file**, not an edit to an existing one —
