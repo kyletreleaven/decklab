@@ -51,18 +51,15 @@ configurations in test code.
 Xcode Command Line Tools supply the C compiler and linker, and the system
 WebView is built in. Elsewhere you need both of those; on Linux that means
 Tauri's [system dependencies](https://v2.tauri.app/start/prerequisites/#linux),
-including WebKitGTK. On Debian/Ubuntu:
+including WebKitGTK.
 
-```bash
-sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-npm ci
-npx tauri build --bundles deb,appimage   # or: npm run tauri dev
-```
+**On Linux**, follow [`scripts/build-linux.md`](scripts/build-linux.md).
 
-**Untested on Linux.** Linux renders with WebKitGTK rather than WKWebView. The
-CSS should carry over, but HTML5 drag-and-drop has historically been less
-reliable there, so check drag between pool, deck and piles first.
+**On Windows** (untested), Tauri's
+[Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) cover
+the compiler (Microsoft C++ Build Tools) and the WebView (WebView2, already
+installed on Windows 10 and 11). After that, steps 4 and 5 of the Linux guide
+are the same, and the app is at `src-tauri\target\release\decklab.exe`.
 
 ---
 
