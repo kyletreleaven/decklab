@@ -19,7 +19,7 @@ interface ApiRequest {
  * first reply per id — but it does every request twice.
  */
 export async function startApiBridge(): Promise<void> {
-  const app = createApp(await invoke<string>("api_token"));
+  const app = createApp(() => invoke<string | null>("api_token"));
 
   await listen<ApiRequest>("api-request", async ({ payload: req }) => {
     // The host is irrelevant: the router only reads path and query.

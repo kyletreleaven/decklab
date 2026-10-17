@@ -138,11 +138,9 @@ pub fn run() {
                 .add_migrations("sqlite:decklab.db", migrations())
                 .build(),
         )
-        .manage(api::ApiBridge::new())
-        .setup(|app| {
-            api::start(app.handle().clone());
-            Ok(())
-        })
+        .manage(api::ApiBridge::default())
+        .menu(api::menu)
+        .on_menu_event(api::on_menu_event)
         .invoke_handler(tauri::generate_handler![
             cache_card_image,
             read_text_file,

@@ -155,24 +155,18 @@ turns out to bite.
       - Rust stays a dumb pipe: it forwards the request nearly untouched, and
         the token check is Hono middleware, so auth moves to (2) with
         everything else.
-- ⬜ **Access by token, handed over by the user.** The API listens on
-      `127.0.0.1` and every request needs a bearer token. The UI shows the
-      token with a copy button and a refresh icon that rotates it, killing
-      the old one; the user gives it to their agent, or to the CLI (`--token`
-      or `DECKLAB_TOKEN`). Nothing reaches the data without the user handing
-      over a token, and rotation is how they take access back.
-      - Mask it until clicked: it is a credential, and screens get shared.
-      - Not persisted, to start: a fresh token each launch, so restarting
-        the app also revokes access. Persist later only if re-handing it
-        over gets tedious.
-      - Every route checks the token, including trivial ones. A web page
-        can send requests to `127.0.0.1` but never sees the token, so a
-        route that skips the check is the one a page can use. (A `Host`
-        check is cheap extra cover against DNS rebinding, but the token
-        already does the job.)
-      - A fixed default port, written to a file in the data dir too, so the
-        CLI finds the app without being told.
-      - Maybe an off switch, so the listener only exists when wanted.
+- ⬜ **Access by token, handed over by the user, from the menu.** Built:
+      Tools → Agent API holds *Enable Agent API* (a check mark), the port it
+      listens on, *Copy Token* and *New Token*. Off at every launch, nothing
+      remembered; enabling binds `127.0.0.1:47474` (`DECKLAB_API_PORT`
+      overrides) with a fresh token, and disabling closes the port. The token
+      never appears on screen — copying is the only way to get it — so the
+      user hands it to their agent or the CLI (`--token` or `DECKLAB_TOKEN`).
+      Every route checks it, including unknown ones: a web page can send
+      requests to `127.0.0.1` but never sees the token. Left:
+      - Remember *Enable* across launches, if re-enabling gets tedious.
+      - The CLI cannot find the port without being told. A port file in the
+        data dir, written on enable, if the env var proves not enough.
 - ⬜ *Later, if wanted:* **GraphQL beside REST** at `/graphql`, for queries
       that cross resources ("decks whose cards are not in Paper, with
       prices"). Resolvers call the same functions the REST handlers do, so it
@@ -1156,6 +1150,11 @@ Statistical, not necessarily AI.
 
 ### 10. Polish 🚧
 - ⬜ Command palette (⌘K / ⌘⇧P)
+- ⬜ **Copy and paste cards and decks.** ⌘C with a card focused copies its
+  decklist line (`1 Sol Ring (C21) 263`); ⌘V with a deck active pastes a
+  decklist into it. Listen for the DOM `copy`/`paste` events, which the native
+  Edit menu fires, and step aside when a text field has focus — so the Edit
+  menu stays, and with it undo, dictation and the rest of native text editing.
 - ⬜ Global search
 - ⬜ Search-bar suggestions that know card names — WebKit autocorrect is off on
   the pool search (`PoolPanel.tsx`) because it mangled names and query syntax.

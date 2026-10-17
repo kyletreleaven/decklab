@@ -4,7 +4,7 @@ import { createApp } from "./app";
 
 vi.mock("../lib/decks", () => ({ listDecks: vi.fn() }));
 
-const app = createApp("secret");
+const app = createApp(async () => "secret");
 const auth = { headers: { Authorization: "Bearer secret" } };
 
 describe("agent API", () => {
@@ -22,6 +22,12 @@ describe("agent API", () => {
   it("guards unknown routes too", async () => {
     expect((await app.request("/nothing-here")).status).toBe(401);
     expect((await app.request("/nothing-here", auth)).status).toBe(404);
+  });
+
+  it("lets nothing in while the API is off", async () => {
+    const off = createApp(async () => null);
+    expect((await off.request("/decks", auth)).status).toBe(401);
+    expect((await off.request("/decks")).status).toBe(401);
   });
 
   it("lists decks", async () => {

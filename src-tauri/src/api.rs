@@ -1,4 +1,4 @@
-//! A localhost HTTP API for agents and the CLI.
+//! A localhost HTTP API for agents and the CLI, switched on from the menu.
 //!
 //! The app's logic lives in TypeScript in the webview, and a webview cannot
 //! listen on a port. So Rust holds the listener and nothing else: each request
@@ -7,6 +7,11 @@
 //! `api_reply` command. Rust is a pipe; what the API *does* is decided in
 //! `src/api/`, so it moves with the TypeScript if the backend ever leaves the
 //! webview.
+//!
+//! **Off until asked.** Tools → Agent API → Enable binds the port with a fresh
+//! token; nothing listens before that, and nothing is remembered across
+//! launches. The token never appears on screen: Copy Token is the only way to
+//! get it, and New Token revokes the old one.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,7 +23,10 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::Response;
 use axum::Router;
 use serde::{Deserialize, Serialize};
+use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::sync::oneshot;
 
 /// Overridable with `DECKLAB_API_PORT`.
@@ -29,21 +37,29 @@ const DEFAULT_PORT: u16 = 47_474;
 /// gets a 504 rather than hanging.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 
+const MENU_ENABLE: &str = "api-enable";
+const MENU_COPY: &str = "api-copy-token";
+const MENU_ROTATE: &str = "api-new-token";
+
+#[derive(Default)]
 pub struct ApiBridge {
-    /// Fresh each launch: restarting the app revokes every token handed out.
-    token: String,
     next_id: AtomicU64,
     pending: Mutex<HashMap<u64, oneshot::Sender<ApiReply>>>,
+    /// `Some` exactly while the port is bound.
+    listening: Mutex<Option<Listening>>,
 }
 
-impl ApiBridge {
-    pub fn new() -> Self {
-        Self {
-            token: uuid::Uuid::new_v4().simple().to_string(),
-            next_id: AtomicU64::new(1),
-            pending: Mutex::new(HashMap::new()),
-        }
-    }
+struct Listening {
+    token: String,
+    shutdown: oneshot::Sender<()>,
+}
+
+/// Handles to the items whose state follows the listener's.
+struct ApiMenu {
+    enable: CheckMenuItem<tauri::Wry>,
+    status: MenuItem<tauri::Wry>,
+    copy: MenuItem<tauri::Wry>,
+    rotate: MenuItem<tauri::Wry>,
 }
 
 #[derive(Clone, Serialize)]
@@ -63,10 +79,22 @@ pub struct ApiReply {
     body: String,
 }
 
-/// The webview reads the token to check requests against it.
+fn port() -> u16 {
+    std::env::var("DECKLAB_API_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_PORT)
+}
+
+fn new_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// The current token, or `None` while the API is off. Read per request, so a
+/// rotation takes effect on the very next one.
 #[tauri::command]
-pub fn api_token(bridge: State<'_, ApiBridge>) -> String {
-    bridge.token.clone()
+pub fn api_token(bridge: State<'_, ApiBridge>) -> Option<String> {
+    bridge.listening.lock().unwrap().as_ref().map(|l| l.token.clone())
 }
 
 /// The webview's answer to an `api-request` event. A reply for an id nobody is
@@ -78,32 +106,122 @@ pub fn api_reply(bridge: State<'_, ApiBridge>, id: u64, reply: ApiReply) {
     }
 }
 
-/// Bind the listener and serve until the app exits. A taken port is reported
-/// and the app carries on without an API.
-pub fn start(app: AppHandle) {
-    let port = std::env::var("DECKLAB_API_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
+/// Tools → Agent API, added to whatever menu the platform would otherwise have.
+///
+/// On macOS that is Tauri's default menu, and starting from it matters:
+/// replacing it would lose Edit, and with it ⌘C/⌘V in text fields. Elsewhere
+/// Tauri sets no menu at all and text editing works without one, so the menu
+/// bar — drawn inside the window there — holds Tools and nothing else.
+pub fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let enable = CheckMenuItem::with_id(app, MENU_ENABLE, "Enable Agent API", true, false, None::<&str>)?;
+    let status = MenuItem::new(app, "Off", false, None::<&str>)?;
+    let copy = MenuItem::with_id(app, MENU_COPY, "Copy Token", false, None::<&str>)?;
+    let rotate = MenuItem::with_id(app, MENU_ROTATE, "New Token", false, None::<&str>)?;
 
-    tauri::async_runtime::spawn(async move {
-        let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("DeckLab API: could not listen on 127.0.0.1:{port}: {e}");
-                return;
+    let agent = Submenu::with_items(
+        app,
+        "Agent API",
+        true,
+        &[&enable, &status, &PredefinedMenuItem::separator(app)?, &copy, &rotate],
+    )?;
+    let tools = Submenu::with_items(app, "Tools", true, &[&agent])?;
+
+    #[cfg(target_os = "macos")]
+    let menu = {
+        // The default always ends Window, Help; Tools goes before Window.
+        let menu = Menu::default(app)?;
+        let at = menu.items()?.len().saturating_sub(2);
+        menu.insert(&tools, at)?;
+        menu
+    };
+    #[cfg(not(target_os = "macos"))]
+    let menu = Menu::with_items(app, &[&tools])?;
+
+    app.manage(ApiMenu { enable, status, copy, rotate });
+    Ok(menu)
+}
+
+pub fn on_menu_event(app: &AppHandle, event: MenuEvent) {
+    match event.id().as_ref() {
+        // The check mark has already flipped by the time we hear about it.
+        MENU_ENABLE => {
+            let on = app.state::<ApiMenu>().enable.is_checked().unwrap_or(false);
+            if on {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move { start(app).await });
+            } else {
+                stop(app);
             }
-        };
-        let token = app.state::<ApiBridge>().token.clone();
-        eprintln!("DeckLab API: http://127.0.0.1:{port}  token: {token}");
-
-        let router = Router::new().fallback(move |method, uri, headers, body| {
-            forward(app.clone(), method, uri, headers, body)
-        });
-        if let Err(e) = axum::serve(listener, router).await {
-            eprintln!("DeckLab API stopped: {e}");
         }
+        MENU_COPY => {
+            if let Some(token) = api_token(app.state()) {
+                let _ = app.clipboard().write_text(token);
+            }
+        }
+        MENU_ROTATE => {
+            if let Some(l) = app.state::<ApiBridge>().listening.lock().unwrap().as_mut() {
+                l.token = new_token();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn reflect(app: &AppHandle, on: bool) {
+    let items = app.state::<ApiMenu>();
+    let _ = items.enable.set_checked(on);
+    let _ = items.copy.set_enabled(on);
+    let _ = items.rotate.set_enabled(on);
+    let _ = items.status.set_text(if on {
+        format!("Listening on 127.0.0.1:{}", port())
+    } else {
+        "Off".into()
     });
+}
+
+async fn start(app: AppHandle) {
+    let port = port();
+    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(l) => l,
+        Err(e) => {
+            reflect(&app, false);
+            app.dialog()
+                .message(format!("Could not listen on 127.0.0.1:{port}: {e}"))
+                .title("Agent API")
+                .kind(MessageDialogKind::Error)
+                .show(|_| {});
+            return;
+        }
+    };
+
+    let (shutdown, stopped) = oneshot::channel::<()>();
+    *app.state::<ApiBridge>().listening.lock().unwrap() =
+        Some(Listening { token: new_token(), shutdown });
+    reflect(&app, true);
+
+    let forwarder = app.clone();
+    let router = Router::new().fallback(move |method, uri, headers, body| {
+        forward(forwarder.clone(), method, uri, headers, body)
+    });
+    let served = axum::serve(listener, router)
+        .with_graceful_shutdown(async {
+            let _ = stopped.await;
+        })
+        .await;
+    if let Err(e) = served {
+        eprintln!("Agent API stopped: {e}");
+        stop(&app);
+    }
+}
+
+/// Close the port and abandon anything in flight; those callers get a 503.
+fn stop(app: &AppHandle) {
+    let bridge = app.state::<ApiBridge>();
+    if let Some(l) = bridge.listening.lock().unwrap().take() {
+        let _ = l.shutdown.send(());
+    }
+    bridge.pending.lock().unwrap().clear();
+    reflect(app, false);
 }
 
 async fn forward(
@@ -149,7 +267,9 @@ async fn forward(
             }
             response
         }
-        _ => {
+        // The sender was dropped: the API was switched off mid-request.
+        Ok(Err(_)) => plain(StatusCode::SERVICE_UNAVAILABLE, "the agent API was switched off".into()),
+        Err(_) => {
             bridge.pending.lock().unwrap().remove(&id);
             plain(StatusCode::GATEWAY_TIMEOUT, "the app did not answer in time".into())
         }
