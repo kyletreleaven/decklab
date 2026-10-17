@@ -27,6 +27,7 @@ What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 | **6. Analytics and intelligence** | sketched | Statistics · Card intelligence · Discovery · Suggestions · Playtesting |
 | **7. Organising decks and collections** ⭐ | not started | Organising decks and collections |
 | **8. Gaps and polish** | ongoing | Contextual filters · Deck builder gaps · Collection gaps · Deck database · Version control · Polish · Known debt |
+| **9. A backend an agent can use** | next up | Backend factoring and a companion CLI |
 
 **Campaign 1 is the one just finished.** What is left of it is small and named:
 roll counts up to oracle grain (the last wrong thing on screen), the
@@ -46,6 +47,118 @@ app does, kept out of here so this file stays about what is left.
 ---
 
 ## Next up
+
+### Backend factoring and a companion CLI ⭐ — next
+
+An agent should be able to do what the app does — search the card cache, read
+and edit decks and collections, import and export — without driving the UI.
+That means a `decklab` CLI over the same data and the same logic, not a second
+implementation of it.
+
+**Most of the backend is already portable.** The logic lives in `src/lib/` and
+is plain TypeScript. Tauri reaches it through exactly three seams:
+
+| Seam | Where |
+|---|---|
+| SQLite | `db.ts` (`@tauri-apps/plugin-sql`) |
+| HTTP | `scryfall.ts`, `urlimport.ts` (`@tauri-apps/plugin-http`) |
+| Image cache | `images.ts` (`invoke("cache_card_image")`) |
+
+Dialogs, clipboard and opener are component-side and stay there. Keep the
+logic in TypeScript, per the stack note: a Rust backend would mean porting
+`compileQuery`, `decklist.ts` and the collection model.
+
+**One owner, not two clients.** The CLI does not open the database or call
+Scryfall itself. Exactly one process owns the SQLite file and the
+`scheduledFetch` queue, and the app's UI and the CLI are both clients of it.
+That single decision settles the hard parts:
+
+- **Rate limit.** CLI traffic goes through the same queue, in a lane of its
+  own, ranked last (the scheduler already has `Lane`). One pipe, one
+  429 pause, one client as far as Scryfall can tell. Two processes each with
+  their own queue would be two clients, whatever their spacing.
+- **UI freshness.** Every write goes through the owner, so the owner knows
+  exactly what changed and can tell the UI — the same `bump()` that fires
+  for in-app writes, rather than a coarse "the file changed" from polling
+  `PRAGMA data_version`.
+- **Concurrent writes and migrations.** Moot: one connection, one migration
+  runner.
+
+**Where the owner lives: the app first, a headless backend later if wanted.**
+The question is whether the CLI must work with the app closed. Not yet — so
+start with (1), and treat (2) as a follow-on rather than a rewrite.
+
+1. **The app is the owner.** Rust listens on a localhost port and
+   forwards each request to the webview, whose TypeScript runs it with the
+   existing `src/lib/` and replies. No new runtime, no adapter seam needed,
+   and `bump()` already fires because the write is in-process. Cost: the
+   app has to be open, and is the CLI's server while it is.
+2. **A headless TypeScript backend.** A Node process (Tauri sidecar, Node SEA
+   or `bun --compile`) owns the database and the queue; the webview talks to
+   it over HTTP and gets change events pushed back. Works with the app
+   closed — the CLI starts it if no one has. Costs a bundled runtime, the
+   adapter seam below, migrations moving out of `tauri-plugin-sql`, and the
+   webview becoming a client of its own backend.
+
+(1) is a strict subset of the work of (2): the request protocol, command
+surface and CLI are the same either way, so starting with (1) loses nothing
+if (2) is wanted later.
+
+- ⬜ **A REST API over HTTP.** Resource paths (`GET /decks/:id`,
+      `POST /collections/:id/items`, `GET /cards?q=…`) with JSON bodies,
+      matching the command surface below; the CLI is a thin client of it, and
+      an agent can also call it directly with `curl`. GraphQL buys little here
+      — a handful of resources, one client we write — and costs a schema
+      layer. Under (1), Rust holds the listener and the TypeScript holds the
+      router: a webview cannot open a listening socket, so Rust forwards each
+      request (method, path, body) to the webview and returns its reply.
+      Under (2), Node serves the same routes directly, so the API carries over.
+- ⬜ **Access by token, handed over by the user.** The API listens on
+      `127.0.0.1` and every request needs a bearer token. The UI shows the
+      token with a copy button and a refresh icon that rotates it, killing
+      the old one; the user gives it to their agent, or to the CLI (`--token`
+      or `DECKLAB_TOKEN`). Nothing reaches the data without the user handing
+      over a token, and rotation is how they take access back.
+      - Mask it until clicked: it is a credential, and screens get shared.
+      - Not persisted, to start: a fresh token each launch, so restarting
+        the app also revokes access. Persist later only if re-handing it
+        over gets tedious.
+      - Every route checks the token, including trivial ones. A web page
+        can send requests to `127.0.0.1` but never sees the token, so a
+        route that skips the check is the one a page can use. (A `Host`
+        check is cheap extra cover against DNS rebinding, but the token
+        already does the job.)
+      - A fixed default port, written to a file in the data dir too, so the
+        CLI finds the app without being told.
+      - Maybe an off switch, so the listener only exists when wanted.
+- ⬜ *Later, if wanted:* **GraphQL beside REST** at `/graphql`, for queries
+      that cross resources ("decks whose cards are not in Paper, with
+      prices"). Resolvers call the same functions the REST handlers do, so it
+      is an addition, not a migration. Check first whether the card-set
+      algebra (Campaign 3) already answers those queries: it is the app's
+      own language for "interesting" card questions.
+- ⬜ **A CLI lane in the scheduler, last.** Below `background`: the UI's
+      responsiveness comes first, and an agent can wait.
+- ⬜ *(2) only:* **Adapter seam.** `db.ts`, the HTTP import and `images.ts` take
+      their implementation from a runtime module set at startup. No
+      `@tauri-apps/*` import under `src/lib/` except in the Tauri adapter.
+- ⬜ *(2) only:* **Migrations move to the backend**, reusing the files in
+      `src-tauri/migrations/`, and it adopts the version `tauri-plugin-sql`
+      already recorded rather than re-running them.
+- ⬜ **Command surface**, JSON output by default with a `--text` for humans:
+      - `cards search <query>` — the local cache, via `compileQuery`
+      - `cards show <name|id>`, `cards printings <oracle-id>`
+      - `decks list|show|add|remove|export|import`
+      - `collections list|show|add|remove|import|export`
+      - `diff <deck> <collection>` — what the deck needs that is not in the
+        collection (a set difference, as in the pool)
+- ⬜ **Grain is explicit in every result.** Oracle- or printing-grain rows say
+      which they are (see *Grain* in `CLAUDE.md`); an agent cannot infer it
+      from which branch ran the way the UI does.
+- ⬜ **Vocabulary carries over.** Flags and fields say `inCollection`, never
+      `owned` — an agent will read the CLI's words as claims.
+- ⬜ Later: the same requests as an MCP server. With one owner it is another
+      thin client, not a third backend.
 
 ### Card panel layout — mostly done
 
