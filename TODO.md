@@ -104,6 +104,34 @@ start with (1), and treat (2) as a follow-on rather than a rewrite.
 surface and CLI are the same either way, so starting with (1) loses nothing
 if (2) is wanted later.
 
+**(1) is half standard, half not.** A desktop app serving a localhost API
+behind a token the user hands over is well-worn: Jupyter, AnkiConnect,
+Obsidian's Local REST API. The unusual part is the hop inside. A typical
+Tauri app keeps its logic in Rust, the webview calls Rust and never the
+reverse, and an HTTP server would call those Rust functions directly. Ours
+lives in the webview, so the server has to call *into* it and wait for an
+answer, which Tauri has nothing built in for. It is assembled by hand: an
+event out, `invoke` back, a table of pending requests keyed by id. About 50
+lines, nothing exotic, but ours to maintain rather than a known pattern.
+
+**Staying on (1) rather than moving to (2):**
+
+| | |
+|---|---|
+| ✅ No bundled runtime | The app stays small; a bundled Node or Bun is very roughly 50–100 MB (unmeasured). |
+| ✅ No per-platform sidecar builds | Nothing added to `build-macos.sh` or `build-linux.md`, no re-signing a Node binary after injection. |
+| ✅ No process to babysit | No starting, stopping, crash detection or port handoff between processes. |
+| ✅ UI freshness for free | API writes run in the same process as the UI, so `bump()` fires as it does for clicks. |
+| ✅ Migrations stay put | `tauri-plugin-sql` keeps running them. |
+| ✅ SQLite driver untouched | (2) rules out `better-sqlite3` (native addon, awkward to bundle) in favour of `node:sqlite` or Bun's. |
+| ❌ The app must be open | The CLI has no API to talk to otherwise. The one thing only (2) fixes. |
+| ❌ The hand-built bridge | Request/reply over events, with timeouts, is ours to get right. |
+| ❌ Background webview throttling | Unverified: macOS may throttle a hidden or minimised webview, slowing replies or hitting the timeout. The first slice should check this. |
+| ❌ Startup race and dev reloads | A request before the webview's listener is registered, or during a reload, times out rather than being served. |
+
+Move to (2) when the closed-app case is actually wanted, or if throttling
+turns out to bite.
+
 - ⬜ **A REST API over HTTP.** Resource paths (`GET /decks/:id`,
       `POST /collections/:id/items`, `GET /cards?q=…`) with JSON bodies,
       matching the command surface below; the CLI is a thin client of it, and
@@ -111,8 +139,22 @@ if (2) is wanted later.
       — a handful of resources, one client we write — and costs a schema
       layer. Under (1), Rust holds the listener and the TypeScript holds the
       router: a webview cannot open a listening socket, so Rust forwards each
-      request (method, path, body) to the webview and returns its reply.
-      Under (2), Node serves the same routes directly, so the API carries over.
+      request (method, URL, headers, body) to the webview and returns its
+      reply. Under (2), Node serves the same routes directly, so the API
+      carries over.
+- ⬜ **Hono for the router.** Express, Koa and Fastify are built on Node's
+      `http` objects, so they cannot run in a webview that never sees a
+      connection. Hono is built on the Fetch API's `Request`/`Response` — the
+      JavaScript counterpart of WSGI/ASGI — so the webview builds a `Request`
+      from Rust's event, calls `app.fetch(request)`, and sends the `Response`
+      back. The same app then runs on Node or Bun under (2) unchanged, which
+      is the main reason. Also: typed routes, Zod validation, an OpenAPI spec
+      via `@hono/zod-openapi` that an agent can read to discover the API, a
+      typed client (`hc`) the CLI can use, and GraphQL as middleware later.
+      Check the current version before pinning.
+      - Rust stays a dumb pipe: it forwards the request nearly untouched, and
+        the token check is Hono middleware, so auth moves to (2) with
+        everything else.
 - ⬜ **Access by token, handed over by the user.** The API listens on
       `127.0.0.1` and every request needs a bearer token. The UI shows the
       token with a copy button and a refresh icon that rotates it, killing
