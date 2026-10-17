@@ -1,3 +1,5 @@
+mod api;
+
 use tauri::{AppHandle, Manager};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -136,10 +138,17 @@ pub fn run() {
                 .add_migrations("sqlite:decklab.db", migrations())
                 .build(),
         )
+        .manage(api::ApiBridge::new())
+        .setup(|app| {
+            api::start(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             cache_card_image,
             read_text_file,
-            write_text_file
+            write_text_file,
+            api::api_token,
+            api::api_reply
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
