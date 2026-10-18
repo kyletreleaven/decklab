@@ -123,6 +123,19 @@ hardcoded to Commander in practice.
   [`docs/importing-moxfield.md`](docs/importing-moxfield.md) cover binders you do
   not own
 
+## Agent API
+
+Early: one route so far. Design and reasoning in
+[`docs/agent-api.md`](docs/agent-api.md).
+
+- **Tools → Agent API** turns on a localhost HTTP API for agents and scripts.
+  Off at every launch; enabling listens on `127.0.0.1:47474`
+  (`DECKLAB_API_PORT` overrides) and disabling closes the port
+- **Bearer token from the menu** — *Copy Token* puts it on the clipboard and
+  *New Token* revokes the old one. It is never shown on screen and every
+  route requires it
+- `GET /decks` — every deck, most recently updated first, as JSON
+
 ## Under the hood
 
 - **Request scheduler** with two lanes over one rate-limited pipe. Interactive
@@ -152,6 +165,9 @@ hardcoded to Commander in practice.
   query syntax, but the cache of every card you have seen is not searchable as
   a whole
 - No undo/redo, deck tabs, or folders
+- The agent API needs the app open, and times out once the app has been in
+  the background a while ([`bugs/003`](bugs/003-agent-api-times-out-when-backgrounded.md),
+  fix applied, not yet confirmed)
 - Tests cover pure logic, and the query compiler's SQL runs against a real
   database (`npm run test:sql`). The rest of the SQL layer (`collections.ts`,
   `decks.ts`) and the React components are not tested

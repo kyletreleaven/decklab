@@ -51,150 +51,56 @@ app does, kept out of here so this file stays about what is left.
 ### Backend factoring and a companion CLI ⭐ — next
 
 An agent should be able to do what the app does — search the card cache, read
-and edit decks and collections, import and export — without driving the UI.
-That means a `decklab` CLI over the same data and the same logic, not a second
-implementation of it.
+and edit decks and collections, import and export — through an HTTP API and a
+`decklab` CLI over it, without driving the UI. Design, the option-1/option-2
+reasoning and how the bridge works are in
+[`docs/agent-api.md`](docs/agent-api.md); what is built is in
+[`FEATURES.md`](FEATURES.md) → *Agent API*.
 
-**Most of the backend is already portable.** The logic lives in `src/lib/` and
-is plain TypeScript. Tauri reaches it through exactly three seams:
+**Where it stands.** The plumbing is done and proven by `curl`: Rust → webview
+→ Hono → back, token-checked, switched on from Tools → Agent API. One route
+exists (`GET /decks`). What is left is mostly breadth, plus two things that
+have to be right before the first write.
 
-| Seam | Where |
-|---|---|
-| SQLite | `db.ts` (`@tauri-apps/plugin-sql`) |
-| HTTP | `scryfall.ts`, `urlimport.ts` (`@tauri-apps/plugin-http`) |
-| Image cache | `images.ts` (`invoke("cache_card_image")`) |
-
-Dialogs, clipboard and opener are component-side and stay there. Keep the
-logic in TypeScript, per the stack note: a Rust backend would mean porting
-`compileQuery`, `decklist.ts` and the collection model.
-
-**One owner, not two clients.** The CLI does not open the database or call
-Scryfall itself. Exactly one process owns the SQLite file and the
-`scheduledFetch` queue, and the app's UI and the CLI are both clients of it.
-That single decision settles the hard parts:
-
-- **Rate limit.** CLI traffic goes through the same queue, in a lane of its
-  own, ranked last (the scheduler already has `Lane`). One pipe, one
-  429 pause, one client as far as Scryfall can tell. Two processes each with
-  their own queue would be two clients, whatever their spacing.
-- **UI freshness.** Every write goes through the owner, so the owner knows
-  exactly what changed and can tell the UI — the same `bump()` that fires
-  for in-app writes, rather than a coarse "the file changed" from polling
-  `PRAGMA data_version`.
-- **Concurrent writes and migrations.** Moot: one connection, one migration
-  runner.
-
-**Where the owner lives: the app first, a headless backend later if wanted.**
-The question is whether the CLI must work with the app closed. Not yet — so
-start with (1), and treat (2) as a follow-on rather than a rewrite.
-
-1. **The app is the owner.** Rust listens on a localhost port and
-   forwards each request to the webview, whose TypeScript runs it with the
-   existing `src/lib/` and replies. No new runtime, no adapter seam needed,
-   and `bump()` already fires because the write is in-process. Cost: the
-   app has to be open, and is the CLI's server while it is.
-2. **A headless TypeScript backend.** A Node process (Tauri sidecar, Node SEA
-   or `bun --compile`) owns the database and the queue; the webview talks to
-   it over HTTP and gets change events pushed back. Works with the app
-   closed — the CLI starts it if no one has. Costs a bundled runtime, the
-   adapter seam below, migrations moving out of `tauri-plugin-sql`, and the
-   webview becoming a client of its own backend.
-
-(1) is a strict subset of the work of (2): the request protocol, command
-surface and CLI are the same either way, so starting with (1) loses nothing
-if (2) is wanted later.
-
-**(1) is half standard, half not.** A desktop app serving a localhost API
-behind a token the user hands over is well-worn: Jupyter, AnkiConnect,
-Obsidian's Local REST API. The unusual part is the hop inside. A typical
-Tauri app keeps its logic in Rust, the webview calls Rust and never the
-reverse, and an HTTP server would call those Rust functions directly. Ours
-lives in the webview, so the server has to call *into* it and wait for an
-answer, which Tauri has nothing built in for. It is assembled by hand: an
-event out, `invoke` back, a table of pending requests keyed by id. About 50
-lines, nothing exotic, but ours to maintain rather than a known pattern.
-
-**Staying on (1) rather than moving to (2):**
-
-| | |
-|---|---|
-| ✅ No bundled runtime | The app stays small; a bundled Node or Bun is very roughly 50–100 MB (unmeasured). |
-| ✅ No per-platform sidecar builds | Nothing added to `build-macos.sh` or `build-linux.md`, no re-signing a Node binary after injection. |
-| ✅ No process to babysit | No starting, stopping, crash detection or port handoff between processes. |
-| ✅ UI freshness for free | API writes run in the same process as the UI, so `bump()` fires as it does for clicks. |
-| ✅ Migrations stay put | `tauri-plugin-sql` keeps running them. |
-| ✅ SQLite driver untouched | (2) rules out `better-sqlite3` (native addon, awkward to bundle) in favour of `node:sqlite` or Bun's. |
-| ❌ The app must be open | The CLI has no API to talk to otherwise. The one thing only (2) fixes. |
-| ❌ The hand-built bridge | Request/reply over events, with timeouts, is ours to get right. |
-| ❌ Background webview throttling | Unverified: macOS may throttle a hidden or minimised webview, slowing replies or hitting the timeout. The first slice should check this. |
-| ❌ Startup race and dev reloads | A request before the webview's listener is registered, or during a reload, times out rather than being served. |
-
-Move to (2) when the closed-app case is actually wanted, or if throttling
-turns out to bite.
-
-- ⬜ **A REST API over HTTP.** Resource paths (`GET /decks/:id`,
-      `POST /collections/:id/items`, `GET /cards?q=…`) with JSON bodies,
-      matching the command surface below; the CLI is a thin client of it, and
-      an agent can also call it directly with `curl`. GraphQL buys little here
-      — a handful of resources, one client we write — and costs a schema
-      layer. Under (1), Rust holds the listener and the TypeScript holds the
-      router: a webview cannot open a listening socket, so Rust forwards each
-      request (method, URL, headers, body) to the webview and returns its
-      reply. Under (2), Node serves the same routes directly, so the API
-      carries over.
-- ⬜ **Hono for the router.** Express, Koa and Fastify are built on Node's
-      `http` objects, so they cannot run in a webview that never sees a
-      connection. Hono is built on the Fetch API's `Request`/`Response` — the
-      JavaScript counterpart of WSGI/ASGI — so the webview builds a `Request`
-      from Rust's event, calls `app.fetch(request)`, and sends the `Response`
-      back. The same app then runs on Node or Bun under (2) unchanged, which
-      is the main reason. Also: typed routes, Zod validation, an OpenAPI spec
-      via `@hono/zod-openapi` that an agent can read to discover the API, a
-      typed client (`hc`) the CLI can use, and GraphQL as middleware later.
-      Check the current version before pinning.
-      - Rust stays a dumb pipe: it forwards the request nearly untouched, and
-        the token check is Hono middleware, so auth moves to (2) with
-        everything else.
-- ⬜ **Access by token, handed over by the user, from the menu.** Built:
-      Tools → Agent API holds *Enable Agent API* (a check mark), the port it
-      listens on, *Copy Token* and *New Token*. Off at every launch, nothing
-      remembered; enabling binds `127.0.0.1:47474` (`DECKLAB_API_PORT`
-      overrides) with a fresh token, and disabling closes the port. The token
-      never appears on screen — copying is the only way to get it — so the
-      user hands it to their agent or the CLI (`--token` or `DECKLAB_TOKEN`).
-      Every route checks it, including unknown ones: a web page can send
-      requests to `127.0.0.1` but never sees the token. Left:
-      - Remember *Enable* across launches, if re-enabling gets tedious.
-      - The CLI cannot find the port without being told. A port file in the
-        data dir, written on enable, if the env var proves not enough.
-- ⬜ *Later, if wanted:* **GraphQL beside REST** at `/graphql`, for queries
-      that cross resources ("decks whose cards are not in Paper, with
-      prices"). Resolvers call the same functions the REST handlers do, so it
-      is an addition, not a migration. Check first whether the card-set
-      algebra (Campaign 3) already answers those queries: it is the app's
-      own language for "interesting" card questions.
+- 🐛 **Times out when backgrounded.** Confirmed by hand.
+      [`bugs/003`](bugs/003-agent-api-times-out-when-backgrounded.md):
+      `backgroundThrottling: disabled` applied, awaiting the repro; App Nap is
+      the next suspect if it still fails.
+- ⬜ **Try the menu in the app.** Built and compiles, not yet clicked: enable,
+      copy, new token (old one → 401), disable (→ connection refused).
+- ⬜ **Writes must refresh the UI.** `bump()` is a React callback in
+      `App.tsx` that components call after a write; `decks.ts` and
+      `collections.ts` do not signal, so an API write would leave the screen
+      stale. Cheap fix: after any non-`GET` request the bridge dispatches a
+      page event and `App.tsx` bumps on it — one place, every write route.
+      The real fix is the `bump()` item under *Known debt*. Needed before the
+      first write route.
 - ⬜ **A CLI lane in the scheduler, last.** Below `background`: the UI's
-      responsiveness comes first, and an agent can wait.
-- ⬜ *(2) only:* **Adapter seam.** `db.ts`, the HTTP import and `images.ts` take
-      their implementation from a runtime module set at startup. No
-      `@tauri-apps/*` import under `src/lib/` except in the Tauri adapter.
-- ⬜ *(2) only:* **Migrations move to the backend**, reusing the files in
-      `src-tauri/migrations/`, and it adopts the version `tauri-plugin-sql`
-      already recorded rather than re-running them.
-- ⬜ **Command surface**, JSON output by default with a `--text` for humans:
-      - `cards search <query>` — the local cache, via `compileQuery`
-      - `cards show <name|id>`, `cards printings <oracle-id>`
-      - `decks list|show|add|remove|export|import`
-      - `collections list|show|add|remove|import|export`
-      - `diff <deck> <collection>` — what the deck needs that is not in the
-        collection (a set difference, as in the pool)
-- ⬜ **Grain is explicit in every result.** Oracle- or printing-grain rows say
-      which they are (see *Grain* in `CLAUDE.md`); an agent cannot infer it
-      from which branch ran the way the UI does.
-- ⬜ **Vocabulary carries over.** Flags and fields say `inCollection`, never
-      `owned` — an agent will read the CLI's words as claims.
-- ⬜ Later: the same requests as an MCP server. With one owner it is another
-      thin client, not a third backend.
+      responsiveness comes first, and an agent can wait. Needed before the
+      first route that reaches Scryfall.
+- ⬜ **Routes**, JSON, each a few lines over existing `src/lib/` code:
+      - decks: `GET /decks/:id` (with entries), add, remove, import, export
+      - collections: list, show, add, remove, import, export
+      - cards, local cache only: search via `compileQuery`, show, printings
+      - `diff` — what a deck needs that is not in a collection (a set
+        difference, as in the pool)
+- ⬜ **Grain is explicit in every card result.** Oracle- or printing-grain
+      rows say which they are (see *Grain* in `CLAUDE.md`); an agent cannot
+      infer it from which branch ran the way the UI does.
+- ⬜ **Vocabulary carries over.** Fields and flags say `inCollection`, never
+      `owned` — an agent will read the API's words as claims.
+- ⬜ **An OpenAPI spec** via `@hono/zod-openapi`, so an agent can discover the
+      routes rather than be told them.
+- ⬜ **The `decklab` CLI**, a thin client of the routes: JSON by default,
+      `--text` for humans, token from `--token` or `DECKLAB_TOKEN`. An
+      `npm run cli` entry first; a shipped binary once the surface settles.
+- ⬜ The CLI cannot find the port without being told. A port file in the data
+      dir, written on enable, if the env var proves not enough.
+- ⬜ Remember *Enable* across launches, if re-enabling gets tedious.
+- ⬜ Compile the Linux branch of the menu (Tools only, no default menu).
+- ⬜ *Later, if wanted:* GraphQL beside REST; an MCP server over the same
+      routes; option (2), a headless backend, if the CLI must work with the
+      app closed. Each is in `docs/agent-api.md`.
 
 ### Card panel layout — mostly done
 
