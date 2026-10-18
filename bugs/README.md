@@ -13,6 +13,7 @@ digging, then read *Traps* for the patterns that have produced bugs before.
 |---|---|---|
 | [001](001-local-grid-ignores-writes.md) | fix applied, awaiting in-app repro | Adding a card to a collection, or removing its last copy, does not add/remove it in the grid |
 | [002](002-stepper-counts-printing-grain.md) | open · known | Pool tile shows `0` and a disabled `−` for a card held in another printing |
+| [003](003-agent-api-times-out-when-backgrounded.md) | first fix applied, awaiting repro | Agent API times out once the app has been in the background a while |
 
 ## Writing a report
 
