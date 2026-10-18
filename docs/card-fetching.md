@@ -106,3 +106,44 @@ returned only 9 of them in testing. Size batches against expected printings
 instant, but waiting on a 74 MB download before the first card renders is the
 opposite of responsive. If it is ever adopted, the bulk-ingest argument for
 DuckDB comes back.
+
+## Compact printing rows and the CSV path
+
+A storage-and-bandwidth optimisation, not a correctness fix, and deferred.
+Recorded because the measurements were expensive to gather and the trade-offs
+are not obvious.
+
+**The measurements.** Scryfall serves the same query as CSV for a twentieth of
+the bytes:
+
+```
+oracleid:X&unique=prints             664 KB   (Sol Ring, 137 printings)
+oracleid:X&unique=prints&format=csv   34 KB
+```
+
+And a card object is mostly not card data — 24% image URLs, 20% affiliate and
+purchase links, 12% API self-references, against **4.7%** actual text and stats.
+We store the raw payload in `cards.data`, so ~5,800 printings is ~27 MB where
+compact rows would be ~4 MB.
+
+**And it cannot back a searchable collection.** CSV omits `oracle_text`,
+`colors`, `color_identity`, `keywords`, `power`, `toughness` and `released_at` —
+pinned by a contract test. `compileQuery` filters on most of those, so a
+CSV-backed cache identifies and displays cards but cannot search them. The 20x
+saving is not "the same data without the URLs": it is most of the card removed.
+That rules CSV out for *save a search as a collection*, where the whole point is
+a set you can then filter.
+
+**Why it was deferred.** Migration 003 undercut the bandwidth argument: a print
+run is now fetched once per card per week, so twenty-times-less of an already
+rare request buys little. And CSV cannot populate `cards` as it stands — it
+carries no `oracle_text`, `legalities`, `colors`, `color_identity` or `keywords`.
+Those are not cosmetic: `color_identity` drives the pool's identity filter and
+`legalities` drives format scoping, so a CSV-sourced row would **silently break
+filtering**. It also drops `border_color`, `frame_effects` and `finishes`, which
+is what stops Sol Ring's 30 Secret Lairs rendering as identical duplicates.
+
+**So it is one piece of work, not two.** CSV only makes sense alongside a
+separate lightweight printings table — promoting the columns we query, keeping
+`data` nullable for rows we have only indexed. Doing either alone is worse than
+doing neither.

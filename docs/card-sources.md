@@ -24,6 +24,12 @@ row, since a `collections` row that can never hold items would be a lie.
 
 ## `writable`, not `kind`
 
+*Superseded by [`inventory.md`](inventory.md).* Which collections count is now a
+union of the locations you choose (*Locations and collections*), and
+writability follows from what an asset is: locations and goals are stored and
+writable, derived collections are not until flattened. Kept as the reasoning
+that got there.
+
 `kind` used to do two jobs: user-facing label *and* the thing behaviour was
 derived from. That conflation cannot express cases that obviously exist:
 
@@ -53,6 +59,55 @@ So **only `writable` is first-class**; everything else is user metadata.
 `touched.find(isWritable)` rather than `touched[0]`, so viewing a read-only
 source leaves `+` where it was: "target" means the last thing you touched that
 can hold cards.
+
+## Arbitrary user metadata
+
+*Superseded by [`inventory.md`](inventory.md).* `game` is answered by which
+locations a deck is designed against, sidebar `colour` and `icon` belong to
+*The asset tree*, and yes/no properties of an asset (archived, favourite) are
+total membership, so labels rather than metadata (*Open → Folders*). What
+survives is free-form properties on an asset that the app does not reason
+about, such as notes.
+
+Everything but `writable` stays user metadata with good affordances rather than
+app-enforced semantics. Resist adding a `game` enum the app reasons about: a deck
+warning is friendlier than a hard rule, and cheaper to be wrong.
+
+Once everything but `writable` is metadata, enumerating the keys stops being
+worthwhile, so allow any. Well-known keys simply get affordances:
+
+| Key | Affordance |
+| --- | --- |
+| `game` | filter, and a soft warning when a paper deck draws on Arena cards |
+| `colour`, `icon` | sidebar styling |
+| anything else | shown and editable, no special behaviour |
+
+This dissolves the structured-versus-freeform choice rather than settling it:
+structured keys are conventions with UI, not a separate mechanism.
+
+Storage is either a `(entity_type, entity_id, key, value)` table or a JSON column
+per entity. The table is filterable ("every collection where game=paper"), which
+matters if collections themselves become selectable inputs to the algebra. JSON
+is simpler and fine at tens of entities.
+
+## Card annotations are not entity metadata
+
+Your annotations on reference data are yours, but they do not reuse the
+entity-metadata mechanism above. "Card annotations" was once one bucket, with
+the dead `card_tags` table as its storage; it splits three ways:
+
+| Annotation | Example | Is |
+| --- | --- | --- |
+| **Tag** | `ramp` | a named ω set: total, so untagged means no |
+| **Copy fact** | signed, altered, condition | a user attribute on a bucket: partial, `absent` means unknown |
+| **Value on a card** | a note, a rating | not decided |
+
+The first two are settled in [`inventory.md`](inventory.md) → *Attributes*, which
+also gives the test between them. Scryfall's `oracle_tags` then becomes a
+filter-defined ω set, the same pattern as the cached `is:` collections, rather
+than half-imported user data. The third is partial like an attribute but at
+card grain rather than copy grain, and is often scoped to a deck or collection
+("why it is in *this* cube"), a shape the model does not have yet.
 
 ## All Magic is the base set
 

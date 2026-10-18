@@ -65,25 +65,31 @@ it is good evidence it is the right primitive.
 
 ---
 
-## C. Save a search — a query becomes a collection
+## C. Save a search as a pool — live, or as it stands
 
 > I have refined a Scryfall search until it is exactly the pool I want to brew
 > from. I want to keep it.
 
 1. ✅ Search in All Magic until the results are right — query, facets and sort
    all already work, and the panel remembers them if I navigate away.
-2. ⬜ **Save as collection…**, defaulting the name to the query text.
-3. ⬜ It saves *all* matches, not the page in hand — but **capped at ~10 pages
-   (about 1,750 cards)**, refusing above that with "narrow your search first".
+2. Choose what to keep:
+   - ⬜ **Save as live pool** — the query itself. It stays up to date: a new
+     printing that matches joins it.
+   - ✅ **Save as pool** — today's **Save as collection…** — the cards that
+     match right now, defaulting the name to the query text.
+3. ⬜ Saving a pool takes *all* matches, not the page in hand — but **capped
+   at ~10 pages (about 1,750 cards)**, refusing above that with "narrow your
+   search first".
 
    The budget is requests, not bytes, and no arrangement of the API makes a
    big walk cheap — see
    [`docs/fetching-many-cards.md`](docs/fetching-many-cards.md).
-4. ⬜ **Static.** A snapshot, not a live query: it must not shift when Scryfall
-   reprints something. A live saved search is a different feature, and calling
-   this one "static" is what makes the difference explicit rather than accidental.
-5. ✅ Afterwards it is an ordinary collection — browsable, usable as a deck
-   pool's comparison set, exportable.
+4. ✅ **A saved pool is static.** A snapshot: it must not shift when Scryfall
+   reprints something. That is the difference from a live pool, and naming
+   both is what keeps it explicit rather than accidental.
+5. ✅ Afterwards either is an ordinary pool — browsable, usable as a deck
+   pool's comparison set, exportable. Adding from it to a deck*list* takes
+   nothing from anywhere; only putting cards into a physical deck does.
 
 **Settled:** full JSON, cached as it arrives, so the walk is paid once and
 everything after is local. CSV and stub-row shortcuts were both ruled out; a
@@ -91,11 +97,14 @@ whole-corpus bulk ingest would remove the walk entirely but is a someday option,
 not a prerequisite. Reasoning in
 [`docs/fetching-many-cards.md`](docs/fetching-many-cards.md).
 
-**Type:** a search saves as a **binary** collection — membership, not counts —
-since it is a pool to brew from rather than cards you own. Storing quantity 1
-would be a false claim and, worse, would cap real counts to 1 the first time
-anything intersected with it. See
-[`docs/card-set-types.md`](docs/card-set-types.md).
+**Type:** a pool is membership, not counts — cards to brew from, not copies
+in a collection. Storing quantity 1 would be a false claim and, worse, would
+cap real counts to 1 the first time anything intersected with it. See
+[`docs/card-set-types.md`](docs/card-set-types.md). In
+[`docs/inventory.md`](docs/inventory.md) terms a pool is an ω set: a live
+pool a *predicate* one, a saved pool a *literal* one, and saving renders the
+first to the second. Today a saved pool is stored as a **binary**
+collection.
 
 **Open:** which printing. `unique=cards` returns one per card and that is the
 row you were looking at, so it is the natural default.
@@ -104,4 +113,54 @@ row you were looking at, so it is the natural default.
 from something else — a union of decks there, a query here. Both materialised,
 both wanting a "New collection from…" entry point rather than two unrelated
 buttons.
+
+---
+
+## D. Build it — from a decklist to a sleeved deck
+
+> I have brewed a Commander list and I am happy with it. Now I want it in a
+> deck box: the foil Sol Ring from my binder, any Island at all, and a clear
+> list of what I still have to buy.
+
+1. ⬜ Pin printings only where I care — *this* Sol Ring, the C21 foil — and
+   leave the rest as "any printing". Pinning art never makes the list illegal.
+2. ⬜ Ask what to pull, and get it grouped by where the cards are: *Binder 2:
+   Sol Ring (C21 foil), Cultivate…*, *Bulk box: 30 Forest*. Cards I have
+   nowhere are a separate shopping list.
+3. ⬜ Walk the shelves with that list and tick off each binder as I finish it.
+   Stopping halfway is fine: the deck shows what has arrived and what is still
+   to come.
+4. ⬜ If another deck is counting on the same Sol Ring, I am told *before* I
+   pull it, not when the other deck comes up short.
+5. ⬜ Weeks later I swap Cultivate for Kodama's Reach in the list. The deck box
+   shows it is out of date: Kodama's Reach to put in, Cultivate to take out,
+   and which binder it goes back to.
+
+**Gap:** all of it — the *Data model* campaign in `TODO.md`. Step 1's "any
+printing" is the first wall: today a deck entry must name a printing.
+
+---
+
+## E. Collecting — mirror my shelves, chase a set
+
+> My cards are spread over binders, a bulk box and deck boxes. I want the app
+> to show where each card actually is, and I want to chase all of MH3,
+> foils included.
+
+1. ⬜ Set up places that match my shelves: Binder 1, Binder 2, the bulk box,
+   each deck box. A card is in one place, as on the shelf.
+2. ⬜ Enter cards as loosely as I know them — "4 Lightning Bolt", printing
+   unknown — and fill in the detail later, as I sort.
+3. ⬜ "My collection" is those places added up, and I pick which ones count:
+   the friend's binder I track for trades does not.
+4. ⬜ Put a checklist on my collection: all of MH3, foils included. I see progress
+   as a number, and the missing cards as a shopping list.
+5. ⬜ Moving a card from a binder into a deck box changes nothing about my
+   progress — it is still in my collection. Trading it away does.
+
+**Gap:** all of it, as with D. Step 5 is the point of mirroring the shelves:
+moving cards around is free, and only cards coming in or going out change
+what I have.
+
+Design for both: [`docs/inventory.md`](docs/inventory.md).
 

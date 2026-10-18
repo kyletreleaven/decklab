@@ -20,22 +20,29 @@ What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 | Campaign | State | Sections |
 | --- | --- | --- |
 | **1. One panel for every card source** | ~done | Universe as a collection · Card panel layout · Active slots and hover · Panel state retention |
-| **2. Storage and fetching** | partly done | Mixed-grain storage (004) · Card data fetching · Compact printing rows |
-| **3. Card-set algebra** ⭐⭐⭐ | design only | Card-set algebra · A union of two sets · Set operations |
+| **2. Data model: buckets, locations, assets** ⭐⭐⭐ | **next** | Data model, including the asset tree's UI · [`docs/inventory.md`](docs/inventory.md) |
+| **3. Card-set algebra** ⭐⭐ | concepts settled; mechanics to do | Card-set algebra · Set operations |
 | **4. Formats beyond Commander** ⭐ | not started | Format support |
 | **5. Multi-panel workspace** ⭐ | not started | Multi-panel workspace |
 | **6. Analytics and intelligence** | sketched | Statistics · Card intelligence · Discovery · Suggestions · Playtesting |
-| **7. Organising decks and collections** ⭐ | not started | Organising decks and collections |
+| **7. Card data fetching** | backlog | Card data fetching · Compact printing rows |
 | **8. Gaps and polish** | ongoing | Contextual filters · Deck builder gaps · Collection gaps · Deck database · Version control · Polish · Known debt |
-| **9. A backend an agent can use** | next up | Backend factoring and a companion CLI |
+| **9. A backend an agent can use** | ongoing, as `cmdr` needs it | Backend factoring and a companion CLI |
 
-**Campaign 1 is the one just finished.** What is left of it is small and named:
-roll counts up to oracle grain (the last wrong thing on screen), the
-active-printing carousel, and scroll restoration.
+**Campaign 2 is next.** The inventory model — buckets with `absent` as a
+value, sparse attributes, locations and goals, one tree of assets — settles
+the concepts the algebra left open, and its schema is one rebuild of real user
+data rather than two. Back up first. It also fixes Campaign 1's last wrong
+thing on screen, since a tile's count is a population at oracle grain
+(bug 002).
 
-**Campaigns 3 and 5 are the big bets**, and both are still prose rather than
-tasks. Campaign 2's migration 004 is the one piece of work that touches real
-user data and wants a backup first.
+**Campaign 3's operations are now well defined; their mechanics are not** —
+laziness, pushdown, invalidation. Start from `cmdr`'s split of local and
+Scryfall terms and its eager pushdown.
+
+**Campaign 9 has what `cmdr` needs to grow against**: the plumbing and one
+route. Further routes come as `cmdr` asks for them, ideally over the new data
+model.
 
 ---
 
@@ -84,6 +91,23 @@ have to be right before the first write.
       - cards, local cache only: search via `compileQuery`, show, printings
       - `diff` — what a deck needs that is not in a collection (a set
         difference, as in the pool)
+- ⬜ **Serve `cmdr`** (the CLI in `../commander`). It is a second Scryfall
+      client with its own scheduler and cache today. Reasoning in
+      [`docs/cmdr.md`](docs/cmdr.md). This also orders the routes above:
+      - card lookup by name, cache-first, misses batched through the CLI lane
+        — then `cmdr cards` and `cmdr search` route through DeckLab when the
+        API is on, and fall back when it is off
+      - deck export as a decklist, which `cmdr analyze`, `curve`, `mana`,
+        `hands` and `grep` already read
+      - collection membership for a list of names, replacing `cmdr`'s
+        hand-kept owned list with the real Paper collection
+- ⬜ **Share logic with `cmdr` instead of copying it.** Four files are copied
+      "verbatim" and two have already drifted; there are also two local
+      Scryfall evaluators (`src/lib/query/` and `cmdr`'s
+      `lang/scryfall-local.ts`). A module both import — a workspace package,
+      or `cmdr` depending on a path into this repo — once the import-extension
+      difference (`./types` vs `./types.ts`) is settled. First casualty:
+      [`bugs/004`](bugs/004-spacecraft-commander-flagged-illegal.md).
 - ⬜ **Grain is explicit in every card result.** Oracle- or printing-grain
       rows say which they are (see *Grain* in `CLAUDE.md`); an agent cannot
       infer it from which branch ran the way the UI does.
@@ -191,6 +215,24 @@ collection. What was built and why is in
       same selection-as-scope question as everywhere else.
 - ⬜ Virtualise long grids. A 50k-card binder wants it whatever the source.
 
+**Paging the local side**, only about performance. `collectionItems` is
+`SELECT c.* … ORDER BY …` with no `LIMIT`, and `c.*` carries the raw Scryfall
+payload in `data`, so a thousand-entry binder ships a few MB over the IPC bridge
+per refetch. Fine at today's sizes.
+
+- ⬜ Drop `data` from list queries. This doesn't depend on paging and is probably
+      the bigger win. Tiles need name, image URLs, quantity and finish, all real
+      columns. `data` is read only by `hasBack` and `variantTraits`, both
+      card-panel concerns. See *Compact printing rows*, which measured it at
+      ~27 MB against ~4 MB compact.
+- ⬜ Swap the generator interface for explicit per-source cursors, so retention
+      can resume mid-scroll and a refetch is targeted rather than a replay. See
+      the end of [`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md).
+- ⬜ When paging does arrive, the total sort key makes it **keyset** rather than
+      OFFSET: exact, and correct precisely because ties cannot straddle a page
+      boundary. Price would need its sort value stored rather than computed
+      from JSON.
+
 **The query box**
 
 - ⬜ **Local and remote dialects are not equal.** `is:` and friends work in All
@@ -221,58 +263,17 @@ collection. What was built and why is in
 
 **Collections and their metadata**
 
-- ⬜ `writable` is derived. It becomes a stored column only when a *stored*
-      collection wants locking, such as an imported reference binder (a
-      friend's list, a tournament decklist). A separate feature.
 - ⬜ **`OWNABLE_KINDS` does not get replaced by a smarter inference — it gets
       deleted.** See *No global ownership* below.
-- ⬜ Everything but `writable` stays user metadata with good affordances rather
-      than app-enforced semantics. Resist adding a `game` enum the app reasons
-      about; a deck warning is friendlier than a hard rule, and cheaper to be
-      wrong.
-
-**Arbitrary user metadata on decks and collections.** Once everything but
-`writable` is metadata, enumerating the keys stops being worthwhile — so allow
-any. Well-known keys simply get affordances:
-
-| Key | Affordance |
-| --- | --- |
-| `game` | filter, and a soft warning when a paper deck draws on Arena cards |
-| `colour`, `icon` | sidebar styling |
-| anything else | shown and editable, no special behaviour |
-
-This dissolves the structured-versus-freeform choice rather than settling it:
-structured keys are conventions with UI, not a separate mechanism.
-
-- ⬜ Storage: either a `(entity_type, entity_id, key, value)` table, or a JSON
-      column per entity. The table is filterable — "every collection where
-      game=paper" — which matters if collections themselves become selectable
-      inputs to the algebra. JSON is simpler and fine at tens of entities. Not
-      decided.
-
-**Card annotations are a separate problem — deliberately not folded in here.**
-Tagging Sol Ring as `ramp` is legitimate (reference data is not editable, but
-your annotations on it are yours), and the dead `card_tags` table was exactly
-that. But it should *not* reuse the entity-metadata mechanism, for four reasons:
-
-- **Scale.** Tens of decks and collections versus ~110k oracle cards and ~500k
-  printings. Different storage and indexing problem entirely.
-- **It is a query input, not display.** Card tags feed predicates — `tag:ramp` —
-  so they must be indexed and joinable. Entity metadata is mostly shown, not
-  filtered on.
-- **Grain, again.** `ramp` is oracle-level, `signed by the artist` is
-  printing-level, and *this particular sleeved copy* is a third grain we do not
-  model at all.
-- **Mixed provenance.** Scryfall publishes an `oracle_tags` bulk file, so card
-  tags would be part imported reference data, part user data — a lifecycle
-  entity metadata never has.
-
-- ⬜ Deferred. Leave `card_tags` in place rather than half-reviving it — the
-      query language it was built for was postponed, not cancelled, and the
-      algebra is that idea in stronger form. Decide its shape when one of them
-      actually needs it.
-- ⬜ Subsumes several backlog items that are each "metadata on a thing": deck
-      notes, tags, favourites, archived/competitive status.
+- ⬜ **Free-form properties on an asset** (notes and the like) that the app
+      does not reason about.
+- ⬜ **Tags as named ω sets** (`tag:ramp`), then delete `card_tags` (0 rows)
+      and its four uncalled functions in `cards.ts` (`allTags`, `addTag`,
+      `removeTag`, `tagsFor`). See
+      [`docs/card-sources.md`](docs/card-sources.md) → *Card annotations are
+      not entity metadata*.
+- ⬜ **Values on a card** (notes, ratings): decide whether they belong to the
+      card or to the deck or collection holding it.
 
 ### Contextual filters — what is left
 
@@ -300,12 +301,6 @@ How fetching and caching work today, including the scheduler, is in
 - ⬜ Prices ride on the same card rows but move daily, unlike print runs, so they
       want their own short TTL rather than inheriting the week. **Deferred** —
       stale prices are a cosmetic problem, not a correctness one.
-- ⬜ Store as **compact printing rows** rather than the raw payload. A card
-      object is ~5 KB of which only ~5% is card text and stats; the rest is
-      affiliate links, API self-references and eleven image URLs. Compact rows
-      are ~700 bytes. Currently ~5,800 printings × 5 KB ≈ 27 MB on disk.
-      See *Compact printing rows and the CSV path* — the two are the same
-      piece of work.
 - ⬜ Optional idle backfill, scoped to cards in collections and decks. Goes on
       the background lane.
 - ⬜ The UI renders whatever is cached *now* and never awaits the scheduler;
@@ -313,398 +308,123 @@ How fetching and caching work today, including the scheduler, is in
 - ⬜ An opt-in "prefetch everything" action using bulk data (`default_cards`,
       74 MB compressed), for offline use. Not the default path.
 
-### Mixed-grain storage — migration 004
+### Data model — buckets, locations, assets ⭐⭐⭐ — next
 
-Both `collection_items` and `deck_cards` require a printing
-(`card_id NOT NULL REFERENCES cards(id)`), so neither *"two more copies, printing
-unknown"* nor *"one Sol Ring, any art"* is expressible. Decks need this at least
-as much as collections: most decklists are oracle-level, and pinning a printing
-is the exception.
+Both `collection_items` and `deck_cards` require a printing, so neither *"two
+more copies, printing unknown"* nor *"one Sol Ring, any art"* is expressible.
+The model that fixes it — buckets with `absent` as a value, sparse
+attributes, locations and goals, one tree of assets — is in
+[`docs/inventory.md`](docs/inventory.md). Earlier design, partly superseded
+(nullable `card_id`, migration "004", which is now `004_quantity_kind`), is in
+[`docs/mixed-grain-storage.md`](docs/mixed-grain-storage.md). One schema, one
+rebuild of real user data — back up first.
 
-**Changes, both tables:**
-- ⬜ Add `oracle_id TEXT NOT NULL`
-- ⬜ Relax `card_id` to nullable, where NULL means *printing unknown / any*
-- ⬜ Replace the UNIQUE constraint with an expression index (see the trap below)
-
-**The trap: SQLite treats NULLs as distinct in UNIQUE.** The moment `card_id`
-becomes nullable, `UNIQUE (collection_id, card_id, finish, condition)` stops
-constraining unsorted rows at all — every add would silently insert a *new*
-"unknown printing" row instead of folding into the existing one. So:
-
-```sql
-CREATE UNIQUE INDEX idx_items_identity ON collection_items
-  (collection_id, oracle_id, COALESCE(card_id, ''), finish, condition);
-
-CREATE UNIQUE INDEX idx_deck_cards_identity ON deck_cards
-  (deck_id, oracle_id, COALESCE(card_id, ''), zone);
-```
-
-This also permits `1 Sol Ring (C21)` and `1 Sol Ring (any)` to coexist in one
-deck, which is meaningful: *"I own one specific art and still need another."*
-
-**Decisions taken:**
-- ⬜ **One table, not two.** `known` and `unsorted` are a logical split; in
-      storage it is one table with a nullable `card_id`. Two tables would double
-      every query for no gain.
-- ⬜ **Storing `oracle_id` removes a join.** Collection queries currently join
-      `cards` solely to reach it.
-- ⬜ **A representative printing is a display choice, not stored data.** An
-      oracle-grained row still needs an image: pick the newest cached printing
-      for that `oracle_id`. Safe because we only ever record cards we have
-      fetched, so one printing is always cached.
-
-**Migration shape.** SQLite cannot relax `NOT NULL` or swap a table constraint in
-place, so this is a create-copy-drop-rename rebuild of both tables rather than an
-`ALTER`. `oracle_id` backfills from `cards` through the existing `card_id`, so no
-data is lost.
-
-**A deck's zones *are* collections — one primitive, not two.** `deck_cards` and
-`collection_items` are both "container holds N of card X", and the duplication
-has already produced four pairs of near-identical functions (`addCardTo…`,
-`adjust…Quantity`, `printingQuantitiesIn…`, plus the row types). The unification
-is structural rather than cosmetic:
-
-| Layer | What it is |
-| --- | --- |
-| **Container** | the primitive — `card → quantity`. A collection's contents; a deck's commander zone; a deck's maindeck |
-| **Entity** | owns containers. A `Collection` owns one (plus `unsorted`, below); a `Deck` owns several named zones, one of them default |
-
-**Two ways to express that, both worth considering. Undecided.**
-
-**A — zones *are* containers.** A deck owns several named containers, one
-default. `zone` stops being a column and becomes a container's identity.
-- One items table keyed by `container_id`, plus a `containers` table naming them
-  and pointing at a parent entity
-- Containers are addressable: a panel or a set operation can point at "the
-  sideboard" as a first-class thing
-- Piles may fall out of the same model — they partition a zone the way zones
-  partition a deck
-- Costs indirection: "the whole deck" becomes a join across its containers, and
-  creating a deck creates four rows before it holds anything
-
-**B — a deck *is* a collection, and rows carry annotations.** Closer to what
-exists now, since `deck_cards.zone` is already exactly that.
-- One container per entity; `zone` sits beside `finish` and `condition` as an
-  annotation on the entry
-- Annotations generalise for free — tags, acquisition price, "loaned to Dave",
-  and arguably the known/unknown printing distinction from mixed-grain storage are all the same
-  shape
-- Costs addressability: a zone is not a thing you can point at, only a value you
-  filter by
-
-**Possible synthesis:** store as **B**, address as **A**. A zone is then
-`Filter(container, zone = main)` — which the card-set algebra already gives us,
-since a filter over a spec is itself a spec. The touch list would hold *specs*
-rather than containers, and "the sideboard" is addressable without existing as a
-row. Worth checking whether that collapses the trade-off or just moves it.
-
-Open either way: which discriminators are universal. `finish` plausibly matters
-in a deck (you want your foil copy sleeved); `condition` almost certainly does
-not.
-
-**Note:** the deck-vs-collection dispatch being written for the carousel `±`
-right now is a **stopgap** this model deletes. Behaviour is identical either way,
-so it is safe to build now and collapse later.
+**Schema** — one migration (005 or later), a create-copy-drop-rename rebuild:
+- ⬜ Buckets: `oracle_id` required, printing and finish first-class with
+      `absent` as a real value (not `NULL`), user attributes sparse, and a
+      canonical bucket key in place of today's
+      `UNIQUE (collection_id, card_id, finish, condition)`
+- ⬜ `condition` demoted to a user attribute of the built-in condition type.
+      Today's `'NM'` is mostly a default (schema, `importer.ts`,
+      `addCard`): map it to `absent`, keep other values. Finish is dropped:
+      every migrated bucket has finish `absent`
+- ⬜ Assets: ids, types, a parent for the tree. Every collection becomes a
+      location; every deck a decklist whose zones are zone goals, with
+      `maybe` a child goal it does not refer to
+- ⬜ Locations and goals, per inventory.md → *First schema scope*: both
+      ship; moves commit immediately and are not stored yet
 
 **Code that follows:**
-- ⬜ **Import stops fabricating printings.** A bare `4 Lightning Bolt` currently
-      resolves to whichever printing Scryfall returns first and records *that*
-      printing — inventing information the source never gave. Bare names should land
-      with `card_id` NULL.
-- ⬜ Printings carousel gains an "unknown printing ×N" slot, and a way to promote
-      copies into a specific printing as they are sorted.
+- ⬜ **Import stops fabricating printings** (and conditions). A bare
+      `4 Lightning Bolt` lands as *printing unknown*.
+- ⬜ Counts are populations: a tile's count at oracle grain sums every
+      bucket of the card. Fixes [`bugs/002`](bugs/002-stepper-counts-printing-grain.md).
+- ⬜ Printings carousel gains an "unknown printing ×N" slot, and a way to
+      move copies to a finer bucket as they are sorted.
 - ⬜ Adding to a deck offers both grains: this printing, or any.
+- ⬜ Zones as collections deletes the deck-vs-collection dispatch behind the
+      carousel `±` and the four pairs of duplicate functions.
+
+**The asset tree's UI.** The model has many kinds of entity (binders, decks,
+goals, moves, plans), and a flat sidebar of decks and collections cannot hold
+them. One tree of assets does; see [`docs/inventory.md`](docs/inventory.md) →
+*The asset tree*.
+
+The sidebar today is a flat list ordered `updated_at DESC`, which rearranges
+itself as you work. Fine at five decks, useless at fifty, and there is nowhere
+to say *this one is retired* or *these three are the Commander pod*. Every item
+below is one mechanism for decks and collections alike, so they want doing
+together rather than once for each.
+
+Recency and manual order conflict when they share a list: the deck you just
+touched jumping to the top is useful, but once you can arrange the list by hand,
+your layout would rearrange itself underneath you. So they get separate lists.
+The tree keeps the order you give it, and recency moves to a Recent list.
+
+- ⬜ **Drag to reorder and re-parent.** A `position` column, the same shape
+      `deck_piles` already has. `PilesView` already demonstrates the drag
+      handlers, including the Firefox quirk of needing `setData` or the drag
+      never starts.
+- ⬜ **Folders.** A folder only organises: it sums nothing. Whether any asset
+      can act as one, as a deck holding its decklist and builds would, is
+      open in inventory.md → *Open → Folders*.
+- ⬜ **Labels** for favourite, brewing / built / retired, competitive. Each is
+      yes or no for every asset, which makes it a label rather than a
+      property. Labels as well as folders, or instead, is the same open
+      question.
+- ⬜ **Collapse and hide.** Fifty decks needs folders that fold, and a way to
+      keep a retired deck without it taking a row.
+- ⬜ **Card sets are their own type**, not a kind of collection: a saved
+      search or a list is a set, a binder is a multiset. `cmdr` keeps exactly
+      these two and never infers one from the other
+      ([`docs/cmdr.md`](docs/cmdr.md)). In the tree that means per-type
+      *Create* actions and `t:` search.
+- ⬜ **Recent assets**, eventually: the recency ordering the sidebar has today,
+      as its own list beside the tree.
+
+**Later in the campaign:** moves and plans, the active move, goals beyond
+the empty one.
 
 ### Card-set algebra — the document model ⭐⭐⭐
 
-The thing panels are views *of*. Maya and Blender give you many viewports onto one
-shared model; here the model is not a mesh but a **graph of card-set
-specifications**. Everything else in this section depends on getting this right.
+The thing panels are views *of*: a **graph of card-set specifications**, where a
+spec is a function `card → quantity` and every operation is pointwise arithmetic
+on those functions. Typed by `{grain, quantity}`. Everything else in Campaigns 3
+and 5 depends on getting this right. The design — nodes, types, grain
+conversion, derived values, presets — is in
+[`docs/card-set-algebra.md`](docs/card-set-algebra.md). Read
+[`docs/cmdr.md`](docs/cmdr.md) first: `cmdr`'s `.decklab` language reached
+much of it independently and is built.
 
-Quantity kinds and how operations combine them —
-[`docs/card-set-types.md`](docs/card-set-types.md). A model layer for the pool,
-taking commands and returning view state —
-[`docs/pool-model.md`](docs/pool-model.md).
+Decide before any code:
 
-A node denotes a (multi)set of cards:
-
-**A spec is a function `card → quantity`,** with quantities in ℕ ∪ {∞}. Every
-combining operation is then *pointwise arithmetic* on those functions, which is
-why the operator list is open-ended rather than fixed at the usual four.
-
-Sources:
-
-| Node | Meaning |
-| --- | --- |
-| `Literal` | an enumerated list with quantities — a decklist, a collection, an import result. **Editable.** |
-| `Empty` | constant `0`. Identity for `Sum` and `Max` |
-| `Universe@g` | constant `∞` at grain `g` — every oracle card, or every printing. Identity for `Min`. Never materialised |
-
-Pointwise binary operators:
-
-| Node | Value | Reads as |
-| --- | --- | --- |
-| `Max(a, b)` | `max(a, b)` | copies needed to field both **at once** (cards shared between decks) |
-| `Sum(a, b)` | `a + b` | total copies consumed building both **separately** |
-| `Min(a, b)` | `min(a, b)` | overlap — what two lists have in common |
-| `Diff(a, b)` | `max(0, a − b)` | still needed / not in the collection |
-| `Sub(a, b)` | `a − b` | signed change — the deck-diff representation (see types below) |
-
-Pointwise unary operators:
-
-| Node | Value | Reads as |
-| --- | --- | --- |
-| `Clamp(a, n)` | `min(a, n)` | copy limits — `n=1` singleton, `n=4` constructed |
-| `Scale(a, k)` | `a × k` | k copies of a whole list |
-| `Mul(a, b)` | `a × b` | **this is filtering** — when `b` is binary it masks `a` |
-| `Project(a, grain)` | regroup | collapse printings to oracle cards, or expand back out |
-
-**Node types: `{grain, quantity}`**, i.e. `{oracle, printing} × {binary, natural, integer}`.
-
-A spec is a function `element → quantity`, so the two axes are just its input and
-output sides. (Avoid "domain" for the second axis — the grain *is* the domain;
-`binary`/`natural`/`integer` is the codomain. "Quantity" says it plainly.)
-
-`grain` — what counts as one element:
-
-| Grain | Element |
-| --- | --- |
-| `oracle` | the card, printing-agnostic. What legality and deck rules care about |
-| `printing` | a specific printing. What a binder cares about |
-
-`quantity` — what a card can map to:
-
-| Quantity | Values | Used for |
-| --- | --- | --- |
-| `binary` | `{0, 1}` | membership: predicates, legality masks, search results as sets |
-| `natural` | `ℕ ∪ {∞}` | inventories: decks, collections |
-| `integer` | `ℤ` | signed change: `+2 Fatal Push / −2 Cut Down` |
-
-**Boolean algebra is just the binary case** — at `binary`, `Max` is OR, `Min` is
-AND, `Diff` is AND-NOT, and complement is `1 − a`. So we get set operations for
-free rather than as a separate feature.
-
-Operator typing:
-
-| Operator | Signature |
-| --- | --- |
-| `Max`, `Min` | `T × T → T` at any quantity |
-| `Sum` | `binary × binary → natural` (1+1 escapes binary); otherwise `T × T → T` |
-| `Diff` (monus) | `natural × natural → natural` |
-| `Sub` | `natural × natural → integer` |
-| `Clamp(a, n)` | `natural → natural`; `Clamp(a, 1)` is the coercion to `binary` |
-| `Scale(a, k)` | preserves quantity for `k ∈ ℕ`; widens to `integer` for `k < 0` |
-| `Not(a)` | `binary → binary` |
-| `Mul(a, p)` | `p` must be `binary`; result keeps `a`'s quantity |
-
-**Predicates have a grain as well**, because card properties do:
-
-| Grain | Properties |
-| --- | --- |
-| `oracle` | type line, oracle text, mana cost, mana value, colour identity, legality |
-| `printing` | set, collector number, rarity, artist, frame, border, promo type, finish, language, price |
-
-So "is a red creature" is oracle-level, while "is mythic in MH2" is
-printing-level — and moving a predicate between grains **changes which set you
-get**. Grain conversion therefore carries an *aggregation*, not just a target:
-
-- `ToOracle(a, agg)` — printing → oracle.
-  At `binary`, `agg` is a quantifier and the choice is load-bearing:
-  - `any` (∃) — "has **a** mythic printing"
-  - `all` (∀) — "**every** printing is mythic"
-
-  At `natural`, `agg` is `sum` (total copies across printings), or `max` / `min`
-  where that reads better.
-
-- `ToPrintings(a)` — oracle → printing. Unambiguous at `binary`: all printings of
-  each matching card. At `natural` there is no principled way to distribute *n*
-  copies across printings, so it stays a type error rather than a guess.
-
-**Round-tripping is not the identity.** `ToPrintings(ToOracle(a, any)) ⊇ a` — the
-trip out and back widens a specific set of printings into *all* printings of
-those cards. Useful (it is exactly "show me every version of what I own"), but it
-must not be mistaken for a no-op, and the UI should not offer it as one.
-
-**Collections are mixed-grain, and that is fine.** Real collections know some
-cards exactly and others only vaguely: *"I have this specific foil printing of X,
-plus two more copies from bulk that I have not sorted."* Both facts are true and
-both are worth storing.
-
-Do **not** model this as a mixed-grain spec — that would break the typing.
-Instead, a `Collection` *entity* holds **two** specs:
-
-| Spec | Grain | Holds |
-| --- | --- | --- |
-| `known` | `printing` | copies whose printing is identified |
-| `unsorted` | `oracle` | copies known only by card |
-
-Then the questions have clean answers:
-
-- *How many X do I own?* → `Sum(ToOracle(known, sum), unsorted)` at oracle grain
-- *Do I own this exact printing?* → read `known` alone
-- *What is my collection worth?* → priceable only over `known`; `unsorted` needs a
-  cheapest-printing or average assumption, and should say which
-
-This is why entities are a layer above specs rather than being specs themselves:
-one collection, several specs.
-
-Consequences to design for:
-
-- ⬜ **Schema.** `collection_items.card_id` currently points at a printing and is
-      required. It needs to become nullable alongside a required `oracle_id`,
-      with a null `card_id` meaning "printing unknown".
-- ⬜ **Import currently fabricates printings.** A pasted line of bare `4 Lightning
-      Bolt` resolves to whichever printing Scryfall returns first and records
-      *that* printing. That is inventing information the source never gave. Bare
-      names should land in `unsorted`.
-- ⬜ **The printings carousel** needs an "unknown printing ×N" slot, and a way to
-      promote copies from `unsorted` into a specific printing as you sort them.
-
-**Grain polymorphism, and inferring it.** A predicate is not tied to one grain; it
-is valid at whichever grains its *properties* support, and that is inferable from
-how it was built:
-
-| Built from | Valid at | Why |
-| --- | --- | --- |
-| oracle properties only | `{oracle, printing}` | oracle properties are constant across a card's printings, so they lift **down** for free |
-| any printing property | `{printing}` | printing properties vary between printings, so they cannot lift **up** without a quantifier |
-
-Composition takes the intersection:
-
-- `t:creature c:r` → valid at `{oracle, printing}`
-- `set:mh2` → valid at `{printing}`
-- `t:creature set:mh2` → valid at `{printing}` only
-
-The payoff is that **the grain is usually invisible**. The app picks it, and only
-has to ask the user anything when a printing-level predicate is used where an
-oracle-level answer is wanted — at which point the question is a real one
-("*any* mythic printing, or *every* printing mythic?") rather than bookkeeping.
-
-This also means a saved predicate stays usable in both worlds where it can be:
-"within my commander's colour identity" is oracle-built, so it filters a decklist
-and a binder alike without being written twice.
-
-**What the types buy.** You cannot intersect a printing-grained binder with an
-oracle-grained decklist without saying which you meant — the type error surfaces
-exactly the any-printing-or-this-printing ambiguity that would otherwise silently produce a
-wrong number. And because `Filter` predicates are themselves binary nodes,
-"legal in Commander" or "within my commander's identity" become reusable,
-storable, composable specs rather than hardcoded checks.
-
-**Derived values, and predicates parameterised by them.** `colorIdentity(commander(deck))`
-is not a spec — it is a *scalar* read out of one, then used to build a predicate.
-So two kinds of value flow through the graph:
-
-1. **Specs** — `card → quantity`, everything above
-2. **Values** — scalars read out of specs: colour sets, counts, formats, prices
-
-with three kinds of edge between them:
-
-| Kind | Signature | Examples |
-| --- | --- | --- |
-| Zone / sub-selection | `spec → spec` | `commander(deck)`, `zone(deck, main)` |
-| Reduction | `spec → value` | `colorIdentity`, `count`, `format`, `totalPrice` |
-| Predicate constructor | `value → binary spec` | `withinIdentity(cs)`, `legalIn(fmt)`, `mvAtMost(n)` |
-
-This is what makes the Arena-style pool a *definition* rather than special-cased
-code:
-
-```
-pool = Selected
-     × legalIn(format(deck))
-     × withinIdentity(colorIdentity(commander(deck)))
-```
-
-Change the commander and the pool re-filters, because the dependency is in the
-graph. The same machinery gives "cards that fit any of my decks", "under £5 and
-legal here", and so on.
-
-**This is now a small language, and that is the risk.** The mitigation is to keep
-the vocabulary **closed** for v1 — a fixed set of reductions and predicate
-constructors, each surfaced as a UI affordance ("scope pool to this deck" is a
-checkbox that builds the expression above) rather than something typed by hand.
-A general expression language stays possible later; designing the value types now
-means it can be layered on rather than retrofitted.
-
-Two consequences to design for:
-
-- **Dependency tracking.** A pool derived from a deck must invalidate when the
-  deck changes. Same propagation the panels need, one level deeper.
-- **Cycles must be forbidden** in the spec graph. A pool derived from a deck that
-  the user then edits *from* that pool is fine — an edit is a user action, not a
-  dataflow edge — but a spec depending on itself is not.
-
-Two more things fall out that are worth keeping:
-
-- **`Universe` must be `∞`, not `1`.** Otherwise `Min(deck, Universe)` would cap
-  every entry at one copy instead of leaving the deck untouched. So `natural`
-  needs ∞, and `Mul(Universe, p)` is `∞` wherever the predicate holds.
-- **Filtering and combining are the same kind of operation**, so the compiler has
-  one thing to optimise rather than two.
-
-**Three decisions determine everything downstream.** These need answering before
-any code:
-
-1. **Multiset or set?** Decks and collections carry quantities. "What am I
-   missing" is only `deck − collection` under *multiset* semantics
-   (`max(0, a−b)`), with intersection as `min(a, b)`. Proposal: multisets
-   throughout, with an explicit `dedupe` when plain set semantics is wanted.
-
-2. ~~What is an element — a printing or a card?~~ **Resolved:** grain is part of
-   the node's *type*, not a per-operation parameter, and conversion between
-   grains is an explicit node. See the type table above.
-
-3. **Laziness.** `Universe` is ~500k printings and conceptually open-ended; it
-   cannot be materialised. Nodes stay symbolic and compile to a query,
-   materialising only what a view needs to draw. The compiler decides per
-   expression whether it is answerable from local SQLite or needs Scryfall:
-   `Filter(Universe, q)` is a Scryfall query; `Intersect(Filter(Universe), Collection)`
-   pushes down into SQL over the local cache.
-
-**Editing.** `Literal` nodes are editable — dragging a card into a deck panel
-edits that node. Derived nodes are read-only but can be **baked** into a literal,
-the way Blender applies a modifier. Edits propagate to every view of a node; two
-panels showing one deck must never drift.
-
-**Re-backing the features we like.** The point of the algebra is that the quality
--of-life behaviour of Arena, Scryfall and Moxfield falls out as presets rather
-than being reimplemented:
-
-| Feature elsewhere | Expression here |
-| --- | --- |
-| Scryfall search | `Filter(Universe, q)` |
-| Arena's card pool | `Filter(Universe ∩ Selected, format + colour identity)` |
-| Moxfield "missing cards" | `Deck − Collection` (multiset, oracle grain) |
-| "Collected but never played" | `Collection − Union(all decks)` |
-| Binder / cube triage | `Collection ∩ Filter(…)` |
-| Deck diff (§4) | `SymmetricDifference(v1, v2)` |
-
-**Open questions.**
-- How is the graph persisted, and are nodes nameable/reusable across workspaces?
-- Union of multisets — sum the quantities, or take the max? ("all my decks
-  combined" wants different answers for "total copies used" vs "copies needed at
-  once")
-- How far should the compiler push down before giving up and materialising?
-- Cycles: forbid outright, presumably.
-- Do derived nodes cache their materialisation, and how is that invalidated?
+- ⬜ **Multiset or set?** Proposal: multisets throughout, with an explicit
+      `dedupe`. `cmdr` already answers this way.
+- ⬜ **Union of multisets: sum or max?** "Total copies used" against "copies
+      needed at once". `cmdr` takes `max`.
+- ⬜ **Laziness and pushdown.** How far the compiler pushes down to SQLite or
+      Scryfall before it materialises.
+- ⬜ **Persistence.** How the graph is stored; whether nodes are nameable and
+      reusable across workspaces; whether derived nodes cache, and how that
+      invalidates.
 
 ### Multi-panel workspace ⭐
 
 Move from one fixed layout to a reconfigurable workspace, so the app can be
 arranged around the activity rather than around a single "current view".
 
-**First milestone — mimic the Arena deckbuilder.** Two panels stacked: the
-filtered pool of candidate cards **on top**, the deck under construction
-**below**. This is the smallest arrangement that proves the model, and it is the
-one that gets used most.
+**First milestone — mimic the Arena deckbuilder.** Pool above, deck below: the
+smallest arrangement that proves the model, and the one that gets used most.
+Shipped; see [`FEATURES.md`](FEATURES.md) → *Deck builder pool*. Left from it:
 
-- ⬜ Pool panel above, deck panel below, draggable horizontal divider
-- ⬜ Pool panel sources: Scryfall search **or** a collection, same panel type
-- ⬜ Facet filters on the pool (extract the ones collections already have)
-- ⬜ Double-click or drag a card from pool → deck
-- ⬜ Pool auto-scopes to the deck's format constraints, with a toggle —
-      format legality everywhere, plus commander colour identity in Commander
-- ⬜ Collection badges in the pool ("3 in Paper") when a collection is selected
+- ⬜ Double-click a pool tile to add it to the deck. Implement, then evaluate
+      whether it earns its place beside the `±` stepper.
+- ⬜ **How many copies you have, on each pool tile.** A tile is bright or dim
+      (is the card in Paper at all?) and its stepper counts the *deck*. A label
+      such as "3 in Paper" would say whether a fourth copy can come from what
+      you have, without hovering each card. Sums every printing of the card,
+      so it waits on *Data model* (counts are populations; see
+      [`bugs/002`](bugs/002-stepper-counts-printing-grain.md)).
 
 **Panel types.** Each is a self-contained view over one source:
 - ⬜ Deck (list / piles / curve)
@@ -837,45 +557,6 @@ is a scratch list), but cross-zone duplicates go unnoticed entirely.
       rather than duplicates, so new data cannot get into this state — but
       existing decks and imports can.
 
-### A union of two sets in the pool — built, then reverted
-
-Drawing `foreground ∪ background` with the foreground lit was built, and then
-removed in `cae2f53`. It took a day of bugs to show a region of the grid nobody
-had asked to tell apart. The app draws one set per pane instead. The reasoning
-is in [`docs/two-designs.md`](docs/two-designs.md), and the parts that stayed
-(total sort key, `merge.ts`) are in
-[`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md).
-
-- ⬜ **The union comes back with set operations**, the first case where two
-      drawn sets are not nested ("all red cards" against a collection holding
-      blue). The merge is ready. Still missing: provenance on rows,
-      membership across sources, and invalidating on a write without
-      re-paging. [`docs/pool-model.md`](docs/pool-model.md) is the design on
-      file for the last of these.
-- ⬜ **Choosing what the grid is lit against.** Today `lit` is always the
-      active collection. Journey B, Dave's binder lit by mine, needs it to be
-      something else. The swatch's gestures (copy, switch, clear) are one
-      design for this. Under one-set-per-pane they would set the lit set
-      rather than a background.
-
-**Paging the local side** is separate from all of this and only about
-performance. `collectionItems` is `SELECT c.* … ORDER BY …` with no `LIMIT`, and
-`c.*` carries the raw Scryfall payload in `data`, so a thousand-entry binder
-ships a few MB over the IPC bridge per refetch. Fine at today's sizes.
-
-- ⬜ Drop `data` from list queries. This doesn't depend on paging and is probably
-      the bigger win. Tiles need name, image URLs, quantity and finish, all real
-      columns. `data` is read only by `hasBack` and `variantTraits`, both
-      card-panel concerns. See *Compact printing rows*, which measured it at
-      ~27 MB against ~4 MB compact.
-- ⬜ Swap the generator interface for explicit per-source cursors, so retention
-      can resume mid-scroll and a refetch is targeted rather than a replay. See
-      the end of [`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md).
-- ⬜ When paging does arrive, the total sort key makes it **keyset** rather than
-      OFFSET: exact, and correct precisely because ties cannot straddle a page
-      boundary. Price would need its sort value stored rather than computed
-      from JSON.
-
 ### Set operations — surfacing the algebra
 
 Subsumed by the card-set algebra above; what remains here is the UI over it.
@@ -884,44 +565,19 @@ Subsumed by the card-set algebra above; what remains here is the UI over it.
 - ⬜ Results are first-class: viewable in any panel, exportable, bakeable into a
       new collection or deck
 - ⬜ Common operations as one-click presets, so the algebra stays optional
-
-### Organising decks and collections ⭐
-
-The sidebar is a flat list ordered `updated_at DESC`, which rearranges itself as
-you work. Fine at five decks, useless at fifty — and there is nowhere to say
-*this one is retired* or *these three are the Commander pod*.
-
-Every item below is the same mechanism applied to both kinds, so they want doing
-together rather than once for decks and again for collections.
-
-**The decision that gates the rest:** recency ordering and manual ordering
-conflict. Today the deck you just touched jumps to the top, which is genuinely
-useful; the moment you can arrange the list by hand, that has to stop, or the
-layout you chose rearranges itself underneath you. Probably: manual order when
-set, recency as the fallback — but it is a choice, not a detail.
-
-- ⬜ **Drag to reorder.** A `position` column, the same shape `deck_piles`
-      already has, and `ORDER BY position, updated_at DESC` so unpositioned rows
-      still land sensibly. `PilesView` already demonstrates the drag handlers,
-      including the Firefox quirk of needing `setData` or the drag never starts.
-- ⬜ **Folders**, or tags, or both — one grouping mechanism for decks and
-      collections. Tags compose and nest badly; folders nest and compose badly.
-      Worth picking deliberately rather than growing whichever is easier first.
-- ⬜ **Favourites** and **states** (brewing / built / retired). Already sketched
-      under *Deck database* as deck-only; they are the same thing for a
-      collection you have stopped adding to.
-- ⬜ These are all **user metadata**, which the Universe section already argues
-      should be arbitrary keys with affordances for well-known ones rather than
-      a column per idea. Building folders as a bespoke table would contradict
-      that; building them as metadata gets ordering and favourites for free.
-- ⬜ **Collapse and hide.** Fifty decks needs sections that fold, and a way to
-      keep a retired deck without it taking a row.
-- ⬜ **Are card sets a separate user-facing type?** Underneath, a collection
-      is natural (a multiset, a shelf) or binary (a set: a saved search, a
-      list), and that is one flag, `quantityKind`, on one table. Users may
-      perceive them as different things: a sidebar section for collections and
-      another for card sets, say, with different actions on each. Decide before
-      folders or tags, since it may be the first grouping the sidebar needs.
+- ⬜ **A union of two drawn sets in one pane**, for the first case where they
+      are not nested ("all red cards" against a collection holding blue). Built
+      once and reverted in `cae2f53`; see
+      [`docs/two-designs.md`](docs/two-designs.md). The merge is ready
+      ([`docs/merging-sorted-sources.md`](docs/merging-sorted-sources.md)).
+      Still missing: provenance on rows, membership across sources, and
+      invalidating on a write without re-paging.
+      [`docs/pool-model.md`](docs/pool-model.md) is the design on file for the
+      last of these.
+- ⬜ **Choosing what the grid is lit against.** Today `lit` is always the
+      active collection. Journey B, Dave's binder lit by mine, needs it to be
+      something else. The swatch's gestures (copy, switch, clear) are one
+      design for this, setting the lit set rather than a background.
 
 ### Deck builder gaps
 - ⬜ Undo / redo
@@ -946,43 +602,12 @@ set, recency as the fallback — but it is a choice, not a detail.
 
 ### Compact printing rows and the CSV path — deferred
 
-A storage-and-bandwidth optimisation, not a correctness fix. Recorded because the
-measurements were expensive to gather and the trade-offs are not obvious.
-
-**The measurements.** Scryfall serves the same query as CSV for a twentieth of
-the bytes:
-
-```
-oracleid:X&unique=prints             664 KB   (Sol Ring, 137 printings)
-oracleid:X&unique=prints&format=csv   34 KB
-```
-
-And a card object is mostly not card data — 24% image URLs, 20% affiliate and
-purchase links, 12% API self-references, against **4.7%** actual text and stats.
-We store the raw payload in `cards.data`, so ~5,800 printings is ~27 MB where
-compact rows would be ~4 MB.
-
-**And it cannot back a searchable collection.** CSV omits `oracle_text`,
-`colors`, `color_identity`, `keywords`, `power`, `toughness` and `released_at` —
-pinned by a contract test. `compileQuery` filters on most of those, so a
-CSV-backed cache identifies and displays cards but cannot search them. The 20x
-saving is not "the same data without the URLs": it is most of the card removed.
-That rules CSV out for *save a search as a collection*, where the whole point is
-a set you can then filter.
-
-**Why it was deferred.** Migration 003 undercut the bandwidth argument: a print
-run is now fetched once per card per week, so twenty-times-less of an already
-rare request buys little. And CSV cannot populate `cards` as it stands — it
-carries no `oracle_text`, `legalities`, `colors`, `color_identity` or `keywords`.
-Those are not cosmetic: `color_identity` drives the pool's identity filter and
-`legalities` drives format scoping, so a CSV-sourced row would **silently break
-filtering**. It also drops `border_color`, `frame_effects` and `finishes`, which
-is what stops Sol Ring's 30 Secret Lairs rendering as identical duplicates.
-
-**So it is one piece of work, not two.** CSV only makes sense alongside a
-separate lightweight printings table — promoting the columns we query, keeping
-`data` nullable for rows we have only indexed. Doing either alone is worse than
-doing neither.
+Store compact printing rows (~4 MB) rather than raw payloads (~27 MB), and
+fetch CSV once rows no longer need the full payload. One piece of work: either
+alone is worse than neither, and CSV alone would silently break filtering.
+Measurements and reasoning are in
+[`docs/card-fetching.md`](docs/card-fetching.md) → *Compact printing rows and
+the CSV path*.
 
 - ⬜ Promote queried fields to real columns, `data` nullable, index-only rows
 - ⬜ CSV as the fetch format once rows no longer need the full payload
@@ -995,8 +620,8 @@ doing neither.
 ### 3. Deck database
 One local library. ⬜
 - ⬜ Format grouping (Commander / Modern / Pioneer / Legacy). Favourites and
-      brewing/built/retired states moved to *Organising decks and collections*,
-      since they apply to collections too.
+      brewing/built/retired states are asset labels, under *Data model → The
+      asset tree's UI*, since they apply to collections too.
 - ⬜ Per-deck notes, tags, history, statistics, playtest notes
       (`decks.notes` column exists; no UI)
 
@@ -1012,7 +637,10 @@ Worth designing before decks accumulate history.
 
 ### 5. Statistics ⭐⭐⭐ 🚧
 The main event. What ships today (curve, colour identity) is in
-[`FEATURES.md`](FEATURES.md) → *Decks*.
+[`FEATURES.md`](FEATURES.md) → *Decks*. Much of the list below is built and
+tested in `cmdr` — the hypergeometric, joint constraints, solved gaps, and
+which constraint binds. Port rather than rewrite; see
+[`docs/cmdr.md`](docs/cmdr.md) → *Statistics, eventually*.
 - ⬜ **Show pip counts.** `deckStats()` already computes them per colour,
       hybrid counted toward both, and tests pin it, but nothing displays them.
 - ⬜ Mana: coloured/untapped source counts, land-spell ratio, MDFCs, fetch
@@ -1100,20 +728,9 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
   several collections at once. That should come back as *multi-select in the
   selection model* — once, globally — rather than as a control on one view. See
   selection-as-shared-context.
-- **Digital and paper still mix.** Arena and MTGO copies count toward a paper
-  deck, because separating them needs a notion of a deck's *game* that does not
-  exist yet.
-- **`card_tags` is unused — table *and* code — but not abandoned.** Built for the
-  query language, where `tag:ramp` was to be a predicate. The table and its index
-  exist with 0 rows, and `src/lib/cards.ts` exports four functions against it —
-  `allTags`, `addTag`, `removeTag`, `tagsFor` — with zero call sites; no
-  component imports them.
-  **Leave it.** The query language was deferred, not cancelled, and the card-set
-  algebra is that idea in a more principled form — `tag:ramp` becomes a binary
-  spec. So this is a stub ahead of a planned feature rather than debt behind a
-  dropped one. Revisit its *shape* when the algebra lands (see *Card
-  annotations*, which argues card tags want different storage from entity
-  metadata), not before.
+- ⬜ **Digital and paper still mix.** Arena and MTGO copies count toward a paper
+  deck. Falls out of the data model: a deck is designed against the locations
+  you choose to sum ([`docs/inventory.md`](docs/inventory.md) → *Decks*).
 - ⬜ **`bump()` is a manual convention with nothing enforcing it.** Every
   mutation has to remember to signal, and every consumer has to remember to
   subscribe. Both have been forgotten, three times so far:
@@ -1138,20 +755,16 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
   [`bugs/001`](bugs/001-local-grid-ignores-writes.md). Fix: send a change
   rather than a total. `adjustCollectionQuantity` already exists for the tile
   steppers.
-- **`touched` is trimmed by hand, same trap.** `forget()` is called from only two
+- ⬜ **`touched` is trimmed by hand, same trap.** `forget()` is called from only two
   places — deleting the deck or collection you are viewing — so a future delete
   path that misses it leaves a stale entry that can still be chosen as `target`,
   aiming `+` at a deleted id. Fix by deriving: filter `touched` against the live
   `decks`/`collections` arrays, which makes `forget` redundant for correctness.
-- **CSP is `null`.** Fine for local dev; tighten before shipping signed builds.
-- **Builds are unsigned and Apple Silicon only.** Gatekeeper blocks them on other
-  machines. Needs an Apple Developer ID + notarization; universal builds need
-  `rustup target add x86_64-apple-darwin`.
-- **`CI=true` required for `tauri build` from a non-interactive shell** — otherwise
-  `bundle_dmg.sh` dies on the Finder AppleScript step and leaves a volume mounted.
-- **Piles are main-zone only**, and pile columns cannot be reordered by drag
+- ⬜ **Signed, universal builds** with a tightened CSP, before handing the app
+  out. What each needs is in [`README.md`](README.md) → *Building a DMG*.
+- ⬜ **Piles are main-zone only**, and pile columns cannot be reordered by drag
   (`reorderPiles` exists in the data layer, unused).
-- **Moxfield JSON needs the Python script.** An in-app "Open file → .json" path
+- ⬜ **Moxfield JSON needs the Python script.** An in-app "Open file → .json" path
   would remove that step; the conversion logic would need porting to TypeScript.
 - ⬜ **No component tests.** Bugs that live in React wiring can only be proven by
   extracting a pure function and testing that: `bugs/001` tested
@@ -1160,6 +773,6 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
   exactly this kind of bug. Vitest is already in place; adding
   `@testing-library/react` with jsdom, and a stub for the `db.ts` layer, would
   let a test press `+` and check the grid. Start with the repros in `bugs/`.
-- **The SQL layer is mostly untested.** Only the query compiler's output runs
+- ⬜ **The SQL layer is mostly untested.** Only the query compiler's output runs
   against a real database (`npm run test:sql`). `collections.ts` and
   `decks.ts` are not covered.
