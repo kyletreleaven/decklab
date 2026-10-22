@@ -267,7 +267,9 @@ per refetch. Fine at today's sizes.
       deleted.** See *No global ownership* below.
 - ⬜ **Free-form properties on an asset** (notes and the like) that the app
       does not reason about.
-- ⬜ **Tags as named ω sets** (`tag:ramp`), then delete `card_tags` (0 rows)
+- ⬜ **Card tags as named ω sets** (`:ramp`, pinned by default — see
+      [`docs/inventory.md`](docs/inventory.md) → *Naming a set in a query*),
+      then delete `card_tags` (0 rows)
       and its four uncalled functions in `cards.ts` (`allTags`, `addTag`,
       `removeTag`, `tagsFor`). See
       [`docs/card-sources.md`](docs/card-sources.md) → *Card annotations are
@@ -368,10 +370,10 @@ The tree keeps the order you give it, and recency moves to a Recent list.
 - ⬜ **Folders.** A folder only organises: it sums nothing. Whether any asset
       can act as one, as a deck holding its decklist and builds would, is
       open in inventory.md → *Open → Folders*.
-- ⬜ **Labels** for favourite, brewing / built / retired, competitive. Each is
-      yes or no for every asset, which makes it a label rather than a
-      property. Labels as well as folders, or instead, is the same open
-      question.
+- ⬜ **Tags** for favourite, brewing / built / retired, competitive. Each is
+      yes or no for every asset, which makes it a tag rather than a
+      property. Tags as well as folders, or instead, is the same open
+      question. Journey G in [`JOURNEYS.md`](JOURNEYS.md).
 - ⬜ **Collapse and hide.** Fifty decks needs folders that fold, and a way to
       keep a retired deck without it taking a row.
 - ⬜ **Card sets are their own type**, not a kind of collection: a saved
@@ -620,7 +622,7 @@ the CSV path*.
 ### 3. Deck database
 One local library. ⬜
 - ⬜ Format grouping (Commander / Modern / Pioneer / Legacy). Favourites and
-      brewing/built/retired states are asset labels, under *Data model → The
+      brewing/built/retired states are asset tags, under *Data model → The
       asset tree's UI*, since they apply to collections too.
 - ⬜ Per-deck notes, tags, history, statistics, playtest notes
       (`decks.notes` column exists; no UI)
@@ -664,7 +666,7 @@ detail panel*.
       decks that hold it, either this printing or any printing of the card.
       Local data, so no corpus needed, unlike the item above. Also the natural
       answer for the card panel when no collection is active (see *No global
-      ownership*).
+      ownership*). Journey F in [`JOURNEYS.md`](JOURNEYS.md).
 
 ### 7. Discovery ⬜
 Needs a public decklist corpus. **This is where DuckDB earns its place.**

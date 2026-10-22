@@ -199,3 +199,29 @@ close out *No global ownership*.
 decklist, "where is each of these", grouped by place rather than by card.
 Step 3 here is the single-card version, and a good first piece of it.
 
+---
+
+## G. Tidy the library — group, tag, retire
+
+> I have forty decks and a dozen collections. I want them in an order that
+> makes sense, the ones I am not playing out of the way, and to find "my
+> brewing Commander decks" without scrolling.
+
+1. ⬜ Put decks and collections in folders I choose, and drag to reorder them.
+   A folder only organises: moving a binder into one changes nothing about
+   what it holds.
+2. ⬜ Tag assets: brewing / built / retired, favourite, competitive. Any asset
+   takes tags, not just decks.
+3. ⬜ Retire a deck without deleting it. It leaves the list but stays
+   findable, history intact.
+4. ⬜ Find assets by tag, format or folder.
+5. ⬜ Folders fold, so fifty decks still fit on a screen.
+
+**Gap:** all of it — *The asset tree's UI* in `TODO.md`. Tags as well as
+folders, or instead of them, is open in
+[`docs/inventory.md`](docs/inventory.md) → *Open*; this journey is where
+to settle it.
+
+**Not card tags.** A tag is on an *asset*. Grouping *cards* — "my ramp
+package" — is an ω set, searched as `:ramp`.
+

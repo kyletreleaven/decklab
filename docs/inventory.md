@@ -393,7 +393,7 @@ have a *(filter, interval)* shape, with more kinds of filter and quantifier:
 | 100 cards | everything, `= 100` |
 | colour identity | cards outside the commander's identity, `= 0` |
 | singleton | *every* card except basics, `≤ 1` |
-| `cmdr`'s role targets | `tag:ramp`, `≥ 10` |
+| `cmdr`'s role targets | `:ramp`, `≥ 10` |
 
 So the format registry (*Format support* in `TODO.md`) and goals share one
 shape, but not one scope. **Goal items are buckets, to start.** What a goal
@@ -645,7 +645,29 @@ position in the tree.
 | Every asset has a GUID; references go by GUID | a goal names its decklist, a move its locations, by id; renaming or moving never breaks a link |
 | Asset types, a per-type *Create* menu, search by type | `t:deck`, `t:move`, `t:filter`; *Create* offers what fits where you are |
 | The Inspector shows whatever is selected | the card panel, generalised to any asset |
-| Labels across folders | possibly, as an alternative or complement to the tree |
+| Labels across folders | tags on assets, possibly as an alternative or complement to the tree |
+
+**Naming a set in a query.** Card search extends Scryfall's syntax the way
+`cmdr` does: `:ramp` means "in the ω set named `ramp`". A typed name has to
+become a reference, and there are two kinds, marked the way Excel marks `$`:
+
+| Written | Binds | Survives rename and move | After copying the query |
+| --- | --- | --- | --- |
+| `:ramp` | when typed, to an id | yes; the text re-renders as the current name | still the same set |
+| `:&/staples/ramp` | each time it runs, by path | no; it means whatever is there | still that path |
+
+- **Pinned is the default** because most queries become saved state — live
+  pools, checklists, deck pools — and saved state should not break when a set
+  is renamed. It is also the id rule above. A `cmdr` file pasted in means the
+  same, since within one file binding early and binding late agree.
+- **Pinning happens as you type.** No set by that name is an error, or an
+  offer to create one. Two sets by that name: take the nearest or ask, then
+  render enough path to tell them apart. A pinned set later deleted shows as
+  broken, like Excel's `#REF!`, rather than matching nothing.
+- **`&` is for what pinning cannot do**: a set that does not exist yet, and
+  `cmdr`'s open definitions (`<<`), where several definitions add to one name.
+- **The search box shows a rendering**, not the source: a pinned reference is
+  stored as an id and drawn as its name.
 
 ## What falls out
 
@@ -700,6 +722,13 @@ decklist does not refer to.
 
 ## Open
 
-- **Folders:** any asset acting as one is a lean, not settled. Labels as
+- **Folders:** any asset acting as one is a lean, not settled. Tags as
   well as folders, and when?
+- **Where a bare `&` path starts:** relative to where the query lives, so a
+  template checklist's `:&ramp` finds each deck's own ramp, or at the root.
+  Until it is settled, accept only `&/rooted/paths`, which mean the same
+  either way, and reject bare `&ramp` rather than give it a meaning saved
+  queries would then depend on.
+- **Exporting a pinned reference** as text: a name loses the pin, so it may
+  need a path or an id. Or `cmdr` learns `&` too.
 - **Rendering `absent` printings and finishes:** the rule, and its scopes.
