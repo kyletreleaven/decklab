@@ -180,6 +180,12 @@ Design for both: [`docs/inventory.md`](docs/inventory.md).
    (C21 foil)*, *Bulk box: 2*, *Atraxa deck box: 1*. Any printing by default,
    since the question is "where is a Sol Ring"; narrowing to *this* printing is
    one click, for when the foil is what I want.
+
+   Counts are honest at the grain asked. Narrowed to the C21 foil, a bulk
+   box of Sol Rings with no printing recorded counts 0, not "maybe 2". That
+   count leads. Under it, a hint lists what else of the card is there, by
+   bucket, only where there is some: *also here: printing not recorded ×
+   2*. Sugar, and a nudge to sort them.
 4. ⬜ Places I track but do not hold from are listed and labelled as what they
    are — the friend's binder, the wishlist, a card on loan — rather than summed
    into one number. That number would be a claim about ownership the app does
@@ -195,9 +201,12 @@ Design for both: [`docs/inventory.md`](docs/inventory.md).
 in `TODO.md`. Local data only — no corpus, no Scryfall. Steps 4 and 7 also
 close out *No global ownership*.
 
-**Note the family.** Journey D step 2 asks the same question of a whole
-decklist, "where is each of these", grouped by place rather than by card.
-Step 3 here is the single-card version, and a good first piece of it.
+**Not just one card.** The same question works for any filter: "where are
+my foil Islands", "which binders hold anything from `:ramp`". Journey D
+step 2 is it with a decklist as the filter, grouped by place. One card is
+the simplest case and a good first piece. The model is in
+[`docs/inventory.md`](docs/inventory.md) → *Where is it: a population per
+place*.
 
 ---
 

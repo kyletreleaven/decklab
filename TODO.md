@@ -387,6 +387,22 @@ The tree keeps the order you give it, and recency moves to a Recent list.
 **Later in the campaign:** moves and plans, the active move, goals beyond
 the empty one.
 
+### Lab and the library file
+
+Try layouts and data shapes in the real app before committing to them.
+Design in [`docs/lab.md`](docs/lab.md).
+
+- ⬜ **Flags:** a *Lab* menu (built like *Tools → Agent API*), a `useFlag`
+      hook, and a `flags.ts` registry naming each flag's journey. First flag:
+      journey F's *Where it is*, read-only, on real data.
+- ⬜ **Lab mode:** a separate database, rebuilt every launch, running the
+      real migrations plus an experimental `lab/` list; **LAB** in the
+      window.
+- ⬜ **The library file:** a lossless text dump/load, property-identified,
+      card data left in the cache, possibly an extension of the DeckLab
+      language. Seeds lab mode from a scenario or a dump;
+      also backup and, with autosave, maybe the record.
+
 ### Card-set algebra — the document model ⭐⭐⭐
 
 The thing panels are views *of*: a **graph of card-set specifications**, where a

@@ -92,6 +92,33 @@ combination.
 coarser buckets do not change. This is the "promote copies from unsorted"
 item in `TODO.md`.
 
+### Where is it: a population per place
+
+A bucket is an **atomic ω set** (see *Card sets* below): the cards its
+description could be. So "where is this card" generalises from one card to
+any filter `f`, asked of every place:
+
+- **The count is containment.** A copy counts when its bucket lies wholly
+  inside `f`: `Σ residual(r) for r ⊆ f`, which is the population when `f`
+  is a bucket. Honest at the grain asked: for *C21 foil Sol Ring*, a bulk
+  box's two Sol Rings of unknown printing count 0, as the near-mint row
+  above does.
+- **The count is the result**, shown first, for the query as asked.
+- **Everything else is a hint, never added in**, and only when `f` refines
+  one card (a bucket under a single oracle). The card's copies that fell
+  outside `f`, partitioned into their residual buckets, listing only the
+  buckets that hold any: "also here: C21 × 1, printing not recorded × 2".
+  A query spanning many cards gets no hint. That covers copies known to be
+  another printing and copies that *might* match (their bucket overlaps `f`
+  without lying inside it); the second kind is also a to-do list for
+  sorting, since learning more is what settles them.
+- **The places shown** are those with a non-zero count (and, if the hint is
+  on, those with only a hint, marked as such).
+
+`f` can be one card, a pattern, a query, a pool (`:ramp`) or a decklist,
+which makes journey D's "what to pull, by place" the same question as
+journey F's "where is it".
+
 ### Two readings of `absent`
 
 In a **location**, a bucket is a *description* and `absent` reads as
@@ -175,7 +202,8 @@ Two kinds, after `cmdr`:
 - An **ω set** says only which cards are in, encoded as `{0, ∞}`.
 
 Both use the same buckets, so an ω set has a grain too: *every foil C21 Sol
-Ring* is an ω set at `{printing, finish}`.
+Ring* is an ω set at `{printing, finish}`. A single bucket is the **atomic**
+ω set, and every ω set is a union of them.
 
 A **filter** is a predicate rather than a set, but applied to All Magic it
 gives one: `Filter(AllMagic, p)` is an ω set, and intersecting any collection
@@ -474,12 +502,13 @@ a physical deck's are locations.
 
 **A deck asset** is a decklist (zone goals) and a physical deck (a location
 group whose cells are its zones), tied zone by zone: each physical zone's
-goal is the matching decklist zone, or a refinement of it. The links go by
-id in definitions, not through the tree. Either side finds its zones one of
-two ways:
+goal is the matching decklist zone, or a refinement of it. The links are
+written in definitions, not implied by the tree. Either side finds its
+zones one of two ways, which are the two kinds of reference in *Naming a
+set in a query*:
 
-- **Explicit:** it links its zones by id, wherever they sit. Renaming or
-  moving a zone never breaks the link.
+- **Explicit:** it links its zones by path, wherever they sit, and a rename
+  or move rewrites the link, so it never breaks.
 - **Conventional:** it looks among its children for zones of specific names
   (`commander`, `main`, `side`). Free to set up, and tidying the tree tidies
   the deck; a missing zone shows as an empty slot, so a rename does not drop
@@ -637,12 +666,18 @@ and whether a binder holds a card never depends on which folder it sits in.
 That holds for an asset acting as a folder too: **a definition does not refer
 to its children**, at least not automatically. A binder holding three sheets
 is not their union unless its definition says so; a deck holding a decklist
-is not thereby built from it. References go by id, as below, never by
-position in the tree.
+is not thereby built from it. References go by path, and renaming or moving
+an asset rewrites every reference to it in the same transaction, so a
+reference follows its target rather than staying with the old position.
+**No identifiers where properties or a path will do** — in the model and
+in the library file. Inside the database, asset ids are fine wherever they
+make that transaction simpler (store a reference by id, render it as the
+current path); a dump writes paths and elides the ids, and a load assigns
+fresh ones.
 
 | Unity | Here |
 | --- | --- |
-| Every asset has a GUID; references go by GUID | a goal names its decklist, a move its locations, by id; renaming or moving never breaks a link |
+| Every asset has a GUID; references go by GUID | a goal names its decklist, a move its locations, by path; renaming or moving rewrites those references in one transaction, so it never breaks a link, with no GUID needed |
 | Asset types, a per-type *Create* menu, search by type | `t:deck`, `t:move`, `t:filter`; *Create* offers what fits where you are |
 | The Inspector shows whatever is selected | the card panel, generalised to any asset |
 | Labels across folders | tags on assets, possibly as an alternative or complement to the tree |
@@ -653,12 +688,12 @@ become a reference, and there are two kinds, marked the way Excel marks `$`:
 
 | Written | Binds | Survives rename and move | After copying the query |
 | --- | --- | --- | --- |
-| `:ramp` | when typed, to an id | yes; the text re-renders as the current name | still the same set |
+| `:ramp` | when typed, to a path | yes; a rename rewrites it | still the same set |
 | `:&/staples/ramp` | each time it runs, by path | no; it means whatever is there | still that path |
 
 - **Pinned is the default** because most queries become saved state — live
   pools, checklists, deck pools — and saved state should not break when a set
-  is renamed. It is also the id rule above. A `cmdr` file pasted in means the
+  is renamed. It is also the path rule above. A `cmdr` file pasted in means the
   same, since within one file binding early and binding late agree.
 - **Pinning happens as you type.** No set by that name is an error, or an
   offer to create one. Two sets by that name: take the nearest or ask, then
@@ -666,8 +701,8 @@ become a reference, and there are two kinds, marked the way Excel marks `$`:
   broken, like Excel's `#REF!`, rather than matching nothing.
 - **`&` is for what pinning cannot do**: a set that does not exist yet, and
   `cmdr`'s open definitions (`<<`), where several definitions add to one name.
-- **The search box shows a rendering**, not the source: a pinned reference is
-  stored as an id and drawn as its name.
+- **The token says which references a rename rewrites**: `:ramp` is
+  rewritten, `:&/path` never is. Neither needs an identifier.
 
 ## What falls out
 
@@ -729,6 +764,9 @@ decklist does not refer to.
   Until it is settled, accept only `&/rooted/paths`, which mean the same
   either way, and reject bare `&ramp` rather than give it a meaning saved
   queries would then depend on.
-- **Exporting a pinned reference** as text: a name loses the pin, so it may
-  need a path or an id. Or `cmdr` learns `&` too.
+- **Finding every reference on rename:** scan every stored query, keep an
+  index of references, or store references by internal id so a rename
+  rewrites nothing. Either way it must be complete, or a rename quietly
+  breaks something. References outside the app (an exported list, a
+  note) are not rewritten, which an identifier would not fix either.
 - **Rendering `absent` printings and finishes:** the rule, and its scopes.
