@@ -164,3 +164,38 @@ what I have.
 
 Design for both: [`docs/inventory.md`](docs/inventory.md).
 
+---
+
+## F. Where is it? — finding every place a card lives
+
+> I want my Sol Ring for a new deck. I know I have a few, somewhere. Which
+> binder, which deck box, and is one of them the foil?
+
+1. ✅ Find the card from anywhere — a grid, a decklist, a search — and the card
+   panel opens on it.
+2. ✅ The panel gives counts, but only against one scope: the target collection
+   and the active deck, this printing and across all printings. It answers "how
+   many here", not "where".
+3. ⬜ The panel lists **every place that holds it**, with counts: *Binder 2: 1
+   (C21 foil)*, *Bulk box: 2*, *Atraxa deck box: 1*. Any printing by default,
+   since the question is "where is a Sol Ring"; narrowing to *this* printing is
+   one click, for when the foil is what I want.
+4. ⬜ Places I track but do not hold from are listed and labelled as what they
+   are — the friend's binder, the wishlist, a card on loan — rather than summed
+   into one number. That number would be a claim about ownership the app does
+   not make.
+5. ⬜ Decklists that name the card are a separate group: a list wanting a Sol
+   Ring is not a place a Sol Ring is.
+6. ⬜ Clicking a place opens it with the card selected, so I can take it out
+   and record the move.
+7. ⬜ It works with no collection active. Today that case falls back to summing
+   the "ownable" kinds, and this list is what should replace it.
+
+**Gap:** steps 3–7, which are *Where is this card?* under *Card intelligence*
+in `TODO.md`. Local data only — no corpus, no Scryfall. Steps 4 and 7 also
+close out *No global ownership*.
+
+**Note the family.** Journey D step 2 asks the same question of a whole
+decklist, "where is each of these", grouped by place rather than by card.
+Step 3 here is the single-card version, and a good first piece of it.
+
