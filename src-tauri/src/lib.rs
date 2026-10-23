@@ -1,4 +1,5 @@
 mod api;
+mod library;
 
 use tauri::{AppHandle, Manager};
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -139,8 +140,16 @@ pub fn run() {
                 .build(),
         )
         .manage(api::ApiBridge::default())
-        .menu(api::menu)
-        .on_menu_event(api::on_menu_event)
+        .menu(|app| {
+            let menu = api::menu(app)?;
+            library::add_to(app, &menu)?;
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if !library::on_menu_event(app, &event) {
+                api::on_menu_event(app, event);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             cache_card_image,
             read_text_file,

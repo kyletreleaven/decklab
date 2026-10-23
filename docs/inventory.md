@@ -521,6 +521,22 @@ in *The asset tree*. Today's `decks` row maps to the decklist.
 **Digital games have no physical decks.** An Arena deck consumes nothing from
 an Arena account, so it is only a decklist checked against that collection.
 
+**Piles are an arrangement**, another part of a deck asset: an ordered list
+of named groups over a decklist's entries, with *Unsorted* as what is left.
+It is how the deck is laid out on screen, not what it holds. As an asset of
+its own:
+
+- **A deck can have several**: by type while building, by role while
+  tuning, a sideboard plan. Today's auto-arrange replaces the one set of
+  piles; with arrangements it would make a new one.
+- **A pile can be defined by a query** (`:ramp`, `t:creature`) as well as
+  by hand, so an automatic arrangement stays live.
+- **It names its decklist in its definition**, like any asset, rather than
+  through where it sits in the tree.
+
+Today piles live inside the deck (`deck_piles`, `deck_cards.pile_id`), and
+the v4 library file keeps them there.
+
 ## Moves and plans
 
 A **move** is a set of edges, `source —(n copies of a bucket)→ target`. It is
@@ -770,3 +786,5 @@ decklist does not refer to.
   breaks something. References outside the app (an exported list, a
   note) are not rewritten, which an identifier would not fix either.
 - **Rendering `absent` printings and finishes:** the rule, and its scopes.
+- **Arrangements:** whether piles become their own asset (see *Decks*),
+  and whether an entry may sit in more than one pile.

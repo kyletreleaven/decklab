@@ -62,11 +62,14 @@ The rebuilt database is seeded from a library file: a hand-written
 
 A text format for a whole library, written and read by the app.
 
-- **Card lines in decklist syntax**: `1 Sol Ring (C21) 263 *F*`. Moxfield,
-  Archidekt and Arena write something close, the app already parses it, and
-  it reads well in a diff.
-- **A plain structured wrapper** for the rest: places, decks, pools, tags,
-  folders, goals.
+- **TOML, one card per line** as an inline table: the name, then
+  `attr = value` pairs. TOML does the quoting and the types, so there is no
+  line grammar to maintain, and a line still reads like a decklist entry.
+  A field at its schema default is left out, and loading puts it back.
+- **The name checks the printing.** In v4 a line names its printing by
+  set, collector number and language (only when not English); load refuses
+  a line whose name does not fit the printing it finds, which catches a
+  mistyped number in a hand-written file.
 - **Property-identified.** A card is its printing and finish, a bucket its
   attribute values (`absent` included), an asset its path. The database
   may use asset ids internally; a dump elides them and a load assigns
@@ -75,10 +78,40 @@ A text format for a whole library, written and read by the app.
   they are. Card data is fetched through `scheduledFetch`, cache-first, as
   the app already does, so a new awkward case costs one line and one
   request.
-- **Loaded through the app's own functions**, not raw SQL, so it survives
-  schema changes.
+- **Checked before written.** The SQL plugin cannot hold a transaction
+  across calls, so load validates everything — names, piles, printings,
+  duplicates — before the first insert.
 - **Lossless.** Loading a dump of a database gives back the same database:
   the property test that keeps the format honest.
+
+Schema 4's is built: `src/lib/library/` (`v4.ts` the format, `v4db.ts` the
+database side), behind *File → Export Library…* and *Import Library…*.
+Import loads only into an empty database. `npm run test:library` runs the
+round trip on a copy of the real database, row for row.
+
+```toml
+format = "decklab-library"
+schema = 4
+
+[[collection]]
+name = "Paper"
+created = 2026-03-01T14:02:11.000Z
+updated = 2026-10-20T09:15:40.000Z
+cards = [
+  { card = "Sol Ring", qty = 1, set = "c21", number = "263", finish = "foil", added = 2026-03-01T14:05:00.000Z },
+  { card = "Sol Ring", qty = 2, set = "cmr", number = "472", added = 2026-04-12T18:30:22.000Z },
+]
+
+[[deck]]
+name = "Atraxa Superfriends"
+created = 2026-02-14T20:00:00.000Z
+updated = 2026-10-01T21:12:09.000Z
+piles = ["Ramp", "Draw"]
+cards = [
+  { card = "Atraxa, Praetors' Voice", qty = 1, set = "2xm", number = "190", zone = "commander", added = 2026-02-14T20:01:00.000Z },
+  { card = "Sol Ring", qty = 1, set = "c21", number = "263", pile = "Ramp", added = 2026-02-14T20:03:00.000Z },
+]
+```
 
 **One triplet per schema: (schema, dump, load).** Today's is (v4, dump₄,
 load₄); the lab's is (lab schema, dump_lab, load_lab), developed
@@ -95,16 +128,9 @@ most of their syntax, so the conversion touches only what differs.
 A **scenario** is a library file written by hand for one journey, partial
 on purpose:
 
-```
-# Journey F — Sol Ring everywhere
-Binder 2:         1 Sol Ring (C21) 263 *F*
-Bulk box:         1 Sol Ring (CMR) 472
-                  1 Sol Ring (C19) 221
-Atraxa deck box:  1 Sol Ring (C21) 263
-Dave's binder:    2 Sol Ring (C21) 263
-```
-
-(The wrapper is undecided; this shows the content, not the syntax.)
+Binder 2 with the C21 foil, a bulk box with two more, Dave's binder with
+two: a few `[[collection]]` tables of a line or two each. For a scenario,
+timestamps are clutter; whether load may default them when absent is open.
 
 The same format is also:
 
@@ -130,10 +156,16 @@ is welcome where it costs neither.
 - **Which is the record?** With autosave, the library file could become the
   record and SQLite a cache rebuilt from it. That would change backups,
   sync and migrations; worth deciding before the format is.
-- **The wrapper syntax**: JSON, YAML or TOML, line-based, or an extension
-  of the DeckLab language.
+- **Timestamps in scenarios**: v4 requires them on every line, which a
+  dump needs and a hand-written file does not. Defaulting them on load would
+  make scenarios short at no cost to dumps.
 - **Autosave triggers and destination**: how often, which events, where the
   file lives, how many to keep.
+- **An oracle identifier on card lines**, from the lab schema on. In v4 the
+  printing (set, number, language) determines the card and the name only
+  checks it. Once a printing can be `absent`, the name is all that is left,
+  and names are not stable: Scryfall renames cards. So a line needs
+  Scryfall's oracle id, with the name kept for reading and as a check.
 - **Where properties are not enough to identify something** in the file.
   Paths cover references to assets; nothing else has needed an identifier
   yet.
