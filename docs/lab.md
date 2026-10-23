@@ -16,7 +16,8 @@ components and real data. So the lab is part of the app.
 | **Lab mode** | a throwaway database, for experiments that change the schema | yes |
 | **The library file** | a text dump/load format; lab mode is seeded from it | — |
 
-Each is useful alone, and they come in that order.
+Each is useful alone. The library file comes first, for today's schema:
+it is the backup Campaign 2 needs and the lab's first seed.
 
 ## Flags
 
@@ -78,6 +79,18 @@ A text format for a whole library, written and read by the app.
   schema changes.
 - **Lossless.** Loading a dump of a database gives back the same database:
   the property test that keeps the format honest.
+
+**One triplet per schema: (schema, dump, load).** Today's is (v4, dump₄,
+load₄); the lab's is (lab schema, dump_lab, load_lab), developed
+separately. Load is not optional even for a schema about to be replaced:
+`load(dump(db)) = db` is the test of dump, and a backup that cannot be
+restored is not one.
+
+**A migration is a text-to-text conversion** between two dumps, outside
+both triplets. It is pure and testable on a real dump, and it is where the
+lossy decisions of [`inventory.md`](inventory.md) → *Mapping today's data*
+live, said out loud rather than buried in a dump. The two formats share
+most of their syntax, so the conversion touches only what differs.
 
 A **scenario** is a library file written by hand for one journey, partial
 on purpose:

@@ -392,6 +392,10 @@ the empty one.
 Try layouts and data shapes in the real app before committing to them.
 Design in [`docs/lab.md`](docs/lab.md).
 
+- ⬜ **First: (v4, dump₄, load₄)** for today's schema, with the round-trip
+      test `load₄(dump₄(db)) = db`. A restorable backup before Campaign 2,
+      and the lab's first seed. Agree the format on real examples first: a
+      collection, a deck with zones and piles, a saved search.
 - ⬜ **Flags:** a *Lab* menu (built like *Tools → Agent API*), a `useFlag`
       hook, and a `flags.ts` registry naming each flag's journey. First flag:
       journey F's *Where it is*, read-only, on real data.
