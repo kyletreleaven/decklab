@@ -410,6 +410,12 @@ Design in [`docs/lab.md`](docs/lab.md).
       cards out of `decklab.db`. Then a lab session starts empty and loads its
       seed, with no copy of the real database. Design in
       [`docs/card-fetching.md`](docs/card-fetching.md) → *The card store*.
+- ⬜ **The `decklab` CLI:** the app's TypeScript compiled into a standalone
+      executable (Bun first), read-only. `dump` first; `convert` once the
+      lab schema differs. Design in [`docs/cli.md`](docs/cli.md).
+- ⬜ **Lab loads a file at launch:** `DECKLAB_LAB_SEED=path`, loaded into the
+      empty `lab.db` before the UI starts. Design in
+      [`docs/lab.md`](docs/lab.md) → *Lab mode*.
 - ⬜ **Card-level table, after the card store:** one row per oracle id for
       text, stats, colours and legalities, instead of repeating them on every
       printing. A `cards` view over the two keeps reads unchanged. Check

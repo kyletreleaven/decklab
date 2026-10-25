@@ -63,8 +63,16 @@ migrations go in `lab::migrations()` (`src-tauri/src/lab.rs`), numbered from
 needs a copy of `decklab.db`.
 
 To work on real data: *File → Export Library…* in the app, then *File →
-Import Library…* in the lab. Loading a library at launch — a hand-written
-*scenario*, or a dump — is next.
+Import Library…* in the lab.
+
+**Loading at launch** (designed, not built):
+`DECKLAB_LAB_SEED=path/to/file.toml npm run lab`. Rust reads the variable and
+hands the file's text to the webview, which loads it into the new, empty
+`lab.db` with the library file's load, before the UI starts. The file is a
+hand-written *scenario* or a dump, converted to the lab's format by
+`decklab convert` ([`cli.md`](cli.md)) once that differs from v4. A file that
+fails to load shows the error and leaves the lab empty. Nothing else ever
+writes to `lab.db` while the lab runs.
 
 ## The library file
 
