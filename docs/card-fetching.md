@@ -38,7 +38,7 @@ written, and the disk-first branch exists.
 becomes necessary alongside the CSV path, which is deferred; see `TODO.md` →
 *Compact printing rows and the CSV path*.
 
-## The card store — designed, not built
+## The card store
 
 Scryfall's data and the user's data live in **separate files**. Card data is
 not the user's, its schema is stable, and it can always be fetched again; the
@@ -107,10 +107,28 @@ need to agree, whatever the journal mode. Foreign keys do not reach across
 files, so a user row can point at a card the store has lost; the answer is
 to fetch it again, not to fail.
 
-**Starting the store** from an existing `decklab.db`: copy `cards` and
-`oracle_fetches` across once, when the store is empty, reading `decklab.db`
-only. Copy rows, not the file: `VACUUM INTO` would carry `decklab.db`'s
-migration records into a database with a different migration list.
+**Starting the store** from an existing `decklab.db`, once, when there is no
+`card-cache.db`: `VACUUM INTO` a staging file (reading `decklab.db` only),
+drop the user's tables *and its migration records* from the copy, then move
+it into place. Without the records gone, the store's own migration list
+would meet `decklab.db`'s versions 1–4 and refuse to run. The staging file is
+opened under a name with no migrations registered, so nothing runs on it
+early. On the real database (37,691 printings, 290 MB) the copy takes about
+half a second; the store migration then only adds `default_printings`.
+
+**Built:** `src-tauri/src/card_store.rs` (the migration list, staging, the
+move into place), `migrations/cache/001_store.sql`, `cardStore()` in `db.ts`,
+the queries in `store.ts` (tested on SQLite in `store.test.ts`), and the
+stand-in in `scryfall.ts`. Left as they were:
+
+- `decklab.db` keeps its own `oracle_fetches`, now unread. Dropping it is a
+  real migration, for when the schema next changes anyway.
+- Loading a library still refuses a non-English printing missing from the
+  working copy: `/cards/collection` cannot ask for a language. The store can
+  answer by language; `v4db.ts` does not ask it yet.
+- Most of a long-lived cache is past the TTL on the first day (2,607 of
+  37,691 rows were fresh), so a first lab import refetches most printings,
+  75 to a request. After that, a week of hits.
 
 **Images are already split this way**: `cache_card_image` keeps them in an
 `images/` folder beside the databases, named by printing id.
