@@ -56,15 +56,15 @@ The app opens a separate database, marked **LAB** in the window, and
   the same flags.
 
 **Built:** `npm run lab` (`DECKLAB_LAB=1`). Each launch deletes the last
-`lab.db` and copies `decklab.db` into it with `VACUUM INTO`, which only reads
-the real file; the window title says **LAB**. Experimental migrations go in
-`lab::migrations()` (`src-tauri/src/lab.rs`), numbered from 1000.
+`lab.db` and starts it empty; the window title says **LAB**. Experimental
+migrations go in `lab::migrations()` (`src-tauri/src/lab.rs`), numbered from
+1000. Card data comes from the card store, which every mode shares
+([`card-fetching.md`](card-fetching.md) → *The card store*), so the lab never
+needs a copy of `decklab.db`.
 
-Today the seed is that copy: realistic at once, and it brings the card
-cache, so nothing is fetched. Once the card cache is its own file, shared by
-every mode ([`card-fetching.md`](card-fetching.md) → *The card store*), lab
-mode starts from an empty database instead and loads a library file — a
-hand-written *scenario*, or a dump — without fetching it all again.
+To work on real data: *File → Export Library…* in the app, then *File →
+Import Library…* in the lab. Loading a library at launch — a hand-written
+*scenario*, or a dump — is next.
 
 ## The library file
 
