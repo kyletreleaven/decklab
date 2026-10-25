@@ -68,7 +68,13 @@ channel across processes*:
 - ✅ one channel across every process (A), with a shared, persistent pause
   and a pace that learns from a 429 (`channel.ts`, `channel.test.ts`; the
   scheduler's side in `scheduler.test.ts` → *a shared channel*). Fixes (3).
-- identity lookups answered from the store at any age;
-- image downloads through the channel, and no remote image URLs in the
-  webview;
+- ✅ every 429 recorded with the pace and the actual gap at the time
+  (`rate_limits`, `migrations/cache/003`).
+- ✅ image downloads through the channel (`scheduledCall` in `images.ts`;
+  Rust's `download_card_image` makes one request and reports its status), and
+  no remote image URL ever reaches the webview. A pasted Scryfall link in URL
+  import is refused. `channel-only.test.ts` reads the source and fails on any
+  new way out to Scryfall.
+- identity data refreshed on a long limit of its own, prices and print-run
+  completeness on the 7-day one;
 - the request count of each change measured on real data.

@@ -3,6 +3,8 @@ mod card_store;
 mod lab;
 mod library;
 
+use std::path::PathBuf;
+
 use tauri::{AppHandle, Manager};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -10,14 +12,12 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 /// See https://scryfall.com/docs/api
 const USER_AGENT: &str = concat!("DeckLab/", env!("CARGO_PKG_VERSION"), " (desktop)");
 
-/// Download a card image into the app data directory and return its absolute path.
+/// Where a card image lives in the app data directory, creating the folder.
 ///
 /// Images are content-addressed by `key` (typically the Scryfall printing id plus a
-/// face suffix), so a second call for the same card is a cheap existence check.
-/// Downloading here rather than in the webview keeps the bytes off the JS bridge
-/// and gives us a real file on disk for offline use.
-#[tauri::command]
-async fn cache_card_image(app: AppHandle, key: String, url: String) -> Result<String, String> {
+/// face suffix). Downloading in Rust rather than in the webview keeps the bytes off
+/// the JS bridge and gives us a real file on disk for offline use.
+async fn image_path(app: &AppHandle, key: &str) -> Result<(PathBuf, PathBuf), String> {
     let dir = app
         .path()
         .app_data_dir()
@@ -45,10 +45,41 @@ async fn cache_card_image(app: AppHandle, key: String, url: String) -> Result<St
         return Err("empty image key".into());
     }
 
-    let path = dir.join(format!("{safe}.jpg"));
-    if tokio::fs::try_exists(&path).await.unwrap_or(false) {
-        return Ok(path.to_string_lossy().into_owned());
-    }
+    Ok((dir.join(format!("{safe}.jpg")), dir.join(format!("{safe}.part"))))
+}
+
+/// The cached image's absolute path, if it is on disk. Never touches the network.
+#[tauri::command]
+async fn cached_card_image(app: AppHandle, key: String) -> Result<Option<String>, String> {
+    let (path, _) = image_path(&app, &key).await?;
+    Ok(tokio::fs::try_exists(&path)
+        .await
+        .unwrap_or(false)
+        .then(|| path.to_string_lossy().into_owned()))
+}
+
+/// What one image download came back with: the status, so a 429 reaches the
+/// channel, and the path once the image is on disk.
+#[derive(serde::Serialize)]
+struct ImageDownload {
+    status: u16,
+    retry_after: Option<String>,
+    path: Option<String>,
+}
+
+/// Download one card image: exactly one request to Scryfall's image servers.
+///
+/// Only ever called through the channel to Scryfall (`scheduledCall` in
+/// `src/lib/images.ts`), which decides when it may run. A response that is not
+/// a success is returned, not raised, so the caller sees a 429 and its
+/// `Retry-After`.
+#[tauri::command]
+async fn download_card_image(
+    app: AppHandle,
+    key: String,
+    url: String,
+) -> Result<ImageDownload, String> {
+    let (path, tmp) = image_path(&app, &key).await?;
 
     let response = reqwest::Client::new()
         .get(&url)
@@ -57,8 +88,19 @@ async fn cache_card_image(app: AppHandle, key: String, url: String) -> Result<St
         .await
         .map_err(|e| format!("image request failed: {e}"))?;
 
-    if !response.status().is_success() {
-        return Err(format!("image request returned {}", response.status()));
+    let status = response.status();
+    let retry_after = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+
+    if !status.is_success() {
+        return Ok(ImageDownload {
+            status: status.as_u16(),
+            retry_after,
+            path: None,
+        });
     }
 
     let bytes = response
@@ -68,7 +110,6 @@ async fn cache_card_image(app: AppHandle, key: String, url: String) -> Result<St
 
     // Write to a temporary file first so an interrupted download never leaves a
     // truncated image that later calls would treat as cached.
-    let tmp = dir.join(format!("{safe}.part"));
     tokio::fs::write(&tmp, &bytes)
         .await
         .map_err(|e| format!("could not write image: {e}"))?;
@@ -76,7 +117,11 @@ async fn cache_card_image(app: AppHandle, key: String, url: String) -> Result<St
         .await
         .map_err(|e| format!("could not finalise image: {e}"))?;
 
-    Ok(path.to_string_lossy().into_owned())
+    Ok(ImageDownload {
+        status: status.as_u16(),
+        retry_after,
+        path: Some(path.to_string_lossy().into_owned()),
+    })
 }
 
 /// Read a user-chosen text file.
@@ -164,7 +209,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            cache_card_image,
+            cached_card_image,
+            download_card_image,
             read_text_file,
             write_text_file,
             lab::prepare_lab_db,

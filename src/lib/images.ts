@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { scheduledCall } from "./scheduler";
 import type { Card } from "./types";
 
 /**
@@ -6,26 +7,62 @@ import type { Card } from "./types";
  * served back through Tauri's asset protocol. Keeping the download in Rust
  * means image bytes never cross the JS bridge, and the files survive restarts
  * so a cached card renders offline.
+ *
+ * Every download goes through the channel to Scryfall (`scheduledCall`), like
+ * every API request: one pace, one pause, shared by every DeckLab process. The
+ * webview is never handed a remote image URL, so it cannot fetch one itself;
+ * until the local copy exists, there is no image.
  */
 
-/** Remote URL -> local asset URL, so a failed cache attempt can fall back. */
+/** Image key -> local asset URL. */
 const resolved = new Map<string, string>();
 const inflight = new Map<string, Promise<string | null>>();
+/** Keys whose download failed this session: not asked for again until restart. */
+const failed = new Set<string>();
+
+interface ImageDownload {
+  status: number;
+  retry_after: string | null;
+  path: string | null;
+}
 
 async function cacheOne(key: string, url: string): Promise<string | null> {
   const existing = resolved.get(key);
   if (existing) return existing;
+  if (failed.has(key)) return null;
 
   const pending = inflight.get(key);
   if (pending) return pending;
 
-  const task = invoke<string>("cache_card_image", { key, url })
+  const task = (async () => {
+    // On disk already: no request at all.
+    const local = await invoke<string | null>("cached_card_image", { key });
+    if (local) return local;
+
+    const { value } = await scheduledCall(
+      url,
+      async () => {
+        const download = await invoke<ImageDownload>("download_card_image", { key, url });
+        return { status: download.status, retryAfter: download.retry_after, value: download.path };
+      },
+      // Behind anything the user is waiting on: a search, a printings lookup.
+      { lane: "background" },
+    );
+    return value;
+  })()
     .then((path) => {
+      if (!path) {
+        failed.add(key);
+        return null;
+      }
       const asset = convertFileSrc(path);
       resolved.set(key, asset);
       return asset;
     })
-    .catch(() => null)
+    .catch(() => {
+      failed.add(key);
+      return null;
+    })
     .finally(() => {
       inflight.delete(key);
     });
@@ -72,18 +109,16 @@ function remoteUrl(card: Card, size: ImageSize, face: Face): string | null {
 }
 
 /**
- * Resolve a displayable image URL for a card, preferring the local cache.
- * Returns the remote URL immediately if the card has not been cached yet, so
- * the grid never blocks on downloads.
+ * The local image for a card, once it is on disk; null until then. Never a
+ * remote URL: that would let the webview fetch from Scryfall outside the
+ * channel.
  */
 export function imageUrl(
   card: Card,
   size: ImageSize = "small",
   face: Face = "front",
 ): string | null {
-  const remote = remoteUrl(card, size, face);
-  if (!remote) return null;
-  return resolved.get(cacheKey(card, size, face)) ?? remote;
+  return resolved.get(cacheKey(card, size, face)) ?? null;
 }
 
 // The back is a different image under the same card id, so it needs its own

@@ -289,25 +289,59 @@ export function scheduledFetch(fetchImpl: FetchLike) {
     url: string,
     init?: RequestInit,
     options: { lane?: Lane; key?: string } = {},
-  ): Promise<Response> =>
-    schedule(async () => {
-      const response = await fetchImpl(url, init);
+  ): Promise<Response> => {
+    const { value } = await scheduledCall(
+      url,
+      async () => {
+        const response = await fetchImpl(url, init);
+        return {
+          status: response.status,
+          retryAfter: response.headers.get("Retry-After"),
+          value: response,
+        };
+      },
+      options,
+    );
+    return value;
+  };
+}
 
-      if (response.status === 429) {
-        const retryAfter = response.headers.get("Retry-After");
-        const until = resumeAt(retryAfter);
-        pausedUntil = Math.max(pausedUntil, until);
-        console.error(
-          `Scryfall rate-limited us (429): paused until ${new Date(until).toISOString()}, pace halved. ` +
-            "This is a bug: see bugs/005.",
-        );
-        await channel.rateLimited(until, {
-          endpoint: endpointOf(url),
-          lane: options.lane ?? "interactive",
-          retryAfter,
-        });
-      }
+/** What a request made by some other client came back with. */
+export interface Outcome<T> {
+  status: number;
+  retryAfter: string | null;
+  value: T;
+}
 
-      return response;
-    }, options);
+/**
+ * A request to Scryfall made by a client other than `fetch` — Rust's, which
+ * downloads card images so their bytes never cross the JS bridge — on the
+ * same channel: it waits for a slot and the pause, and a 429 it reports
+ * pauses and slows everything, exactly as one from `scheduledFetch` does.
+ * `run` must make exactly one request, to `url`.
+ */
+export function scheduledCall<T>(
+  url: string,
+  run: () => Promise<Outcome<T>>,
+  options: { lane?: Lane; key?: string } = {},
+): Promise<Outcome<T>> {
+  return schedule(async () => {
+    const outcome = await run();
+
+    if (outcome.status === 429) {
+      const until = resumeAt(outcome.retryAfter);
+      pausedUntil = Math.max(pausedUntil, until);
+      console.error(
+        `Scryfall rate-limited us (429): paused until ${new Date(until).toISOString()}, pace halved. ` +
+          "This is a bug: see bugs/005.",
+      );
+      await channel.rateLimited(until, {
+        endpoint: endpointOf(url),
+        lane: options.lane ?? "interactive",
+        retryAfter: outcome.retryAfter,
+      });
+    }
+
+    return outcome;
+  }, options);
 }

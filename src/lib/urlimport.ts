@@ -98,7 +98,20 @@ const BLOCKED: { pattern: RegExp; name: string }[] = [
   { pattern: /(^|\.)moxfield\.com$/i, name: "Moxfield" },
 ];
 
+/**
+ * Scryfall's hosts. Everything sent to them goes through the channel
+ * (`scheduler.ts`); this generic fetch does not, so it refuses them.
+ */
+export const SCRYFALL_HOST = /(^|\.)scryfall\.(com|io)$/i;
+
 async function importGeneric(url: URL): Promise<UrlImportResult> {
+  if (SCRYFALL_HOST.test(url.hostname)) {
+    throw new UrlImportError(
+      "DeckLab only talks to Scryfall through its own rate-limited channel, so it does not fetch Scryfall links here.",
+      "Copy the list from Scryfall as text and paste it on the Paste tab.",
+    );
+  }
+
   const blocked = BLOCKED.find((b) => b.pattern.test(url.hostname));
   if (blocked) {
     throw new UrlImportError(

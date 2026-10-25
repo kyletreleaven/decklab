@@ -3,9 +3,9 @@ import { ensureCached, imageUrl, type Face, type ImageSize } from "../lib/images
 import type { Card } from "../lib/types";
 
 /**
- * Shows the remote image immediately, then swaps to the locally cached copy
- * once Rust has it on disk. The swap is invisible (same bytes) but means the
- * next render — and the next launch, offline — comes from the local file.
+ * Shows the locally cached image, and the card's name until it is on disk.
+ * Never the remote image: the download goes through the channel to Scryfall
+ * (`ensureCached`), and the webview never fetches from Scryfall itself.
  */
 export function CardImage({
   card,
