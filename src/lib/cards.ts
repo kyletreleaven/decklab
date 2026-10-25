@@ -1,5 +1,12 @@
 import { CardRow, execute, rowToCard, select } from "./db";
+import type { Sql } from "./sql";
 import type { Card } from "./types";
+
+/** A card and when the store last had it from Scryfall. */
+export interface Stamped {
+  card: Card;
+  cachedAt: string;
+}
 
 /** Column order shared by the upsert and its placeholder generator. */
 const COLUMNS = [
@@ -69,36 +76,40 @@ function cardValues(card: Card, cachedAt: string): unknown[] {
 }
 
 /**
- * Write cards into the local cache. This is the mechanism that builds the
- * offline catalogue: anything the user has seen, they can later search without
- * a network round trip.
+ * Write cards into a `cards` table: the store's, or the user database's
+ * working copy. Both have the same schema.
  *
  * Rows are batched into multi-row INSERTs because each `execute` is an IPC hop,
  * and a Scryfall page can carry 175 cards.
  */
-export async function cacheCards(cards: Card[]): Promise<void> {
-  if (!cards.length) return;
-
-  const cachedAt = new Date().toISOString();
+export async function writeCards(sql: Sql, rows: Stamped[]): Promise<void> {
   const perRow = COLUMNS.length;
   // SQLite's default variable ceiling is 999; stay well under it.
   const batchSize = Math.floor(900 / perRow);
 
-  for (let i = 0; i < cards.length; i += batchSize) {
-    const batch = cards.slice(i, i + batchSize);
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
     const params: unknown[] = [];
-    const tuples = batch.map((card, row) => {
+    const tuples = batch.map(({ card, cachedAt }, row) => {
       params.push(...cardValues(card, cachedAt));
       const base = row * perRow;
       const holes = Array.from({ length: perRow }, (_, j) => `$${base + j + 1}`);
       return `(${holes.join(", ")})`;
     });
 
-    await execute(
+    await sql.execute(
       `INSERT OR REPLACE INTO cards (${COLUMNS.join(", ")}) VALUES ${tuples.join(", ")}`,
       params,
     );
   }
+}
+
+/**
+ * Copy cards into the user database's working copy, stamps and all. Anything
+ * the app shows passes through here, so user rows can always refer to it.
+ */
+export async function cacheCards(rows: Stamped[]): Promise<void> {
+  await writeCards({ select, execute }, rows);
 }
 
 export async function getCard(id: string): Promise<Card | null> {
@@ -114,42 +125,6 @@ export async function getCards(ids: string[]): Promise<Card[]> {
     ids,
   );
   return rows.map(rowToCard);
-}
-
-/** Cached printings of the same card, newest first. */
-export async function cachedPrintings(oracleId: string): Promise<Card[]> {
-  const rows = await select<CardRow>(
-    "SELECT * FROM cards WHERE oracle_id = $1 ORDER BY released_at DESC",
-    [oracleId],
-  );
-  return rows.map(rowToCard);
-}
-
-/**
- * When a card's *complete* print run was last fetched, or null if never.
- *
- * `cards` holds every printing we have seen, but not the knowledge that we have
- * seen them all — so without this we cannot tell "three printings because that
- * is all there are" from "three because that is all we happened to meet".
- */
-export async function printingsFetchedAt(oracleId: string): Promise<number | null> {
-  const rows = await select<{ printings_fetched_at: string }>(
-    "SELECT printings_fetched_at FROM oracle_fetches WHERE oracle_id = $1",
-    [oracleId],
-  );
-  if (!rows.length) return null;
-
-  const at = Date.parse(rows[0].printings_fetched_at);
-  return Number.isFinite(at) ? at : null;
-}
-
-export async function markPrintingsFetched(oracleId: string): Promise<void> {
-  await execute(
-    `INSERT INTO oracle_fetches (oracle_id, printings_fetched_at)
-     VALUES ($1, $2)
-     ON CONFLICT (oracle_id) DO UPDATE SET printings_fetched_at = excluded.printings_fetched_at`,
-    [oracleId, new Date().toISOString()],
-  );
 }
 
 export async function cacheSize(): Promise<number> {

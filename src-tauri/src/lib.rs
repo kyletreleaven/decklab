@@ -1,4 +1,5 @@
 mod api;
+mod card_store;
 mod lab;
 mod library;
 
@@ -142,6 +143,7 @@ pub fn run() {
                     "sqlite:lab.db",
                     migrations().into_iter().chain(lab::migrations()).collect(),
                 )
+                .add_migrations("sqlite:card-cache.db", card_store::migrations())
                 .build(),
         )
         .setup(|app| {
@@ -166,6 +168,8 @@ pub fn run() {
             read_text_file,
             write_text_file,
             lab::prepare_lab_db,
+            card_store::prepare_card_store,
+            card_store::finish_card_store,
             api::api_token,
             api::api_reply
         ])

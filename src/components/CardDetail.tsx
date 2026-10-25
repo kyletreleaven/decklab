@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { collectionCountsByPrinting } from "../lib/collections";
-import { cachedPrintings } from "../lib/cards";
 import { printingLabel, scryfallPages, variantTraits } from "../lib/printings";
 import { isSuperseded } from "../lib/scheduler";
 import * as scryfall from "../lib/scryfall";
@@ -137,7 +136,7 @@ export function CardDetail({
     setPrintings(card ? [card] : []);
     setPrintingsError(null);
 
-    cachedPrintings(oracleId).then((rows) => {
+    scryfall.storedPrintings(oracleId).then((rows) => {
       if (active && !networkWon && rows.length) setPrintings(rows);
     });
 

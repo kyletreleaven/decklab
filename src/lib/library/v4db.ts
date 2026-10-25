@@ -1,4 +1,5 @@
 import { resolveIdentifiers, type Identifier } from "../scryfall";
+import type { Sql } from "../sql";
 import type { Card } from "../types";
 import {
   LibraryFormatError,
@@ -17,10 +18,7 @@ import {
  * Takes its SQL as a parameter rather than importing `db.ts`, so the round trip
  * can be tested against a real SQLite file outside the app.
  */
-export interface Sql {
-  select<T>(sql: string, params?: unknown[]): Promise<T[]>;
-  execute(sql: string, params?: unknown[]): Promise<void>;
-}
+export type { Sql };
 
 const ZONES: readonly string[] = ["commander", "main", "side", "maybe"];
 

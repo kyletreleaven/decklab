@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { dumpV4, loadV4 } from "./v4";
-import { readV4, writeV4, type Sql } from "./v4db";
+import { sqlOver } from "../testing/sqlOver";
+import { readV4, writeV4 } from "./v4db";
 
 /**
  * The library round trip against the real database:
@@ -21,32 +22,6 @@ const DB = join(homedir(), "Library/Application Support/dev.treleaven.decklab/de
 const MIGRATIONS = join(__dirname, "../../../src-tauri/migrations");
 
 const ENABLED = !!process.env.LIBRARY_DB && existsSync(DB);
-
-/**
- * `$1`-style parameters, as the SQL plugin takes them, over `node:sqlite`,
- * which binds only anonymous `?` positionally: each `$n` becomes `?`, and the
- * parameters are laid out in the order the holes appear.
- */
-function sqlOver(db: DatabaseSync): Sql {
-  const bind = (sql: string, params: unknown[]) => {
-    const order: number[] = [];
-    const text = sql.replace(/\$(\d+)/g, (_, n: string) => {
-      order.push(Number(n) - 1);
-      return "?";
-    });
-    return { stmt: db.prepare(text), args: order.map((i) => params[i]) as never[] };
-  };
-  return {
-    async select<T>(sql: string, params: unknown[] = []) {
-      const { stmt, args } = bind(sql, params);
-      return stmt.all(...args) as T[];
-    },
-    async execute(sql: string, params: unknown[] = []) {
-      const { stmt, args } = bind(sql, params);
-      stmt.run(...args);
-    },
-  };
-}
 
 /** Every user row, with ids replaced by the names they stand for. */
 function userRows(db: DatabaseSync) {
@@ -89,7 +64,7 @@ describe.skipIf(!ENABLED)("library round trip on the real database", () => {
     const real = new DatabaseSync(copyPath);
 
     const fresh = new DatabaseSync(join(dir, "fresh.db"));
-    for (const file of readdirSync(MIGRATIONS).sort()) {
+    for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
       fresh.exec(readFileSync(join(MIGRATIONS, file), "utf8"));
     }
 

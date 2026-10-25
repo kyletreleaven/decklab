@@ -1,13 +1,22 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import type { Card } from "./types";
 import { canonicalColors } from "./types";
-import {
-  cachedPrintings,
-  cacheCards,
-  markPrintingsFetched,
-  printingsFetchedAt,
-} from "./cards";
+import { cacheCards, type Stamped } from "./cards";
+import { cardStore } from "./db";
 import { scheduledFetch, type Lane } from "./scheduler";
+import {
+  completePrintings,
+  freshById,
+  freshBySetNumber,
+  freshDefaults,
+  markPrintingsFetched,
+  nameKey,
+  recordDefaults,
+  setNumberKey,
+  storeCards,
+  storedPrintings as storedRun,
+  TTL_MS,
+} from "./store";
 
 /** Tauri's HTTP plugin, on the shared queue. */
 const request_ = scheduledFetch(fetch);
@@ -63,6 +72,35 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
   }
 
   return body as T;
+}
+
+/*
+ * The stand-in. Every function below asks the card store before Scryfall,
+ * and keeps what Scryfall sends: into the store first, then the user
+ * database's working copy, so a user row never refers to a card the store
+ * has not got. A store hit is copied into the working copy too. Hits are
+ * answered at once; only misses reach `request()` and the queue. See
+ * docs/card-fetching.md → *The card store*.
+ */
+
+/**
+ * Keep Scryfall's answer. `asCards` marks a reply that gave each card
+ * without naming a printing (a name lookup, a `unique=cards` search), so
+ * the printing it chose is recorded as that card's default.
+ */
+async function keep(cards: Card[], asCards = false): Promise<void> {
+  if (!cards.length) return;
+  const at = new Date().toISOString();
+  const store = await cardStore();
+  const rows = await storeCards(store, cards, at);
+  if (asCards) await recordDefaults(store, cards, at);
+  await cacheCards(rows);
+}
+
+/** Answer from the store. */
+async function serve(rows: Stamped[]): Promise<Card[]> {
+  await cacheCards(rows);
+  return rows.map((row) => row.card);
 }
 
 /** Raw Scryfall card JSON. Only the fields we denormalise are typed. */
@@ -170,8 +208,9 @@ interface ScryfallList {
 }
 
 /**
- * Full Scryfall search. Every card that comes back is written into the local
- * cache, which is what incrementally builds up the offline catalogue.
+ * Full Scryfall search, always from Scryfall: results move, and paging and
+ * sorting are Scryfall's. Every card that comes back is kept, and since the
+ * search asks for one printing per card, that printing becomes its default.
  */
 export async function search(
   query: string,
@@ -202,7 +241,7 @@ export async function search(
   }
 
   const cards = list.data.map(normalize);
-  await cacheCards(cards);
+  await keep(cards, true);
 
   return {
     cards,
@@ -222,12 +261,17 @@ export async function autocomplete(partial: string): Promise<string[]> {
   return body.data ?? [];
 }
 
+/** An exact name can be answered by its default printing; a fuzzy one cannot. */
 export async function named(name: string, exact = true): Promise<Card> {
+  if (exact) {
+    const hit = (await freshDefaults(await cardStore(), [name], Date.now())).get(nameKey(name));
+    if (hit) return (await serve([hit]))[0];
+  }
   const params = new URLSearchParams(exact ? { exact: name } : { fuzzy: name });
   const card = normalize(
     await request<ScryfallCard>(`/cards/named?${params}`, { key: "named" }),
   );
-  await cacheCards([card]);
+  await keep([card], true);
   return card;
 }
 
@@ -237,13 +281,13 @@ export async function named(name: string, exact = true): Promise<Card> {
  * levels:
  *
  *   1. an in-memory memo, which saves even the database round trip in-session
- *   2. `oracle_fetches` on disk, which survives restarts
+ *   2. `oracle_fetches` in the card store, which survives restarts
  *
  * The second matters because the printings themselves were always persisted;
  * what was not was the knowledge that we had them *all*, so every restart
  * refetched print runs it already held.
  */
-const PRINTINGS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PRINTINGS_TTL_MS = TTL_MS;
 const printingsMemo = new Map<string, { at: number; cards: Card[] }>();
 const printingsInflight = new Map<string, Promise<Card[]>>();
 
@@ -257,20 +301,26 @@ async function fetchPrintings(oracleId: string): Promise<Card[]> {
     key: "printings",
   });
   const cards = list.data.map(normalize);
-  await cacheCards(cards);
+  await keep(cards);
   // Stamp only after a successful write, so a failure part-way leaves the run
   // marked incomplete and it gets refetched.
-  await markPrintingsFetched(oracleId);
+  await markPrintingsFetched(await cardStore(), oracleId, new Date().toISOString());
   return cards;
 }
 
-/** Serve a complete print run from disk when the stamp is still fresh. */
+/** Serve a complete print run from the store when the stamp is still fresh. */
 async function printingsFromDisk(oracleId: string): Promise<Card[] | null> {
-  const fetchedAt = await printingsFetchedAt(oracleId);
-  if (fetchedAt === null || Date.now() - fetchedAt >= PRINTINGS_TTL_MS) return null;
+  const rows = await completePrintings(await cardStore(), oracleId, Date.now());
+  return rows && serve(rows);
+}
 
-  const rows = await cachedPrintings(oracleId);
-  return rows.length ? rows : null;
+/**
+ * Whatever printings of a card the store holds, however old, newest first:
+ * something to show while `printings` makes sure of the whole run.
+ */
+export async function storedPrintings(oracleId: string): Promise<Card[]> {
+  const rows = await storedRun(await cardStore(), oracleId);
+  return rows.map((row) => row.card);
 }
 
 /** Every printing of a card, used by the printings carousel. */
@@ -316,32 +366,73 @@ export interface IdentifierResult {
  * Batch-resolve arbitrary identifiers. Used by import, where a line may pin an
  * exact printing (Archidekt gives us Scryfall ids outright, Arena gives set +
  * collector number) or may only know a name.
+ *
+ * The store answers what it can; the rest goes to Scryfall in chunks, exact
+ * printings and bare names apart, since only a name's answer is the card's
+ * default. Store hits come first in `found`, so it is not in request order.
  */
 export async function resolveIdentifiers(
   identifiers: Identifier[],
 ): Promise<IdentifierResult> {
-  const found: Card[] = [];
-  const notFound: Identifier[] = [];
+  const store = await cardStore();
+  const now = Date.now();
 
-  for (let i = 0; i < identifiers.length; i += 75) {
-    const chunk = identifiers.slice(i, i + 75);
-    const body = await request<{
-      data: ScryfallCard[];
-      not_found: Identifier[];
-    }>("/cards/collection", {
-      method: "POST",
-      body: JSON.stringify({ identifiers: chunk }),
-      // Background lane: every chunk carries distinct cards, so these must
-      // queue rather than evict one another, and they should yield to whatever
-      // the user is doing.
-      lane: "background",
-    });
+  const hits: Stamped[] = [];
+  const byId = await freshById(store, identifiers.flatMap((i) => ("id" in i ? [i.id] : [])), now);
+  hits.push(...byId);
+  const ids = new Set(byId.map((row) => row.card.id));
 
-    found.push(...(body.data ?? []).map(normalize));
-    notFound.push(...(body.not_found ?? []));
+  const bySet = await freshBySetNumber(
+    store,
+    identifiers.flatMap((i) => ("set" in i ? [setNumberKey(i.set, i.collector_number)] : [])),
+    now,
+  );
+  hits.push(...bySet);
+  const setKeys = new Set(bySet.map((row) => setNumberKey(row.card.setCode, row.card.collectorNumber)));
+
+  const defaults = await freshDefaults(
+    store,
+    identifiers.flatMap((i) => ("name" in i ? [i.name] : [])),
+    now,
+  );
+  hits.push(...defaults.values());
+
+  const exact: Identifier[] = [];
+  const names: Identifier[] = [];
+  for (const i of identifiers) {
+    if ("id" in i) {
+      if (!ids.has(i.id)) exact.push(i);
+    } else if ("set" in i) {
+      if (!setKeys.has(setNumberKey(i.set, i.collector_number))) exact.push(i);
+    } else if (!defaults.has(nameKey(i.name))) {
+      names.push(i);
+    }
   }
 
-  await cacheCards(found);
+  const found = await serve(hits);
+  const notFound: Identifier[] = [];
+  for (const [misses, asCards] of [[exact, false], [names, true]] as const) {
+    for (let i = 0; i < misses.length; i += 75) {
+      const chunk = misses.slice(i, i + 75);
+      const body = await request<{
+        data: ScryfallCard[];
+        not_found: Identifier[];
+      }>("/cards/collection", {
+        method: "POST",
+        body: JSON.stringify({ identifiers: chunk }),
+        // Background lane: every chunk carries distinct cards, so these must
+        // queue rather than evict one another, and they should yield to
+        // whatever the user is doing.
+        lane: "background",
+      });
+
+      const cards = (body.data ?? []).map(normalize);
+      await keep(cards, asCards);
+      found.push(...cards);
+      notFound.push(...(body.not_found ?? []));
+    }
+  }
+
   return { found, notFound };
 }
 
@@ -350,32 +441,12 @@ export interface ResolveResult {
   notFound: string[];
 }
 
-/**
- * Batch name lookup, used by decklist import. Scryfall's collection endpoint
- * takes 75 identifiers per call, so long lists are chunked.
- */
+/** Batch name lookup: `resolveIdentifiers` with bare names only. */
 export async function resolveNames(names: string[]): Promise<ResolveResult> {
   const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
-  const found: Card[] = [];
-  const notFound: string[] = [];
-
-  for (let i = 0; i < unique.length; i += 75) {
-    const chunk = unique.slice(i, i + 75);
-    const body = await request<{
-      data: ScryfallCard[];
-      not_found: { name?: string }[];
-    }>("/cards/collection", {
-      method: "POST",
-      body: JSON.stringify({ identifiers: chunk.map((name) => ({ name })) }),
-      lane: "background",
-    });
-
-    found.push(...(body.data ?? []).map(normalize));
-    notFound.push(
-      ...(body.not_found ?? []).map((entry) => entry.name ?? "unknown"),
-    );
-  }
-
-  await cacheCards(found);
-  return { found, notFound };
+  const { found, notFound } = await resolveIdentifiers(unique.map((name) => ({ name })));
+  return {
+    found,
+    notFound: notFound.map((entry) => ("name" in entry ? entry.name : "unknown")),
+  };
 }
