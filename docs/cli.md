@@ -1,4 +1,4 @@
-# The command line — designed, not built
+# The command line
 
 A `decklab` executable for working with a library without opening the app:
 first a dump, later conversions between library file formats. See
@@ -18,9 +18,11 @@ under them differs:
 | HTTP | Tauri HTTP plugin | the standard `fetch` |
 | Where the database is | the plugin resolves it | computed the same way, or `--db path` |
 
-The seam already exists: `v4db.ts` and `store.ts` take an `Sql` parameter
-(`src/lib/sql.ts`), and `src/lib/testing/sqlOver.ts` is that floor for
-`node:sqlite`; it moves out of `testing/` when the CLI uses it.
+The seam: `v4db.ts` and `store.ts` take an `Sql` parameter
+(`src/lib/sql.ts`), and `src/lib/sqlOver.ts` builds one over any
+synchronous SQLite — `bun:sqlite` in the CLI, `node:sqlite` in the tests.
+Neither binds `$n` by its number (`bun:sqlite` numbers parameters in the
+order they first appear), so `sqlOver` rewrites each `$n` to `?`.
 `scryfall.ts` imports Tauri's HTTP plugin directly, which the commands below
 never reach; a command that fetches would have the fetch passed in.
 
@@ -42,24 +44,36 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
 ## Read-only, and safe beside the app
 
 - **One transaction per dump.** `readV4` runs several queries; inside one
-  `BEGIN … COMMIT` they share one shared lock and see one snapshot, so an edit
-  committed in the app mid-dump cannot leave a deck half before and half
-  after. The CLI has a connection of its own, which is what makes that easy;
-  the app's pooled plugin cannot promise it.
-- **Beside a running app.** The databases use a rollback journal: readers
-  share a lock, and a commit waits for them. A dump takes well under a
-  second, against the app's wait of about five, so at worst an edit pauses.
+  `BEGIN … COMMIT` they see one snapshot, so an edit committed in the app
+  mid-dump cannot leave a deck half before and half after. The CLI has a
+  connection of its own, which is what makes that easy; the app's pooled
+  plugin cannot promise it.
+- **WAL mode.** sqlx creates databases in WAL mode, so `decklab.db` and
+  `lab.db` are in it. (The card store, made by `VACUUM INTO`, is not.) A
+  reader then never holds up the app's writes, nor they it.
+- **Opened read-write, writes refused.** A read-only connection cannot create
+  the `-wal` and `-shm` files WAL needs, so with the app closed it cannot open
+  the database at all. The CLI opens it read-write with `PRAGMA query_only`,
+  which refuses any write.
+- **Leaves no files behind.** On macOS Bun uses Apple's SQLite, which keeps
+  `-wal` and `-shm` after the last connection closes; the CLI turns that off
+  (`SQLITE_FCNTL_PERSIST_WAL`). Checked on the real database: same bytes
+  after a dump, same directory listing.
 - **Schema versions.** The CLI is distributed apart from the app, so the two
   can disagree. It reads the highest version in `_sqlx_migrations` and
   refuses one it does not know, rather than guessing at its tables.
 
 ## Runtime and distribution
 
-- **Bun first:** `bun build --compile` makes one executable, runs TypeScript
-  without a build step, and has SQLite built in. To check first: that
-  `bun:sqlite` binds `$1`-style parameters the way `Sql` expects, or needs
-  the same rewrite `sqlOver` does. Deno's `compile` and Node's single
-  executable applications are the alternatives.
+- **Bun:** runs TypeScript without a build step and has SQLite built in.
+  `npm run cli -- dump` runs it from source; `npm run cli:build` compiles
+  `src/cli/decklab.ts` into `build/decklab`, about 90 MB, most of it the
+  runtime. A dump of the real library takes about a second.
+- **Every platform from one machine:** `bun build --compile --target=…`
+  builds for macOS, Linux and Windows. The database path follows Tauri's
+  config directory on each; only macOS is checked so far.
+- **`bun:sqlite` has no types here.** `src/cli/bun-sqlite.d.ts` declares the
+  part the CLI uses, rather than adding `@types/bun` to a browser project.
 - **Distributed separately**, and the app built with or without it bundled
   (Tauri calls a bundled executable a *sidecar*). Bundling and releases wait
   for a release process.
@@ -72,3 +86,10 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
   through Rust.
 - **A CLI in Rust.** Small and fast, but a second implementation of the
   format and its checks, in a second language, to drift from the first.
+
+## Open
+
+- **One executable or two.** The Agent API plans a `decklab` CLI too
+  ([`agent-api.md`](agent-api.md)), of a different kind: it only talks to the
+  running app, and never opens the database. Whether that and this become one
+  executable is undecided; until then `decklab` is this tool's working name.

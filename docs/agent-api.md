@@ -10,7 +10,10 @@ logic rather than a second implementation of it. What is left to build is in
 
 The CLI does not open the database or call Scryfall itself. Exactly one process
 owns the SQLite file and the `scheduledFetch` queue, and the app's UI and the
-CLI are both clients of it. That single decision settles the hard parts:
+CLI are both clients of it. (The library tool in [`cli.md`](cli.md) is a
+separate tool: it reads a database file directly, under the dump/load
+exception in [`principles.md`](principles.md), and never writes.) That single
+decision settles the hard parts:
 
 - **Rate limit.** CLI traffic goes through the same queue, in a lane of its
   own, ranked last. One pipe, one 429 pause, one client as far as Scryfall can
