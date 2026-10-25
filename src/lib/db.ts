@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
 import type { Card } from "./types";
 
@@ -9,8 +10,28 @@ import type { Card } from "./types";
 let handle: Promise<Database> | null = null;
 
 export function db(): Promise<Database> {
-  handle ??= Database.load("sqlite:decklab.db");
+  handle ??= open();
   return handle;
+}
+
+/**
+ * The real database, or in lab mode a fresh copy of it (`src-tauri/src/lab.rs`).
+ *
+ * `VACUUM INTO` writes a consistent copy even if another instance is writing,
+ * and only reads the source. Loading `lab.db` afterwards runs the lab's own
+ * migrations on top; the copy already records the real ones as applied.
+ */
+async function open(): Promise<Database> {
+  const labPath = await invoke<string | null>("prepare_lab_db");
+  if (labPath === null) return Database.load("sqlite:decklab.db");
+
+  const real = await Database.load("sqlite:decklab.db");
+  try {
+    await real.execute("VACUUM INTO $1", [labPath]);
+  } finally {
+    await real.close();
+  }
+  return Database.load("sqlite:lab.db");
 }
 
 export async function select<T>(sql: string, params: unknown[] = []): Promise<T[]> {

@@ -1,4 +1,5 @@
 mod api;
+mod lab;
 mod library;
 
 use tauri::{AppHandle, Manager};
@@ -137,8 +138,18 @@ pub fn run() {
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:decklab.db", migrations())
+                .add_migrations(
+                    "sqlite:lab.db",
+                    migrations().into_iter().chain(lab::migrations()).collect(),
+                )
                 .build(),
         )
+        .setup(|app| {
+            if lab::enabled() {
+                lab::setup(app.handle())?;
+            }
+            Ok(())
+        })
         .manage(api::ApiBridge::default())
         .menu(|app| {
             let menu = api::menu(app)?;
@@ -154,6 +165,7 @@ pub fn run() {
             cache_card_image,
             read_text_file,
             write_text_file,
+            lab::prepare_lab_db,
             api::api_token,
             api::api_reply
         ])

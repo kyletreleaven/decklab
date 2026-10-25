@@ -55,8 +55,15 @@ The app opens a separate database, marked **LAB** in the window, and
 - **Code that touches experimental tables runs only in lab mode**, behind
   the same flags.
 
-The rebuilt database is seeded from a library file: a hand-written
-*scenario*, or a dump of your own library.
+**Built:** `npm run lab` (`DECKLAB_LAB=1`). Each launch deletes the last
+`lab.db` and copies `decklab.db` into it with `VACUUM INTO`, which only reads
+the real file; the window title says **LAB**. Experimental migrations go in
+`lab::migrations()` (`src-tauri/src/lab.rs`), numbered from 1000.
+
+Today the seed is that copy: realistic at once, and it brings the card
+cache, so nothing is fetched. Seeding from a library file — a hand-written
+*scenario*, or a dump — would replace the copy's user data while keeping its
+cache.
 
 ## The library file
 
