@@ -33,6 +33,11 @@ function labMode(): Promise<boolean> {
   return lab;
 }
 
+/** Which kind of DeckLab process this is, as the channel's record says it. */
+export async function processKind(): Promise<"app" | "lab"> {
+  return (await labMode()) ? "lab" : "app";
+}
+
 function sqlOf(conn: Database): Sql {
   return {
     select: <T>(sql: string, params: unknown[] = []) => conn.select<T[]>(sql, params),
@@ -45,7 +50,12 @@ function sqlOf(conn: Database): Sql {
 async function openStore(): Promise<Database> {
   const staging = await invoke<string | null>("prepare_card_store");
   if (staging !== null) await startStore(staging);
-  return Database.load("sqlite:card-cache.db");
+  const conn = await Database.load("sqlite:card-cache.db");
+  // Every request claims its slot with a small write here (`channel.ts`), so
+  // WAL, where writes never hold up readers. Persistent once set; if another
+  // process holds the file at this moment, the next launch sets it.
+  await conn.execute("PRAGMA journal_mode = WAL").catch((e) => console.warn("card store: WAL not set", e));
+  return conn;
 }
 
 /**

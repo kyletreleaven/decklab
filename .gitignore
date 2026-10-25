@@ -5,6 +5,8 @@ node_modules/
 dist/
 dist-ssr/
 build/
+# bun build --compile's temporary file, left behind if a build is interrupted
+*.bun-build
 
 # rust / tauri
 src-tauri/target/

@@ -168,6 +168,7 @@ pub fn run() {
             read_text_file,
             write_text_file,
             lab::prepare_lab_db,
+            lab::lab_seed,
             card_store::prepare_card_store,
             card_store::finish_card_store,
             api::api_token,

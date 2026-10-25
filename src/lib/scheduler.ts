@@ -10,9 +10,18 @@
  * cost one request, not one per card — but note this is *not* a debounce: the
  * first request goes out immediately, and only requests still waiting are
  * replaced. Nothing is ever made to wait on a timer.
+ *
+ * Lanes are priority only. Every lane shares one channel — one pace, one
+ * pause — and in the app that channel is shared by every DeckLab process,
+ * through the card store (`shareChannel`, docs/card-fetching.md → *One channel
+ * across processes*).
  */
 
-const MIN_INTERVAL_MS = 100;
+/** The starting pace: Scryfall asks for 50-100ms between requests. */
+export const BASE_INTERVAL_MS = 100;
+
+/** The slowest a 429 can push the pace. */
+export const MAX_INTERVAL_MS = 10_000;
 
 /**
  * How long the pipe stays shut after a 429.
@@ -24,22 +33,100 @@ const MIN_INTERVAL_MS = 100;
  */
 const RATE_LIMIT_BACKOFF_MS = 60_000;
 
-/** When set, nothing runs until this timestamp. */
-let pausedUntil = 0;
-
-/** Shut the pipe. Private: only `scheduleFetch` decides when we have overrun. */
-function pauseFor(ms: number): void {
-  pausedUntil = Math.max(pausedUntil, Date.now() + ms);
+/**
+ * Permission to send: the pace and the pause.
+ *
+ * A 429 pauses the channel *and* halves its pace, and the slower pace stays:
+ * a 429 is never the plan, but when one comes it is the best information
+ * there is about what Scryfall allows. How the pace recovers is the
+ * channel's business.
+ */
+export interface Channel {
+  /** Claim the next slot; resolves with when (ms since epoch) it starts. */
+  claim(): Promise<number>;
+  /** When the pause ends (ms since epoch); in the past when there is none. */
+  pausedUntil(): Promise<number>;
+  /** A 429 arrived: pause until `until`, slow down, and record it. */
+  rateLimited(until: number, drawnBy: RateLimited): Promise<void>;
 }
 
-/** Remaining pause in ms, 0 when running normally. */
+/** What drew a 429, for the record. */
+export interface RateLimited {
+  /** Host and path, no query: `api.scryfall.com/cards/collection`. */
+  endpoint: string;
+  lane: Lane;
+  /** The `Retry-After` header as sent. */
+  retryAfter: string | null;
+}
+
+/** Host and path of a URL, without its query. */
+export function endpointOf(url: string): string {
+  try {
+    const { host, pathname } = new URL(url);
+    return `${host}${pathname}`;
+  } catch {
+    return url.split("?")[0];
+  }
+}
+
+/** What this process knows of the pause, for diagnostics and tests. */
+let pausedUntil = 0;
+let lastSlotAt = 0;
+let intervalMs = BASE_INTERVAL_MS;
+
+/**
+ * This process alone: the default, and what the tests and the contract suite
+ * run on. Its pace never recovers within the process.
+ */
+const memoryChannel: Channel = {
+  async claim() {
+    lastSlotAt = Math.max(lastSlotAt + intervalMs, Date.now(), pausedUntil);
+    return lastSlotAt;
+  },
+  async pausedUntil() {
+    return pausedUntil;
+  },
+  async rateLimited(until) {
+    // No record outside the store: this channel is for tests and the
+    // contract suite.
+    intervalMs = Math.min(MAX_INTERVAL_MS, intervalMs * 2);
+    pausedUntil = Math.max(pausedUntil, until);
+  },
+};
+
+let channel: Channel = memoryChannel;
+
+/** Share the channel beyond this process. The app calls this at startup. */
+export function shareChannel(shared: Channel): void {
+  channel = shared;
+}
+
+/** Remaining pause in ms, as this process knows it; 0 when running normally. */
 export function pausedRemaining(): number {
   return Math.max(0, pausedUntil - Date.now());
 }
 
-/** Test hook — the pause is module state and would leak between cases. */
+/** Test hook — the channel's state is module state and would leak between cases. */
 export function resetRateLimit(): void {
   pausedUntil = 0;
+  lastSlotAt = 0;
+  intervalMs = BASE_INTERVAL_MS;
+  channel = memoryChannel;
+}
+
+/**
+ * When a 429 says to resume: `Retry-After` as seconds or as an HTTP date.
+ * Anything unparseable, or a date already past, gets the fixed backoff —
+ * never zero, since a rate-limit response is never permission to continue.
+ */
+export function resumeAt(retryAfter: string | null, now = Date.now()): number {
+  const seconds = Number(retryAfter);
+  if (retryAfter !== null && retryAfter.trim() !== "" && Number.isFinite(seconds) && seconds > 0) {
+    return now + seconds * 1000;
+  }
+  const date = retryAfter === null ? NaN : Date.parse(retryAfter);
+  if (Number.isFinite(date) && date > now) return date;
+  return now + RATE_LIMIT_BACKOFF_MS;
 }
 
 export type Lane = "interactive" | "background";
@@ -80,10 +167,27 @@ const interactive = new Map<string, Job>();
 const background: Job[] = [];
 
 let inFlight = false;
-let lastStartedAt = 0;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Wait for a slot on the channel, then check the pause: another process may
+ * have drawn a 429 while this one waited. A slot lost to a pause is simply
+ * not used. Spacing runs from each request's *start*, so a slow response does
+ * not add its own latency to the gap. If the channel itself fails, this
+ * throws and the request is not sent.
+ */
+async function permission(): Promise<void> {
+  for (;;) {
+    const slot = await channel.claim();
+    if (slot > Date.now()) await sleep(slot - Date.now());
+    const resume = await channel.pausedUntil();
+    if (resume <= Date.now()) return;
+    pausedUntil = Math.max(pausedUntil, resume);
+    await sleep(resume - Date.now());
+  }
 }
 
 function takeNext(): Job | null {
@@ -104,16 +208,7 @@ async function pump(): Promise<void> {
 
   inFlight = true;
   try {
-    // A 429 shuts everything, not just the request that drew it.
-    const paused = pausedRemaining();
-    if (paused > 0) await sleep(paused);
-
-    // Space requests from the last *start*, so a slow response does not add
-    // its own latency to the gap.
-    const wait = MIN_INTERVAL_MS - (Date.now() - lastStartedAt);
-    if (wait > 0) await sleep(wait);
-    lastStartedAt = Date.now();
-
+    await permission();
     job.resolve((await job.run()) as never);
   } catch (error) {
     job.reject(error);
@@ -199,15 +294,18 @@ export function scheduledFetch(fetchImpl: FetchLike) {
       const response = await fetchImpl(url, init);
 
       if (response.status === 429) {
-        // `Retry-After` is seconds when numeric. Anything unparseable falls
-        // back to the fixed backoff rather than to zero — never treat a
-        // rate-limit response as permission to continue.
-        const retryAfter = Number(response.headers.get("Retry-After"));
-        pauseFor(
-          Number.isFinite(retryAfter) && retryAfter > 0
-            ? retryAfter * 1000
-            : RATE_LIMIT_BACKOFF_MS,
+        const retryAfter = response.headers.get("Retry-After");
+        const until = resumeAt(retryAfter);
+        pausedUntil = Math.max(pausedUntil, until);
+        console.error(
+          `Scryfall rate-limited us (429): paused until ${new Date(until).toISOString()}, pace halved. ` +
+            "This is a bug: see bugs/005.",
         );
+        await channel.rateLimited(until, {
+          endpoint: endpointOf(url),
+          lane: options.lane ?? "interactive",
+          retryAfter,
+        });
       }
 
       return response;

@@ -57,8 +57,12 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
   which refuses any write.
 - **Leaves no files behind.** On macOS Bun uses Apple's SQLite, which keeps
   `-wal` and `-shm` after the last connection closes; the CLI turns that off
-  (`SQLITE_FCNTL_PERSIST_WAL`). Checked on the real database: same bytes
-  after a dump, same directory listing.
+  (`SQLITE_FCNTL_PERSIST_WAL`). Checked on the real database, with the app
+  closed and with it running: same directory listing after a dump.
+- **Closing may checkpoint.** If the CLI's is the last connection open,
+  SQLite copies the WAL's committed changes into the database file as it
+  closes, as the app's own connections do. No data changes, but the file's
+  bytes can.
 - **Schema versions.** The CLI is distributed apart from the app, so the two
   can disagree. It reads the highest version in `_sqlx_migrations` and
   refuses one it does not know, rather than guessing at its tables.
@@ -68,7 +72,9 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
 - **Bun:** runs TypeScript without a build step and has SQLite built in.
   `npm run cli -- dump` runs it from source; `npm run cli:build` compiles
   `src/cli/decklab.ts` into `build/decklab`, about 90 MB, most of it the
-  runtime. A dump of the real library takes about a second.
+  runtime. It builds from inside `build/`, because Bun writes a temporary
+  `.….bun-build` file in the working directory. A dump of the real library
+  takes about a second.
 - **Every platform from one machine:** `bun build --compile --target=…`
   builds for macOS, Linux and Windows. The database path follows Tauri's
   config directory on each; only macOS is checked so far.

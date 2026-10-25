@@ -1553,3 +1553,9 @@ a.external:hover {
 .preview-list .row.unmatched .meta {
   color: var(--danger);
 }
+
+/* Lab mode, while a seed file loads before the UI starts (main.tsx). */
+.lab-loading {
+  padding: 16px;
+  color: var(--text-dim);
+}

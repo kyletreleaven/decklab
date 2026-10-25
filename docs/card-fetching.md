@@ -126,9 +126,11 @@ stand-in in `scryfall.ts`. Left as they were:
 - Loading a library still refuses a non-English printing missing from the
   working copy: `/cards/collection` cannot ask for a language. The store can
   answer by language; `v4db.ts` does not ask it yet.
-- Most of a long-lived cache is past the TTL on the first day (2,607 of
-  37,691 rows were fresh), so a first lab import refetches most printings,
-  75 to a request. After that, a week of hits.
+- **Wrong, and the cause of a 429:** the TTL applies to identity lookups
+  too, so a card the store has, but fetched over a week ago, is fetched again
+  just to answer *which card is set C21, number 263*, which never changes.
+  Loading the library into the lab sent ~25 back-to-back requests and drew a
+  429 ([`bugs/005`](../bugs/005-lab-load-rate-limited.md)).
 
 **Images are already split this way**: `cache_card_image` keeps them in an
 `images/` folder beside the databases, named by printing id.
@@ -195,6 +197,75 @@ The tests cover the parts that fail silently: that an evicted job really does
 not run, that different keys coexist, that a replacement is ordered by when it
 was *queued*, that interactive preempts background, that background work is
 never dropped, and that spacing holds.
+
+## One channel across processes
+
+**The gap.** The queue, its spacing and its 429 pause are module state: one
+per app process. Run the app and the lab together and there are two queues,
+each pacing itself, both sending; a 429 in one leaves the other sending, and
+a relaunch forgets the pause. Scryfall sees one client either way. Lanes
+are not the problem: within a process they share the one channel and differ
+only in priority, which stays so.
+
+**A — shared through the card store (built).** Each process
+keeps its own stand-in and does its own HTTP; only the *permission to send*
+is shared, as state in `card-cache.db`:
+
+| | |
+| --- | --- |
+| `next_slot_at` | the earliest a request may start |
+| `paused_until` | set from `Retry-After` by any 429, in any process |
+| `interval_ms` | the pace: today's 100 ms to start with, lowered by a 429 and kept lowered |
+
+Before each request a process claims a slot in one short write transaction:
+read the state, wait out any pause, take `next_slot_at`, push it on by
+`interval_ms`, commit, and sleep until the slot. SQLite's file lock makes the
+claim atomic across processes. A 429 is never the plan, but when one comes it
+is the best information there is, so the pace learns from it and stays
+learned across restarts, recovering slowly and never past the starting pace.
+The store moves to WAL mode so these writes do not hold up readers. What A
+does not do: two processes asking for the same card at once both fetch it.
+
+Built as: `migrations/cache/002_channel.sql` (the one row), `channel.ts`
+(the claim is a single `UPDATE … RETURNING`, so it is atomic through the
+plugin's pooled connections as well as across processes), and the
+`Channel` interface in `scheduler.ts`, which waits for a slot, then
+re-checks the pause another process may have set meanwhile. The app shares
+it at startup (`main.tsx`); tests and the contract suite run on the
+in-memory channel. If the store cannot be reached, nothing is sent.
+
+**Every 429 is recorded** in `rate_limits` (`migrations/cache/003`): when,
+which process and lane, the endpoint, `Retry-After` as sent, the pace, and
+the actual gap before the request that drew it. With every process claiming
+slots through the one row, the gap between the last two slots *is* the
+present rate, so nothing else needs logging. The new pace is half the slower
+of the pace and that gap — unless the gap is over a second, when the request
+went out alone and its gap says nothing about the rate. `Retry-After` sets
+the pause and nothing else: it says how long to stop, not what pace is
+allowed. A bug report about a 429 quotes this table.
+
+**B — a configurable upstream (an option; where this may lead).** The app
+reads card data from an *upstream* that speaks the stand-in's protocol, and
+the stand-in is a client of whichever is configured:
+
+- **Scryfall itself**, with A's rules: today's behaviour. As an upstream it
+  is a thin facade — requests passed through to `api.scryfall.com` under the
+  channel's pace and pause, with no logic of its own.
+- **A local daemon** that owns `card-cache.db` and the channel, shared by the
+  app, the lab and a CLI. Truly one client: identical requests from different
+  processes are merged, one writer, nothing to coordinate. The card-data
+  counterpart of the agent API's *one owner* ([`agent-api.md`](agent-api.md)).
+- **A shared server** — a machine on the network, a mirror — so several
+  installs draw on one cache, and Scryfall sees one client for all of them.
+
+The price is lifecycle: who starts the daemon, what happens when it crashes
+or is older than the app, how the app finds it, and a round trip to another
+process for every card read. A's state rows carry over into it unchanged, so
+A is a step towards B, not a detour.
+
+**A probe for the pace, later and carefully.** A CLI command could measure
+what Scryfall allows — response headers, timings — at the normal pace. It
+must never find the limit by tripping 429s.
 
 ## Batching
 

@@ -19,12 +19,26 @@ const STORE: &str = "card-cache.db";
 const STAGING: &str = "card-cache.staging.db";
 
 pub fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "card store",
-        sql: include_str!("../migrations/cache/001_store.sql"),
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "card store",
+            sql: include_str!("../migrations/cache/001_store.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "shared channel",
+            sql: include_str!("../migrations/cache/002_channel.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 3,
+            description: "rate limit record",
+            sql: include_str!("../migrations/cache/003_rate_limits.sql"),
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 /// Where the SQL plugin keeps its databases: it resolves `sqlite:<name>`

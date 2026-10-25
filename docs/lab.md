@@ -56,7 +56,10 @@ The app opens a separate database, marked **LAB** in the window, and
   the same flags.
 
 **Built:** `npm run lab` (`DECKLAB_LAB=1`). Each launch deletes the last
-`lab.db` and starts it empty; the window title says **LAB**. Experimental
+`lab.db` and starts it empty; the window title says **LAB**. It serves the
+frontend on port 1440 (`DECKLAB_PORT`, and `src-tauri/tauri.lab.conf.json`
+pointing Tauri at it), so it runs beside `npm run tauri dev` on 1420. Both
+build the same Rust binary, so a Rust edit restarts both. Experimental
 migrations go in `lab::migrations()` (`src-tauri/src/lab.rs`), numbered from
 1000. Card data comes from the card store, which every mode shares
 ([`card-fetching.md`](card-fetching.md) → *The card store*), so the lab never
@@ -65,14 +68,17 @@ needs a copy of `decklab.db`.
 To work on real data: *File → Export Library…* in the app, then *File →
 Import Library…* in the lab.
 
-**Loading at launch** (designed, not built):
-`DECKLAB_LAB_SEED=path/to/file.toml npm run lab`. Rust reads the variable and
-hands the file's text to the webview, which loads it into the new, empty
-`lab.db` with the library file's load, before the UI starts. The file is a
-hand-written *scenario* or a dump, converted to the lab's format by
-`decklab convert` ([`cli.md`](cli.md)) once that differs from v4. A file that
-fails to load shows the error and leaves the lab empty. Nothing else ever
-writes to `lab.db` while the lab runs.
+**Loading at launch:** `DECKLAB_LAB_SEED=path/to/file.toml npm run lab`.
+Rust reads the variable and hands the file's text to the webview
+(`lab_seed`), which loads it into the new, empty `lab.db` with the library
+file's load, before the UI starts (`src/lib/library/seed.ts`). A relative
+path is taken from where the command was typed (npm's `INIT_CWD`), not from
+`src-tauri/`, where `tauri dev` runs the app. Emptying the lab and loading
+the seed happen once per launch: reloading the window keeps the lab as it
+is. The file is a hand-written *scenario* or a dump (`decklab dump`,
+[`cli.md`](cli.md)), converted to the lab's format by `decklab convert` once
+that differs from v4. A file that fails to load shows the error and leaves
+the lab empty. No other program writes to `lab.db` while the lab runs.
 
 ## The library file
 

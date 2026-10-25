@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type Channel,
+  type RateLimited,
   isSuperseded,
   pausedRemaining,
   pendingCounts,
   resetRateLimit,
+  resumeAt,
   schedule,
   scheduledFetch,
+  shareChannel,
   Superseded,
 } from "./scheduler";
 
@@ -294,6 +298,110 @@ describe("rate limiting", () => {
     const send = scheduledFetch(async () => reply(200));
     await send("https://example.test/a");
     expect(pausedRemaining()).toBe(0);
+  });
+
+  it("reads Retry-After as seconds or a future date, and never as zero", () => {
+    const now = Date.parse("2026-10-25T12:00:00Z");
+    expect(resumeAt("30", now)).toBe(now + 30_000);
+    expect(resumeAt("Sun, 25 Oct 2026 12:02:00 GMT", now)).toBe(now + 120_000);
+    for (const junk of [null, "", "0", "-5", "soon", "Wed, 21 Oct 2015 07:28:00 GMT"]) {
+      expect(resumeAt(junk, now)).toBeGreaterThan(now + 1_000);
+    }
+  });
+});
+
+describe("a shared channel", () => {
+  const reply = (status: number, headers: Record<string, string> = {}) =>
+    new Response(null, { status, headers });
+
+  /** A channel as another process would see it, with its state in plain view. */
+  function sharedChannel() {
+    const state = { slot: 0, pausedUntil: 0, limited: [] as number[], drawnBy: [] as RateLimited[] };
+    const channel: Channel = {
+      async claim() {
+        state.slot = Math.max(state.slot + 100, Date.now(), state.pausedUntil);
+        return state.slot;
+      },
+      async pausedUntil() {
+        return state.pausedUntil;
+      },
+      async rateLimited(until, drawnBy) {
+        state.limited.push(until);
+        state.drawnBy.push(drawnBy);
+        state.pausedUntil = Math.max(state.pausedUntil, until);
+      },
+    };
+    return { state, channel };
+  }
+
+  beforeEach(() => resetRateLimit());
+  afterEach(() => {
+    resetRateLimit();
+    vi.useRealTimers();
+  });
+
+  it("tells the shared channel about a 429", async () => {
+    const { state, channel } = sharedChannel();
+    shareChannel(channel);
+    await scheduledFetch(async () => reply(429, { "Retry-After": "30" }))(
+      "https://example.test/cards/collection?q=ignored",
+      undefined,
+      { lane: "background" },
+    );
+    expect(state.limited).toHaveLength(1);
+    expect(state.limited[0]).toBeGreaterThan(Date.now() + 25_000);
+    expect(state.drawnBy).toEqual([
+      { endpoint: "example.test/cards/collection", lane: "background", retryAfter: "30" },
+    ]);
+  });
+
+  it("holds a request while another process's pause lasts", async () => {
+    vi.useFakeTimers();
+    const { state, channel } = sharedChannel();
+    shareChannel(channel);
+    state.pausedUntil = Date.now() + 5_000;
+
+    const sent = vi.fn(async () => reply(200));
+    const done = scheduledFetch(sent)("https://example.test/a");
+
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(sent).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+    await done;
+    expect(sent).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-checks the pause after waiting for its slot", async () => {
+    vi.useFakeTimers();
+    const { state, channel } = sharedChannel();
+    shareChannel(channel);
+    state.slot = Date.now() + 900; // the next slot is a second away
+
+    const sent = vi.fn(async () => reply(200));
+    const done = scheduledFetch(sent)("https://example.test/a");
+
+    // Meanwhile another process draws a 429.
+    await vi.advanceTimersByTimeAsync(500);
+    state.pausedUntil = Date.now() + 10_000;
+
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(sent).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await done;
+    expect(sent).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing when the channel cannot be reached", async () => {
+    shareChannel({
+      claim: async () => {
+        throw new Error("store unavailable");
+      },
+      pausedUntil: async () => 0,
+      rateLimited: async () => {},
+    });
+    const sent = vi.fn(async () => reply(200));
+    await expect(scheduledFetch(sent)("https://example.test/a")).rejects.toThrow("store unavailable");
+    expect(sent).not.toHaveBeenCalled();
   });
 });
 
