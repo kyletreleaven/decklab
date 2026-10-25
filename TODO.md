@@ -402,6 +402,17 @@ Design in [`docs/lab.md`](docs/lab.md).
 - ⬜ **Lab mode:** a separate database, rebuilt every launch, running the
       real migrations plus an experimental `lab/` list; **LAB** in the
       window.
+- ⬜ **Card store:** a local stand-in for Scryfall under `scheduledFetch`,
+      keeping every card in its own `card-cache.db`, shared by every mode.
+      Hits answer at once; only misses join the queue. `cards` in the user
+      database becomes a working copy with the same schema, filled from the
+      store; `oracle_fetches` moves to the store. Started by copying the
+      cards out of `decklab.db`. Then a lab session starts empty and loads its
+      seed, with no copy of the real database.
+- ⬜ **Card-level table, after the card store:** one row per oracle id for
+      text, stats, colours and legalities, instead of repeating them on every
+      printing. A `cards` view over the two keeps reads unchanged. Check
+      first whether any oracle id's rows disagree; faces need a list.
 - ⬜ **The library file:** a lossless text dump/load, property-identified,
       card data left in the cache, possibly an extension of the DeckLab
       language. Seeds lab mode from a scenario or a dump;
