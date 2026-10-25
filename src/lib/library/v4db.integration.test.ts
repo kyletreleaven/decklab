@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { dumpV4, loadV4 } from "./v4";
-import { sqlOver } from "../testing/sqlOver";
+import { sqlOver } from "../sqlOver";
 import { readV4, writeV4 } from "./v4db";
 
 /**

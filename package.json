@@ -12,6 +12,8 @@
     "test:contract": "SCRYFALL_CONTRACT=1 vitest run --testTimeout=60000 src/lib/scryfall.contract.test.ts",
     "tauri": "tauri",
     "lab": "DECKLAB_LAB=1 tauri dev",
+    "cli": "bun src/cli/decklab.ts",
+    "cli:build": "bun build --compile src/cli/decklab.ts --outfile build/decklab",
     "test:sql": "QUERY_SQL=1 vitest run src/lib/query/compile.integration.test.ts",
     "test:library": "LIBRARY_DB=1 vitest run --testTimeout=120000 src/lib/library/v4db.integration.test.ts"
   },

@@ -14,7 +14,7 @@ import {
   TTL_MS,
 } from "./store";
 import type { Sql } from "./sql";
-import { sqlOver } from "./testing/sqlOver";
+import { sqlOver } from "./sqlOver";
 import type { Card } from "./types";
 
 const MIGRATIONS = join(__dirname, "../../src-tauri/migrations");
