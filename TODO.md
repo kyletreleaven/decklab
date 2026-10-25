@@ -410,6 +410,15 @@ Design in [`docs/lab.md`](docs/lab.md).
       cards out of `decklab.db`. Then a lab session starts empty and loads its
       seed, with no copy of the real database. Design in
       [`docs/card-fetching.md`](docs/card-fetching.md) → *The card store*.
+- ⬜ **Two freshness limits in the card store:** card data (name, text, set,
+      images) refreshed on a long limit, say 90 days; prices and print-run
+      completeness stay on 7. Today one 7-day limit makes a load or import
+      refetch cards it already has, just to learn which card a set and
+      number are ([bug 005](bugs/005-lab-load-rate-limited.md)). Count the
+      requests a load of the real library sends, before and after.
+- ⬜ **Rate channels:** one channel per group of endpoints, groups that
+      overlap, a request needing a slot on every channel it falls in.
+      Proposal in [`docs/rate-channels.md`](docs/rate-channels.md).
 - ⬜ **The `decklab` CLI:** the app's TypeScript compiled into a standalone
       executable (Bun first), read-only. `dump` first; `convert` once the
       lab schema differs. Design in [`docs/cli.md`](docs/cli.md).
