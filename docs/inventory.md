@@ -700,12 +700,26 @@ fresh ones.
 
 **Naming a set in a query.** Card search extends Scryfall's syntax the way
 `cmdr` does: `:ramp` means "in the ω set named `ramp`". A typed name has to
-become a reference, and there are two kinds, marked the way Excel marks `$`:
+become a reference. Two marks, each answering one question, the way Excel
+marks `$`:
 
-| Written | Binds | Survives rename and move | After copying the query |
-| --- | --- | --- | --- |
-| `:ramp` | when typed, to a path | yes; a rename rewrites it | still the same set |
-| `:&/staples/ramp` | each time it runs, by path | no; it means whatever is there | still that path |
+- **`&`: does it follow the target?** Without it, **pinned**: it follows
+  the set. With it, **by name**: whatever is at that path when the query
+  runs.
+- **A leading `/`: anchored where?** With it, **rooted**. Without it,
+  **relative** to where the query lives, and downward only.
+
+| | The target moves or is renamed | The query's owner moves | The owner is copied | Another set takes the target's old path |
+| --- | --- | --- | --- | --- |
+| `:/staples/ramp` pinned, rooted | followed: rewritten | unaffected | the copy points at the *original's* set | ignored |
+| `:ramp` pinned, relative | followed while it stays below the owner; if it leaves, becomes rooted | still its own | the copy points at *its own* | ignored |
+| `:&/staples/ramp` by name, rooted | not followed: means whatever is there | unaffected | same path | picked up |
+| `:&ramp` by name, relative | not followed | still its own | the copy's own: a template checklist's `:&ramp` finds each deck's own ramp | picked up |
+
+**Typing a bare name searches.** `:ramp` as typed is looked up by name, then
+stored as a pinned reference: relative when the set is below the query's
+owner, rooted otherwise. The same tables, for the library file, are in
+[`library-format-5.md`](library-format-5.md) → *References*.
 
 - **Pinned is the default** because most queries become saved state — live
   pools, checklists, deck pools — and saved state should not break when a set
@@ -717,8 +731,8 @@ become a reference, and there are two kinds, marked the way Excel marks `$`:
   broken, like Excel's `#REF!`, rather than matching nothing.
 - **`&` is for what pinning cannot do**: a set that does not exist yet, and
   `cmdr`'s open definitions (`<<`), where several definitions add to one name.
-- **The token says which references a rename rewrites**: `:ramp` is
-  rewritten, `:&/path` never is. Neither needs an identifier.
+- **The token says which references a rename rewrites**: pinned ones are
+  rewritten, `&` ones never are. None needs an identifier.
 
 ## What falls out
 
@@ -775,11 +789,6 @@ decklist does not refer to.
 
 - **Folders:** any asset acting as one is a lean, not settled. Tags as
   well as folders, and when?
-- **Where a bare `&` path starts:** relative to where the query lives, so a
-  template checklist's `:&ramp` finds each deck's own ramp, or at the root.
-  Until it is settled, accept only `&/rooted/paths`, which mean the same
-  either way, and reject bare `&ramp` rather than give it a meaning saved
-  queries would then depend on.
 - **Finding every reference on rename:** scan every stored query, keep an
   index of references, or store references by internal id so a rename
   rewrites nothing. Either way it must be complete, or a rename quietly
@@ -788,3 +797,12 @@ decklist does not refer to.
 - **Rendering `absent` printings and finishes:** the rule, and its scopes.
 - **Arrangements:** whether piles become their own asset (see *Decks*),
   and whether an entry may sit in more than one pile.
+- **The ontology of asset types.** Every asset's type is a node in a
+  static is-a graph, fixed in code; users do not add types. The relations
+  this doc states as facts become its edges: a place is a refinement of an
+  exact checklist, a pool a special case of a checklist, a list pool and a
+  query pool each a pool. A node may have more than one parent, likely
+  rarely (a physical deck is a place, and refines a decklist). Binder, box
+  and the like are not types but a free-text storage note on a place,
+  which picks the icon. The library file names one node per asset and
+  never the hierarchy ([`library-format-5.md`](library-format-5.md)).
