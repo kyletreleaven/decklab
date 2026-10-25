@@ -61,9 +61,10 @@ the real file; the window title says **LAB**. Experimental migrations go in
 `lab::migrations()` (`src-tauri/src/lab.rs`), numbered from 1000.
 
 Today the seed is that copy: realistic at once, and it brings the card
-cache, so nothing is fetched. Seeding from a library file — a hand-written
-*scenario*, or a dump — would replace the copy's user data while keeping its
-cache.
+cache, so nothing is fetched. Once the card cache is its own file, shared by
+every mode ([`card-fetching.md`](card-fetching.md) → *The card store*), lab
+mode starts from an empty database instead and loads a library file — a
+hand-written *scenario*, or a dump — without fetching it all again.
 
 ## The library file
 
