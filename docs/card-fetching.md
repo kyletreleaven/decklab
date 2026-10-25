@@ -38,6 +38,92 @@ written, and the disk-first branch exists.
 becomes necessary alongside the CSV path, which is deferred; see `TODO.md` →
 *Compact printing rows and the CSV path*.
 
+## The card store — designed, not built
+
+Scryfall's data and the user's data live in **separate files**. Card data is
+not the user's, its schema is stable, and it can always be fetched again; the
+user's data is none of those. Split, every mode shares one cache, and a lab
+session can start from an empty database without fetching anything twice
+([`lab.md`](lab.md) → *Lab mode*).
+
+```
+app ──> scryfall.ts ──> stand-in ──hit──> card-cache.db   one, shared by every mode
+                           └──miss──> scheduledFetch ──> api.scryfall.com
+
+decklab.db / lab.db: the user's data, plus `cards` as a working copy
+```
+
+**Two databases, two handles, no `ATTACH`.** `db()` opens the user database as
+now; a second handle, `store()`, opens `card-cache.db`, and only the stand-in
+uses it. SQL never joins across the two, so nothing needs attaching. That
+matters because `tauri-plugin-sql` keeps a pool of up to ten connections with
+no per-connection setup hook, and `ATTACH` holds for one connection only.
+Cards move between the files through JavaScript.
+
+**The working copy has the same schema.** `cards` in the user database stays
+exactly as it is, so the foreign keys from `collection_items` and
+`deck_cards`, and every query that joins `cards`, are untouched. Every
+`scryfall.ts` function still passes what it returns through `cacheCards`,
+whether the answer came from the store or from Scryfall, so *anything the
+app has shown is in `cards`* still holds. Lab starts with that table empty.
+
+**The stand-in sits inside `scryfall.ts`**, between the exported functions and
+the private `request()`. A hit is answered at once; only misses join the
+queue, so the rule that every request to Scryfall goes through
+`scheduledFetch` is kept, and hits do not wait on its spacing.
+
+| Function | From the store when |
+| --- | --- |
+| `printings` | the oracle id's `oracle_fetches` stamp is fresh (as today, against the store) |
+| `resolveIdentifiers` by id, or set + number | the printing is stored and fresh; a batch splits into hits and misses |
+| `named` exact, `resolveNames` | the name's card has a fresh default printing (below) |
+| `named` fuzzy, `search`, `autocomplete` | never: results move, and paging is Scryfall's. The cards returned are stored |
+
+**One freshness rule, in the store.** A stored row older than the TTL — a
+week, as for print runs — is a miss and is fetched again. The working copy
+takes the store's row verbatim, `cached_at` included, and has no rule of its
+own.
+
+**The store's tables:**
+
+- `cards`, the same definition as the working copy's.
+- `oracle_fetches`, moved here: that a print run is complete is a fact about
+  the store.
+- **Default printings**: per oracle id, the printing Scryfall last gave *as
+  the card* and when. Name lookups and `unique=cards` search results record
+  it; print runs and lookups by id or set + number do not, since they asked
+  for an exact printing. A later answer replaces an earlier one. A bare name
+  never named a printing, so whichever one Scryfall last offered is a fair
+  answer, and recording search results fills the table as you browse.
+
+A name lookup goes: name → oracle id through the store's `cards` → a fresh
+default printing is a hit; otherwise the batched name lookup (75 per
+request) as today, recording each answer.
+
+**Order of writes: the store first.** A card reaches the store before any user
+row refers to it. A crash in between leaves an unused stored card, which is
+harmless. No transaction ever writes both files, so their journals never
+need to agree, whatever the journal mode. Foreign keys do not reach across
+files, so a user row can point at a card the store has lost; the answer is
+to fetch it again, not to fail.
+
+**Starting the store** from an existing `decklab.db`: copy `cards` and
+`oracle_fetches` across once, when the store is empty, reading `decklab.db`
+only. Copy rows, not the file: `VACUUM INTO` would carry `decklab.db`'s
+migration records into a database with a different migration list.
+
+**Images are already split this way**: `cache_card_image` keeps them in an
+`images/` folder beside the databases, named by printing id.
+
+**Considered and rejected:** moving `cards` into an attached file and replacing
+`tauri-plugin-sql` with our own commands, so that a pool hook could `ATTACH`
+on every connection. It works, but costs a rewrite of the database layer for
+joins the two-handle design never needs.
+
+**Later:** a card-level table, one row per oracle id for text, stats and
+legalities, instead of repeating them on every printing. A separate change,
+in both files at once; see `TODO.md`.
+
 ## Two tiers, one queue
 
 The goal is **responsiveness**: minimising *round trips* on the path the user is

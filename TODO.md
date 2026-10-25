@@ -408,7 +408,8 @@ Design in [`docs/lab.md`](docs/lab.md).
       database becomes a working copy with the same schema, filled from the
       store; `oracle_fetches` moves to the store. Started by copying the
       cards out of `decklab.db`. Then a lab session starts empty and loads its
-      seed, with no copy of the real database.
+      seed, with no copy of the real database. Design in
+      [`docs/card-fetching.md`](docs/card-fetching.md) → *The card store*.
 - ⬜ **Card-level table, after the card store:** one row per oracle id for
       text, stats, colours and legalities, instead of repeating them on every
       printing. A `cards` view over the two keeps reads unchanged. Check
