@@ -94,3 +94,59 @@ exactly these channels, for every client behind it.
 - Is a group without a 429 history allowed to speed up beyond its starting
   pace? Proposed: no. Starting paces come from the service's own documentation,
   and the pace only ever learns downward, then eases back to that start.
+
+## Appendix: related work
+
+Written from memory, not from a search: versions and maintenance status
+are worth checking before anything is adopted.
+
+**Bottleneck** (npm) is the closest match. One limiter per group, with
+spacing (`minTime`), concurrency and reservoirs. `limiter.chain(other)`
+makes a job pass through every limiter in the chain, which is this
+proposal's composition rule for overlapping groups. It has groups of
+limiters keyed by name, and job priorities, roughly our lanes. Clustering
+across processes is through Redis only. It does not learn from 429s; its
+retry-on-failure is the opposite of what we want. As far as I know it has
+had no release in years.
+
+**p-queue / p-throttle** (npm): simple in-process queues and throttles. No
+sharing across processes, no overlap.
+
+**rate-limiter-flexible** (npm): many storage backends (memory, Redis,
+several databases), and several limiters can be combined on one key. Built
+mostly for servers limiting their clients, not for being a polite client.
+
+**governor** (Rust) and **tower**'s rate-limit layers: in-process only.
+tower's layers stack, which composes overlapping limits.
+
+**nginx `limit_req`**: the classic example of overlapping zones. Several
+limits apply to the same request at once, keyed by host, path or anything
+else. The same composition rule, on the server side.
+
+### The ideas, by name
+
+- **GCRA** (generic cell rate algorithm), used by governor, redis-cell and
+  others. The channel's claim,
+  `last_slot_at = max(last_slot_at + interval_ms, now, paused_until)`, is
+  GCRA with no burst allowance: its "theoretical arrival time" is our
+  `last_slot_at`.
+- **AIMD** (additive increase, multiplicative decrease), from TCP congestion
+  control: cut sharply on a signal, recover gradually. Halving on a 429 is
+  the multiplicative decrease. Our recovery, a tenth per quiet hour, is
+  multiplicative rather than additive, but the same family.
+- **Client-side adaptive throttling** (Google's *Site Reliability
+  Engineering*, the chapter on handling overload): a client that learns
+  from rejections and holds itself back before the server has to.
+
+### What none of them gives us
+
+1. **Sharing through SQLite.** Every cross-process option assumes Redis or
+   a server; we already have a shared file in `card-cache.db`.
+2. **Learning the pace from 429s.** Libraries take their limits as fixed
+   configuration.
+3. **Refusing unknown endpoints.** A library limits what is passed through
+   it; it cannot stop a caller going around it. `channel-only.test.ts` does.
+
+So the proposal is to keep our own implementation, which is small, and take
+from these the names and the precedent: GCRA and AIMD for the mechanics,
+Bottleneck's `chain` and nginx's overlapping zones for the composition rule.
