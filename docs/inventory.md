@@ -187,6 +187,45 @@ Whatever the rule, the tile must say it is a stand-in, so it is not read as
 a known printing. This is the same question as the *active printing* in
 `TODO.md` (bug 002), seen from storage.
 
+### Drawing a pattern at printing grain
+
+**Grain in a view is only a way of drawing a set.** Toggling it changes no
+bucket and stores nothing. A pattern — a pool or a checklist, where a key
+left out means *any* — can mix grains: some lines name a printing, some
+only the card. Holdings, where left out means *not recorded*, are set aside
+for now.
+
+**A view's grain is a ceiling, not a target.** Each bucket projects *down*
+to it, never up: keys finer than the grain are dropped, and a bucket
+already coarser stays as it is, its missing key shown as missing. Rows are
+the distinct results, counts added. Nothing is invented or expanded.
+
+| View | Drops | "Sol Ring", no printing named |
+| --- | --- | --- |
+| **Cards** | printing, finish, attributes | one row with every other Sol Ring line |
+| **Printings** | finish, attributes | its own row: *Sol Ring, any printing* |
+
+So at printing grain, "Sol Ring, any" and "Sol Ring, C21" are two rows:
+slightly redundant, true to the lines. Listing every printing an "any" row
+could be would be a separate action, not the view, and may cost a request
+per card whose printings the store lacks. **Full detail**, a third value
+that drops nothing and shows buckets as written, is for later.
+
+**All Magic holds ∞ in every bucket at both grains**: ∞ of "Sol Ring" and ∞
+of each printing. Each printing projects into its card, and ∞ onto ∞, so
+either view draws the same set. By the ceiling rule its printing view
+includes one *any printing* row per card beside the printings — and that row
+is useful: adding it to a pattern adds a card-only line, where adding a
+printing's row adds that printing.
+
+**Built:** the All Magic view's *Cards | Printings* toggle, which asks
+Scryfall for one row per printing (`unique=prints`). **Not yet:** the *any
+printing* rows. Scryfall returns printings only, so they would be drawn
+client-side, one per card; sorted by name a card's printings arrive together
+and its row can lead them, but under another sort they scatter, and where
+the row goes is open. Where else to offer the toggle, or not, is open too:
+query pools and the deck builder's pool are candidates.
+
 ## Attributes
 
 Signed by the artist, graded, altered, misprinted: distinctions finer than a
