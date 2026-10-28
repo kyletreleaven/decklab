@@ -209,18 +209,23 @@ interface ScryfallList {
 
 /**
  * Full Scryfall search, always from Scryfall: results move, and paging and
- * sorting are Scryfall's. Every card that comes back is kept, and since the
- * search asks for one printing per card, that printing becomes its default.
+ * sorting are Scryfall's. Every card that comes back is kept.
+ *
+ * `grain` picks one result per card (`unique=cards`) or per printing
+ * (`unique=prints`). Only the first names no printing, so only its results
+ * become each card's default printing: a printings search must not overwrite
+ * Scryfall's pick with whichever printing came last.
  */
 export async function search(
   query: string,
   page = 1,
   sort: { order: string; dir: "asc" | "desc" } = { order: "name", dir: "asc" },
+  grain: "cards" | "prints" = "cards",
 ): Promise<SearchPage> {
   const params = new URLSearchParams({
     q: query,
     page: String(page),
-    unique: "cards",
+    unique: grain,
     // Always both: Scryfall's default direction varies by key, so omitting
     // `dir` sorts prices ascending on one key and descending on another.
     order: sort.order,
@@ -241,7 +246,7 @@ export async function search(
   }
 
   const cards = list.data.map(normalize);
-  await keep(cards, true);
+  await keep(cards, grain === "cards");
 
   return {
     cards,

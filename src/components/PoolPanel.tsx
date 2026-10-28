@@ -111,6 +111,7 @@ export function PoolPanel({
   onSaveSearch,
   activePrintings = {},
   compact = false,
+  grainToggle = false,
 }: {
   selectedId: string | null;
   onSelect: (card: Card) => void;
@@ -229,6 +230,12 @@ export function PoolPanel({
    * somebody else's collection.
    */
   compact?: boolean;
+  /**
+   * Offer a Cards | Printings toggle while All Magic is drawn: one tile per
+   * card, or per printing. Only a view — the set is the same. Given where it
+   * is wanted (the All Magic view); absent, the panel draws cards.
+   */
+  grainToggle?: boolean;
 }) {
   const [filter, setFilter] = useRetained<CardFilter>(stateKey, "filter", {});
   const [showFilters, setShowFilters] = useRetained(stateKey, "showFilters", false);
@@ -253,6 +260,7 @@ export function PoolPanel({
   /** Inverts the sort's useful default rather than forcing ascending. */
   const [sortFlipped, setSortFlipped] = useRetained(stateKey, "sortFlipped", false);
   const [layout, setLayout] = useRetained<"wall" | "list">(stateKey, "layout", "wall");
+  const [chosenGrain, setGrain] = useRetained<"cards" | "printings">(stateKey, "grain", "cards");
   /** What this pane is showing, by name. */
   const sourceName = source.kind === "collection" ? source.name : UNIVERSE_NAME;
 
@@ -367,11 +375,17 @@ export function PoolPanel({
       ? destination?.quantityKind !== "binary"
       : drawnKind !== "binary";
 
+  // Printings only where offered, and only of All Magic: a local list is
+  // already at printing grain.
+  const offersGrain = grainToggle && drawn === "universe";
+  const grain = offersGrain ? chosenGrain : "cards";
+
   // Also the fetch effect's only dependency — see `fetchSignature`.
   const signature = fetchSignature({
     drawn,
     localSourceId,
     effectiveKey,
+    grain,
     sort,
     sortFlipped,
     refreshKey,
@@ -438,12 +452,21 @@ export function PoolPanel({
         } else {
           const query = toScryfallQuery(effective) || EVERYTHING;
           stream = fromPages(async (page) => {
-            const result = await scryfall.search(query, page, scryfallSort);
+            const result = await scryfall.search(
+              query,
+              page,
+              scryfallSort,
+              grain === "printings" ? "prints" : "cards",
+            );
             // Scryfall knows its own total; a local list knows its length.
             if (page === 1) known = result.totalCards;
             return {
               items: result.cards.map(
-                (card): Row => ({ kind: "card", key: card.oracleId, card }),
+                (card): Row => ({
+                  kind: "card",
+                  key: grain === "printings" ? card.id : card.oracleId,
+                  card,
+                }),
               ),
               next: result.nextPage,
             };
@@ -501,11 +524,12 @@ export function PoolPanel({
   const visible = useMemo(
     () =>
       rows.slice(0, shown).map((row) =>
-        row.kind === "card" && activePrintings[row.card.oracleId]
+        // At printing grain a row *is* a printing: nothing to substitute.
+        row.kind === "card" && grain === "cards" && activePrintings[row.card.oracleId]
           ? { ...row, card: activePrintings[row.card.oracleId] }
           : row,
       ),
-    [rows, shown, activePrintings],
+    [rows, shown, activePrintings, grain],
   );
   const hasMore = shown < rows.length || !exhausted;
 
@@ -800,6 +824,25 @@ export function PoolPanel({
             Clear
           </button>
         </span>
+
+        {offersGrain && (
+          <div className="segmented">
+            <button
+              className={grain === "cards" ? "on" : ""}
+              onClick={() => setGrain("cards")}
+              title="One tile per card"
+            >
+              Cards
+            </button>
+            <button
+              className={grain === "printings" ? "on" : ""}
+              onClick={() => setGrain("printings")}
+              title="One tile per printing"
+            >
+              Printings
+            </button>
+          </div>
+        )}
 
         {!compact && (
           <div className="segmented">

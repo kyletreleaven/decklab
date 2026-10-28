@@ -18,6 +18,8 @@ export interface FetchInputs {
   localSourceId: string | undefined;
   /** The effective filter, already serialised. */
   effectiveKey: string;
+  /** One row per card or per printing: a view of the same set, but another question. */
+  grain: "cards" | "printings";
   sort: string;
   sortFlipped: boolean;
   /** App's mutation counter, bumped on every write. */
@@ -39,6 +41,7 @@ export function fetchSignature({
   drawn,
   localSourceId,
   effectiveKey,
+  grain,
   sort,
   sortFlipped,
   refreshKey,
@@ -47,6 +50,7 @@ export function fetchSignature({
     localSourceId,
     drawn,
     effectiveKey,
+    grain,
     sort,
     sortFlipped,
     drawn === "collection" ? refreshKey : 0,

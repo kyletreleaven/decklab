@@ -5,6 +5,7 @@ const local: FetchInputs = {
   drawn: "collection",
   localSourceId: "c1",
   effectiveKey: "{}",
+  grain: "cards",
   sort: "name",
   sortFlipped: false,
   refreshKey: 0,
@@ -29,6 +30,7 @@ describe("fetchSignature — the question itself", () => {
     ["filter", { effectiveKey: '{"query":"t:elf"}' }],
     ["sort", { sort: "cmc" }],
     ["direction", { sortFlipped: true }],
+    ["grain", { grain: "printings" as const }],
   ])("changes with the %s", (_, change) => {
     expect(fetchSignature({ ...local, ...change })).not.toBe(fetchSignature(local));
   });

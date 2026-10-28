@@ -946,6 +946,7 @@ export default function App() {
             source={{ kind: "universe" }}
             activePrintings={activePrintings}
             scopes={deckScopes}
+            grainToggle
             refreshKey={refreshKey}
             onSaveSearch={(filter, sort, flipped) =>
               setSaving({
