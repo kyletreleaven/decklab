@@ -1720,3 +1720,13 @@ a.external:hover {
   font-size: 10px;
   pointer-events: none;
 }
+
+.asset-category {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+}

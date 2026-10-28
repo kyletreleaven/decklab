@@ -9,12 +9,17 @@ import {
 } from "../lib/assets";
 import { cardStore, execute, select } from "../lib/db";
 import type { Card } from "../lib/types";
+import { CATEGORY_ORDER, categoryOf } from "../lib/deckstats";
 import { CardImage } from "./CardImage";
 
 /** Tiles a section shows at first, and adds per "Show more": as the pool pages. */
 const PAGE = 175;
 
-const ZONE_LABEL: Record<string, string> = { commander: "Commander", main: "Main", side: "Sideboard" };
+const ZONE_LABEL: Record<string, string> = {
+  commander: "Commander",
+  main: "Main",
+  side: "Sideboard",
+};
 
 interface Section {
   /** Absent for a place or checklist: one section, no heading. */
@@ -33,11 +38,45 @@ function bounds(t: Tile): string {
   return t.count === t.max ? `${t.count}×` : `${t.count}–${t.max}`;
 }
 
+/**
+ * A section's first `limit` tiles, as the view draws them: a decklist's or
+ * deck's main zone by card type, in the order a decklist reads, each by name
+ * within; anything else as one run.
+ */
+function groups(
+  s: Section,
+  limit: number,
+): { category?: string; count: number; tiles: Tile[] }[] {
+  if (s.zone !== "main") return [{ count: 0, tiles: s.tiles.slice(0, limit) }];
+  const by = new Map<string, Tile[]>();
+  for (const t of s.tiles) {
+    const c = categoryOf(t.card);
+    by.set(c, [...(by.get(c) ?? []), t]);
+  }
+  let left = limit;
+  const out: { category: string; count: number; tiles: Tile[] }[] = [];
+  for (const category of CATEGORY_ORDER) {
+    const tiles = by.get(category);
+    if (!tiles || left <= 0) continue;
+    out.push({
+      category,
+      count: tiles.reduce((n, t) => n + t.count, 0),
+      tiles: tiles.slice(0, left),
+    });
+    left -= tiles.length;
+  }
+  return out;
+}
+
 /** What a tile knows about its copies, one line per bucket. */
 function describe(b: HeldBucket): string {
-  const printing = b.printing ? `${b.printing.set.toUpperCase()} ${b.printing.number}` : "printing not recorded";
+  const printing = b.printing
+    ? `${b.printing.set.toUpperCase()} ${b.printing.number}`
+    : "printing not recorded";
   const attrs = Object.entries(b.attrs).map(([k, v]) => `${k} ${String(v)}`);
-  return [`${b.qty}× ${printing}`, b.finish, ...attrs].filter(Boolean).join(" · ");
+  return [`${b.qty}× ${printing}`, b.finish, ...attrs]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /**
@@ -70,21 +109,26 @@ export function AssetView({
     (async () => {
       const lab = { select, execute };
       const store = await cardStore();
-      if (node.type === "place") return [{ tiles: await placeContents(lab, store, node.id) }];
-      if (node.type === "checklist") return [{ tiles: await checklistContents(lab, store, node.id) }];
+      if (node.type === "place")
+        return [{ tiles: await placeContents(lab, store, node.id) }];
+      if (node.type === "checklist")
+        return [{ tiles: await checklistContents(lab, store, node.id) }];
       const own = node.path.join("/");
       return (await deckContents(lab, store, node.id)).map((z) => {
         const at = z.target?.path.join("/");
         return {
           zone: z.zone,
           broken: !z.target,
-          ...(at !== undefined && at !== `${own}/${z.zone}` && { elsewhere: `/${at}` }),
+          ...(at !== undefined &&
+            at !== `${own}/${z.zone}` && { elsewhere: `/${at}` }),
           tiles: z.tiles,
         };
       });
     })()
       .then((s) => live && setSections(s))
-      .catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
+      .catch(
+        (e) => live && setError(e instanceof Error ? e.message : String(e)),
+      );
     return () => {
       live = false;
     };
@@ -108,16 +152,28 @@ export function AssetView({
 
       {sections && (
         <div className="stats">
-          <div className="stat">
+          {/* As the pool says them: every copy, then distinct cards — a
+              decklist's 100 counts its seven Islands seven times. */}
+          <div
+            className="stat"
+            title={
+              isChecklist
+                ? "Copies asked for; for a range, its minimum"
+                : "Copies held"
+            }
+          >
             <span className="label">Cards</span>
-            <span className="value">{all.length}</span>
-          </div>
-          <div className="stat">
-            <span className="label">{isChecklist ? "Asks for" : "Copies"}</span>
             <span className="value">{copies}</span>
           </div>
+          <div className="stat" title="Distinct cards">
+            <span className="label">Unique</span>
+            <span className="value">{all.length}</span>
+          </div>
           {standIns > 0 && (
-            <div className="stat" title="Cards whose printing was not recorded: the image is Scryfall's pick">
+            <div
+              className="stat"
+              title="Cards whose printing was not recorded: the image is Scryfall's pick"
+            >
               <span className="label">Stand-ins</span>
               <span className="value">{standIns}</span>
             </div>
@@ -138,39 +194,70 @@ export function AssetView({
               {s.zone && (
                 <h2 className="asset-zone">
                   {ZONE_LABEL[s.zone] ?? s.zone}
-                  <span className="asset-zone-count">{s.tiles.reduce((n, t) => n + t.count, 0)}</span>
-                  {s.elsewhere && <span className="asset-zone-where">{s.elsewhere}</span>}
-                  {s.broken && <span className="asset-zone-where missing">names nothing</span>}
+                  <span className="asset-zone-count">
+                    {s.tiles.reduce((n, t) => n + t.count, 0)}
+                  </span>
+                  {s.elsewhere && (
+                    <span className="asset-zone-where">{s.elsewhere}</span>
+                  )}
+                  {s.broken && (
+                    <span className="asset-zone-where missing">
+                      names nothing
+                    </span>
+                  )}
                 </h2>
               )}
-              {s.tiles.length === 0 && !s.broken && <div className="empty">Empty.</div>}
-              <div className="card-grid">
-                {s.tiles.slice(0, limit).map((t) => (
-                  <div
-                    key={t.oracleId}
-                    className={["card-tile", selectedId === t.card.id && "selected", t.standIn && "stand-in"]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onClick={() => onSelect(t.card)}
-                    onMouseEnter={() => onHoverCard?.(t.card)}
-                    onMouseLeave={() => onHoverCard?.(null)}
-                    title={[
-                      t.card.name,
-                      ...t.buckets.map(describe),
-                      t.standIn && "Shown as Scryfall's pick: no printing recorded",
-                    ]
-                      .filter(Boolean)
-                      .join("\n")}
-                  >
-                    <CardImage card={t.card} size="small" />
-                    <span className="qty-badge">{bounds(t)}</span>
-                    {t.standIn && <span className="stand-in-badge">stand-in</span>}
+              {s.tiles.length === 0 && !s.broken && (
+                <div className="empty">Empty.</div>
+              )}
+              {groups(s, limit).map((g) => (
+                <div key={g.category ?? ""}>
+                  {g.category && (
+                    <h3 className="asset-category">
+                      {g.category}
+                      <span className="asset-zone-count">{g.count}</span>
+                    </h3>
+                  )}
+                  <div className="card-grid">
+                    {g.tiles.map((t) => (
+                      <div
+                        key={t.oracleId}
+                        className={[
+                          "card-tile",
+                          selectedId === t.card.id && "selected",
+                          t.standIn && "stand-in",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        onClick={() => onSelect(t.card)}
+                        onMouseEnter={() => onHoverCard?.(t.card)}
+                        onMouseLeave={() => onHoverCard?.(null)}
+                        title={[
+                          t.card.name,
+                          ...t.buckets.map(describe),
+                          t.standIn &&
+                            "Shown as Scryfall's pick: no printing recorded",
+                        ]
+                          .filter(Boolean)
+                          .join("\n")}
+                      >
+                        <CardImage card={t.card} size="small" />
+                        <span className="qty-badge">{bounds(t)}</span>
+                        {t.standIn && (
+                          <span className="stand-in-badge">stand-in</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
               {s.tiles.length > limit && (
                 <div style={{ padding: "12px 0", textAlign: "center" }}>
-                  <button onClick={() => setShown((m) => ({ ...m, [key]: limit + PAGE }))}>
+                  <button
+                    onClick={() =>
+                      setShown((m) => ({ ...m, [key]: limit + PAGE }))
+                    }
+                  >
                     Show more ({s.tiles.length - limit})
                   </button>
                 </div>
