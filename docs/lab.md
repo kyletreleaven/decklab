@@ -40,12 +40,16 @@ your real collections.
 
 ## Lab mode
 
-The app opens a separate database, marked **LAB** in the window, and
-**rebuilds it from scratch on every launch**. Nothing in it is kept, so:
+The app opens a separate database, marked **LAB** in the window, which
+**keeps its data from run to run**; **a seed replaces it**. So:
 
-- **Schema can change freely.** Edit an experimental table and relaunch. The
-  sqlx trap of editing an applied migration cannot happen, because nothing
-  was previously applied.
+- **Schema can change freely.** The lab's data lives in a library file
+  whose format changes far more slowly than the schema
+  ([`library-format-5.md`](library-format-5.md)). After editing an
+  experimental table, dump the lab, then relaunch with that dump as the
+  seed: a seeded launch starts a fresh `lab.db`, so the sqlx trap of an
+  edited applied migration cannot happen. Without the reseed, the lab
+  refuses to open.
 - **Experiments carry their own migrations.** Lab mode runs the real
   migrations plus an experimental list (`lab/folders.sql`,
   `lab/asset_tags.sql`). The real `decklab.db` never sees that list.
@@ -55,13 +59,15 @@ The app opens a separate database, marked **LAB** in the window, and
 - **Code that touches experimental tables runs only in lab mode**, behind
   the same flags.
 
-**Built:** `npm run lab` (`DECKLAB_LAB=1`). Each launch deletes the last
-`lab.db` and starts it empty; the window title says **LAB**. It serves the
+**Built:** `npm run lab` (`DECKLAB_LAB=1`). A launch with a seed deletes the
+last `lab.db` and loads the seed into a fresh one; a launch without keeps
+the lab as it was. The window title says **LAB**. It serves the
 frontend on port 1440 (`DECKLAB_PORT`, and `src-tauri/tauri.lab.conf.json`
 pointing Tauri at it), so it runs beside `npm run tauri dev` on 1420. Both
 build the same Rust binary, so a Rust edit restarts both. Experimental
 migrations go in `lab::migrations()` (`src-tauri/src/lab.rs`), numbered from
-1000. Card data comes from the card store, which every mode shares
+1000; the first is the new model's schema, `lab/1000_assets.sql`. Card data
+comes from the card store, which every mode shares
 ([`card-fetching.md`](card-fetching.md) → *The card store*), so the lab never
 needs a copy of `decklab.db`.
 
@@ -76,9 +82,17 @@ path is taken from where the command was typed (npm's `INIT_CWD`), not from
 `src-tauri/`, where `tauri dev` runs the app. Emptying the lab and loading
 the seed happen once per launch: reloading the window keeps the lab as it
 is. The file is a hand-written *scenario* or a dump (`decklab dump`,
-[`cli.md`](cli.md)), converted to the lab's format by `decklab convert` once
-that differs from v4. A file that fails to load shows the error and leaves
-the lab empty. No other program writes to `lab.db` while the lab runs.
+[`cli.md`](cli.md)). A **version 5** file loads into the new model's tables
+(`writeLab`, `src/lib/library/labdb.ts`), which **today's UI does not read
+yet**; a schema 4 file loads into today's tables, as before. A schema 4 dump
+of the real library becomes version 5 with `decklab convert`, and `decklab
+dump --db <lab.db>` dumps the lab back as version 5. A file that fails to
+load shows the error and leaves the lab empty. No other program writes to
+`lab.db` while the lab runs.
+
+`npm run test:library` runs the whole way on copies of the real databases:
+dump, convert, load into a fresh lab, dump the lab. The last is the
+converted file, byte for byte, with no requests.
 
 ## The library file
 

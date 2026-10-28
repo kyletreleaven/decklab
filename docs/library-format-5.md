@@ -1,10 +1,12 @@
 # Library file, version 5 — proposal
 
-**Status: the format and `decklab convert` are built; the lab schema, its
-load and its dump are not.** Code: `src/lib/paths.ts` (paths and
-references), `src/lib/ontology.ts` (the asset types),
+**Status: built** — the format, `decklab convert`, and the lab schema's
+load and dump; no UI reads the lab schema yet. Code: `src/lib/paths.ts`
+(paths and references), `src/lib/ontology.ts` (the asset types),
 `src/lib/library/v5.ts` (the format), `src/lib/library/convert.ts` (v4 →
-5). The library file for the new model
+5), `src/lib/library/labdb.ts` and `src-tauri/migrations/lab/1000_assets.sql`
+(the lab schema). A line's `added` left out stays unknown; an asset's
+`created` and `updated` left out become the time of the load. The library file for the new model
 ([`inventory.md`](inventory.md)), to replace v4 ([`lab.md`](lab.md) → *The
 library file*) as the format the lab loads and dumps.
 
