@@ -1559,3 +1559,40 @@ a.external:hover {
   padding: 16px;
   color: var(--text-dim);
 }
+
+/* The lab's asset tree: a twisty, a type glyph, the name. */
+.nav-item.asset-row {
+  justify-content: flex-start;
+  gap: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.asset-row .twisty {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.asset-row .glyph {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.asset-row .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-row.inert {
+  cursor: default;
+}
+
+.asset-stub {
+  padding: 24px;
+  color: var(--text-dim);
+}

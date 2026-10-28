@@ -13,6 +13,9 @@ import { ImportDialog, type ImportTarget } from "./components/ImportDialog";
 import { ManaCost } from "./components/ManaCost";
 import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
+import { AssetTree } from "./components/AssetTree";
+import { assetTree, type AssetNode } from "./lib/assets";
+import { execute, processKind, select } from "./lib/db";
 import * as collectionsApi from "./lib/collections";
 import { UNIVERSE_ID, UNIVERSE_NAME } from "./lib/collections";
 import type { CardFilter } from "./lib/filters";
@@ -37,7 +40,9 @@ import type {
 
 type View =
   | { kind: "deck"; id: string }
-  | { kind: "collection"; id: string };
+  | { kind: "collection"; id: string }
+  /** An asset of the new model, in the lab only. */
+  | { kind: "asset"; id: string };
 
 /**
  * One entry per deck or collection you have touched, most recent first.
@@ -207,6 +212,28 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err)),
     );
   }, [reloadDecks, reloadCollections]);
+
+  // The new model's assets: lab only, and only once a version 5 seed has
+  // filled them. Read-only for now, so read once.
+  const [assets, setAssets] = useState<AssetNode[]>([]);
+  useEffect(() => {
+    processKind()
+      .then((kind) => (kind === "lab" ? assetTree({ select, execute }) : []))
+      .then(setAssets)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, []);
+  const currentAsset = useMemo(() => {
+    if (view.kind !== "asset") return null;
+    const find = (nodes: AssetNode[]): AssetNode | null => {
+      for (const n of nodes) {
+        if (n.id === view.id) return n;
+        const below = find(n.children);
+        if (below) return below;
+      }
+      return null;
+    };
+    return find(assets);
+  }, [view, assets]);
 
   const currentDeck =
     view.kind === "deck" ? (decks.find((d) => d.id === view.id) ?? null) : null;
@@ -611,6 +638,19 @@ export default function App() {
       <nav className="sidebar">
         <div className="brand">DECKLAB</div>
 
+        {assets.length > 0 && (
+          <div className="nav-section">
+            <div className="nav-header">
+              <span>Assets</span>
+            </div>
+            <AssetTree
+              nodes={assets}
+              activeId={currentAsset?.id ?? null}
+              onOpen={(node) => setView({ kind: "asset", id: node.id })}
+            />
+          </div>
+        )}
+
 
         <div className="nav-section">
           <div className="nav-header">
@@ -852,6 +892,16 @@ export default function App() {
               })
             }
           />
+        )}
+
+        {currentAsset && (
+          <div className="asset-stub">
+            <h2>{currentAsset.name}</h2>
+            <p>
+              /{currentAsset.path.join("/")} — {currentAsset.type}. Its contents
+              come with the place and deck views.
+            </p>
+          </div>
         )}
 
         {view.kind === "collection" && currentCollection && withPool(
