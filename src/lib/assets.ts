@@ -63,6 +63,11 @@ export interface Tile {
   count: number;
   /** A checklist's maximum: null for no limit, undefined outside checklists. */
   max?: number | null;
+  /**
+   * Against a decklist, in a deck it builds: held and on the list, on the
+   * list and not held, or held beyond what the list asks. Undefined elsewhere.
+   */
+  state?: BuiltState;
   buckets: HeldBucket[];
 }
 
@@ -436,4 +441,79 @@ export async function newDeckFrom(lab: Sql, decklistId: string, at = new Date().
   const id = await createAsset(lab, decklistId, "deck", { name: "deck", at });
   await setDeckList(lab, id, decklistId, at);
   return id;
+}
+
+export type BuiltState = "held" | "missing" | "extra";
+
+export interface BuiltZone extends ZoneContents {
+  /** Copies the decklist's zone asks for, and how many of them the deck holds. */
+  asked: number;
+  held: number;
+}
+
+/**
+ * A deck drawn as the decklist it builds: zone by zone, at card grain (the
+ * decklist's oracle projection, what the deck plays). Each card's copies
+ * split into runs by state — held, missing, extra — so a tile is never
+ * partly there: 3 of 7 Islands is a held 3× and a missing 4×. A range is
+ * held up to its maximum and missing below its minimum. Null when the
+ * deck builds no decklist, or one that no longer exists.
+ */
+export async function builtContents(
+  lab: Sql,
+  store: Sql,
+  deckId: string,
+  layers = [scryfallLayer(store)],
+): Promise<BuiltZone[] | null> {
+  const list = await deckList(lab, deckId);
+  let listId = list?.id;
+  if (list && !listId) {
+    // By name: whatever is at that path now.
+    const tree = await assetTree(lab);
+    const walk = (nodes: AssetNode[]): string | undefined => {
+      for (const n of nodes) {
+        if (pathKey(n.path) === pathKey(list.path) && n.type === "decklist") return n.id;
+        const below = walk(n.children);
+        if (below) return below;
+      }
+    };
+    listId = walk(tree);
+  }
+  if (!listId) return null;
+
+  const asked = await deckContents(lab, store, listId, layers);
+  const held = await deckContents(lab, store, deckId, layers);
+  const out: BuiltZone[] = [];
+  for (const zone of ZONE_ROLES) {
+    const a = asked.find((z) => z.zone === zone);
+    const h = held.find((z) => z.zone === zone);
+    if (!a && !h) continue;
+    const heldBy = new Map((h?.tiles ?? []).map((t) => [t.oracleId, t]));
+    const tiles: Tile[] = [];
+    let askedN = 0;
+    let heldN = 0;
+    for (const want of a?.tiles ?? []) {
+      const have = heldBy.get(want.oracleId);
+      heldBy.delete(want.oracleId);
+      // A checklist line is a range: held up to its maximum, missing below
+      // its minimum. `count` is the minimum; an exact line has max = min.
+      const has = have?.count ?? 0;
+      const cap = want.max === null ? Infinity : (want.max ?? want.count);
+      const there = Math.min(has, cap);
+      askedN += want.count;
+      heldN += Math.min(there, want.count);
+      if (there > 0) tiles.push({ ...have!, count: there, max: undefined, state: "held" });
+      if (want.count > has) tiles.push({ ...want, count: want.count - has, max: undefined, state: "missing" });
+      if (has > cap) tiles.push({ ...have!, count: has - cap, max: undefined, state: "extra" });
+    }
+    for (const have of heldBy.values()) tiles.push({ ...have, state: "extra" });
+    out.push({
+      zone,
+      ...(h?.target && { target: h.target }),
+      tiles: tiles.sort((x, y) => x.card.name.localeCompare(y.card.name)),
+      asked: askedN,
+      held: heldN,
+    });
+  }
+  return out;
 }

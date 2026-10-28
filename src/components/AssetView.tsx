@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import {
+  builtContents,
   checklistContents,
   deckContents,
   deckList,
   placeContents,
   type AssetNode,
+  type BuiltZone,
+  type ZoneContents,
   type DeckList,
   type HeldBucket,
   type Tile,
@@ -30,6 +33,8 @@ interface Section {
   elsewhere?: string;
   /** The zone names nothing that exists. */
   broken?: boolean;
+  /** A deck drawn as its decklist: copies the zone asks for, and holds of them. */
+  built?: { asked: number; held: number };
   tiles: Tile[];
 }
 
@@ -43,25 +48,30 @@ function bounds(t: Tile): string {
 /**
  * A section's first `limit` tiles, as the view draws them: a decklist's or
  * deck's main zone by card type, in the order a decklist reads, each by name
- * within; anything else as one run.
+ * within; anything else as one run. A deck's extras — held, not asked for —
+ * come last, as their own group.
  */
 function groups(
   s: Section,
   limit: number,
 ): { category?: string; count: number; tiles: Tile[] }[] {
-  if (s.zone !== "main") return [{ count: 0, tiles: s.tiles.slice(0, limit) }];
+  const listed = s.tiles.filter((t) => t.state !== "extra");
+  const extra = s.tiles.filter((t) => t.state === "extra");
   const by = new Map<string, Tile[]>();
-  for (const t of s.tiles) {
-    const c = categoryOf(t.card);
-    by.set(c, [...(by.get(c) ?? []), t]);
-  }
+  if (s.zone === "main") {
+    for (const t of listed) {
+      const c = categoryOf(t.card);
+      by.set(c, [...(by.get(c) ?? []), t]);
+    }
+  } else if (listed.length) by.set("", listed);
+  if (extra.length) by.set("Extra", extra);
   let left = limit;
-  const out: { category: string; count: number; tiles: Tile[] }[] = [];
-  for (const category of CATEGORY_ORDER) {
+  const out: { category?: string; count: number; tiles: Tile[] }[] = [];
+  for (const category of ["", ...CATEGORY_ORDER, "Extra"]) {
     const tiles = by.get(category);
     if (!tiles || left <= 0) continue;
     out.push({
-      category,
+      ...(category && { category }),
       count: tiles.reduce((n, t) => n + t.count, 0),
       tiles: tiles.slice(0, left),
     });
@@ -117,7 +127,7 @@ export function AssetView({
     setSections(null);
     setError(null);
     setShown({});
-    (async () => {
+    (async (): Promise<Section[]> => {
       const lab = { select, execute };
       const store = await cardStore();
       setList(node.type === "deck" ? await deckList(lab, node.id) : null);
@@ -125,12 +135,22 @@ export function AssetView({
         return [{ tiles: await placeContents(lab, store, node.id) }];
       if (node.type === "checklist")
         return [{ tiles: await checklistContents(lab, store, node.id) }];
+      // A deck that builds a decklist is drawn as it, missing copies dimmed.
+      const built =
+        node.type === "deck" ? await builtContents(lab, store, node.id) : null;
+      const zones: (ZoneContents &
+        Partial<Pick<BuiltZone, "asked" | "held">>)[] =
+        built ?? (await deckContents(lab, store, node.id));
       const own = node.path.join("/");
-      return (await deckContents(lab, store, node.id)).map((z) => {
+      return zones.map((z) => {
         const at = z.target?.path.join("/");
         return {
           zone: z.zone,
-          broken: !z.target,
+          // A deck missing a zone its decklist has: everything there is missing.
+          broken: !z.target && z.asked === undefined,
+          ...(z.asked !== undefined && {
+            built: { asked: z.asked, held: z.held ?? 0 },
+          }),
           ...(at !== undefined &&
             at !== `${own}/${z.zone}` && { elsewhere: `/${at}` }),
           tiles: z.tiles,
@@ -152,6 +172,16 @@ export function AssetView({
   const copies = all.reduce((n, t) => n + t.count, 0);
   const standIns = all.filter((t) => t.standIn).length;
   const isChecklist = node.type === "checklist" || node.type === "decklist";
+  const built =
+    sections?.every((s) => s.built) && sections.length > 0
+      ? sections.reduce(
+          (b, s) => ({
+            asked: b.asked + s.built!.asked,
+            held: b.held + s.built!.held,
+          }),
+          { asked: 0, held: 0 },
+        )
+      : null;
 
   return (
     <div className="pool asset-view">
@@ -167,12 +197,17 @@ export function AssetView({
               value={list?.id ?? (list ? "by-name" : "")}
               disabled={!onSetList}
               onChange={async (e) => {
-                await onSetList?.(node, e.target.value === "" ? null : e.target.value);
+                await onSetList?.(
+                  node,
+                  e.target.value === "" ? null : e.target.value,
+                );
                 setVersion((v) => v + 1);
               }}
             >
               <option value="">none</option>
-              {list?.byName && <option value="by-name">&amp;/{list.path.join("/")}</option>}
+              {list?.byName && (
+                <option value="by-name">&amp;/{list.path.join("/")}</option>
+              )}
               {decklists.map((d) => (
                 <option key={d.id} value={d.id}>
                   /{d.path.join("/")}
@@ -185,6 +220,17 @@ export function AssetView({
 
       {sections && (
         <div className="stats">
+          {built && (
+            <div
+              className="stat"
+              title="Copies the decklist asks for that this deck holds"
+            >
+              <span className="label">Built</span>
+              <span className="value">
+                {built.held} / {built.asked}
+              </span>
+            </div>
+          )}
           {/* As the pool says them: every copy, then distinct cards — a
               decklist's 100 counts its seven Islands seven times. */}
           <div
@@ -228,7 +274,9 @@ export function AssetView({
                 <h2 className="asset-zone">
                   {ZONE_LABEL[s.zone] ?? s.zone}
                   <span className="asset-zone-count">
-                    {s.tiles.reduce((n, t) => n + t.count, 0)}
+                    {s.built
+                      ? `${s.built.held} / ${s.built.asked}`
+                      : s.tiles.reduce((n, t) => n + t.count, 0)}
                   </span>
                   {s.elsewhere && (
                     <span className="asset-zone-where">{s.elsewhere}</span>
@@ -254,11 +302,12 @@ export function AssetView({
                   <div className="card-grid">
                     {g.tiles.map((t) => (
                       <div
-                        key={t.oracleId}
+                        key={`${t.oracleId}:${t.state ?? ""}`}
                         className={[
                           "card-tile",
                           selectedId === t.card.id && "selected",
                           t.standIn && "stand-in",
+                          t.state === "missing" && "dim",
                         ]
                           .filter(Boolean)
                           .join(" ")}
@@ -267,7 +316,13 @@ export function AssetView({
                         onMouseLeave={() => onHoverCard?.(null)}
                         title={[
                           t.card.name,
-                          ...t.buckets.map(describe),
+                          t.state === "missing" &&
+                            `${t.count} on the list, not in this deck`,
+                          t.state === "extra" &&
+                            `${t.count} in this deck, not on the list`,
+                          ...(t.state === "missing"
+                            ? []
+                            : t.buckets.map(describe)),
                           t.standIn &&
                             "Shown as Scryfall's pick: no printing recorded",
                         ]

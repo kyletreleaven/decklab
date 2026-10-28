@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   AssetError,
   assetTree,
+  builtContents,
   createAsset,
   deckContents,
   deckList,
@@ -226,5 +227,17 @@ describe("the lab's assets, for display", () => {
     expect(await deckList(sqlOver(db), box)).toBeNull();
     await expect(setDeckList(sqlOver(db), box, await find("Binders/Red"))).rejects.toThrow(/only build a decklist/);
     await expect(setDeckList(sqlOver(db), other, box)).rejects.toThrow(/Only a deck/);
+  });
+
+  it("draws a deck as its decklist: each card's copies split into held, missing and extra", async () => {
+    const box = await find("Decks/Burn box");
+    const zones = await builtContents(sqlOver(db), sqlOver(cards), box);
+    expect(zones!.map((z) => [z.zone, z.asked, z.held, z.tiles.map((t) => [t.card.id, t.count, t.state])])).toEqual([
+      ["main", 4, 3, [["bolt-m10", 3, "held"], ["bolt-2x2", 1, "missing"]]],
+      // The list's sideboard asks for 0–1 Sol Ring: one of two is within it.
+      ["side", 0, 0, [["bolt-2x2", 6, "extra"], ["sol-cmr", 1, "held"], ["sol-cmr", 1, "extra"]]],
+    ]);
+    await setDeckList(sqlOver(db), box, null);
+    expect(await builtContents(sqlOver(db), sqlOver(cards), box)).toBeNull();
   });
 });
