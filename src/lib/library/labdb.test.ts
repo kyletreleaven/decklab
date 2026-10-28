@@ -65,7 +65,7 @@ cards = [
 
 [[asset]]
 path = '/Decks/Izzet'
-type = "deck"
+type = "decklist"
 format = "commander"
 shows = '.arranged.by_mana'
 created = 2026-03-01T14:02:11.000Z
@@ -103,6 +103,20 @@ piles = [
 ]
 
 [[asset]]
+path = '/Built/Izzet'
+type = "deck"
+list = '/Decks/Izzet'
+shows = '/Decks/Izzet/piles'
+created = 2026-03-01T14:02:11.000Z
+updated = 2026-03-01T14:02:11.000Z
+
+[asset.zones]
+main = [
+  { card = "Lightning Bolt", oracle = "${BOLT}", qty = 1, set = "m10", number = "146" },
+]
+side = '/Binders/"St. Louis"'
+
+[[asset]]
 path = '/pools/cheap'
 type = "query pool"
 query = "usd<1"
@@ -131,7 +145,7 @@ describe("the lab database, against library file version 5", () => {
       .get(SOL);
     expect(sol).toEqual({ printing_id: "", finish: "", attrs: "{}" });
     const folders = db.prepare("SELECT name FROM assets WHERE type = 'folder' AND id <> 'root' ORDER BY name").all();
-    expect(folders).toEqual([{ name: "Binders" }, { name: "Decks" }, { name: "pools" }]);
+    expect(folders).toEqual([{ name: "Binders" }, { name: "Built" }, { name: "Decks" }, { name: "pools" }]);
   });
 
   it("follows a pinned reference when its target moves, and writes it rooted once it is not below", async () => {

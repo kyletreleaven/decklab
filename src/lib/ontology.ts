@@ -15,6 +15,7 @@ export const TYPES = [
   "pool",
   "list pool",
   "query pool",
+  "decklist",
   "deck",
   "arrangement",
 ] as const;
@@ -37,10 +38,15 @@ const ONTOLOGY: Record<AssetType, Node> = {
   pool: { parents: ["checklist"], facets: [] },
   "list pool": { parents: ["pool"], facets: [] },
   "query pool": { parents: ["pool"], facets: [] },
-  deck: {
+  // A decklist's zones are checklists: what a deck should hold. A deck's
+  // zones are places: what it does hold. Arrangements are the decklist's; a
+  // deck shows one of its decklist's (docs/inventory.md → *Every decklist
+  // has an oracle projection*).
+  decklist: {
     parents: [],
     facets: ["oracle", "arranged.by_mana", "arranged.by_type", "arranged.by_colour"],
   },
+  deck: { parents: [], facets: [] },
   arrangement: { parents: [], facets: [] },
 };
 
@@ -55,12 +61,12 @@ export function isA(type: AssetType, ancestor: AssetType): boolean {
 
 /**
  * The type of what a facet chain names, on an asset of `type`; null when the
- * type has no such facet. Chains: a deck's `oracle` is a deck (its
+ * type has no such facet. Chains: a decklist's `oracle` is a decklist (its
  * projection), so `oracle.arranged.by_type` is an arrangement.
  */
 export function facetType(type: AssetType, chain: string[]): AssetType | null {
   if (!chain.length) return type;
-  if (type === "deck" && chain[0] === "oracle") return facetType("deck", chain.slice(1));
+  if (type === "decklist" && chain[0] === "oracle") return facetType("decklist", chain.slice(1));
   if (!ONTOLOGY[type].facets.includes(chain.join("."))) return null;
   return chain[0] === "arranged" ? "arrangement" : null;
 }

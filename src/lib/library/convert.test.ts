@@ -100,19 +100,19 @@ describe("convert v4 → 5", () => {
   });
 
   it("gives a deck inline zones, a child maybe checklist, and an arrangement", () => {
-    const deck = at("Atraxa (deck)");
-    expect(deck).toMatchObject({ type: "deck", format: "commander" });
-    expect(at("Atraxa (deck)", "commander")).toMatchObject({ type: "checklist", unlisted: "excluded" });
-    expect(at("Atraxa (deck)", "main")).toMatchObject({ type: "checklist", unlisted: "excluded" });
-    expect(at("Atraxa (deck)", "maybe")).toMatchObject({
+    const deck = at("Atraxa (decklist)");
+    expect(deck).toMatchObject({ type: "decklist", format: "commander" });
+    expect(at("Atraxa (decklist)", "commander")).toMatchObject({ type: "checklist", unlisted: "excluded" });
+    expect(at("Atraxa (decklist)", "main")).toMatchObject({ type: "checklist", unlisted: "excluded" });
+    expect(at("Atraxa (decklist)", "maybe")).toMatchObject({
       type: "checklist",
       unlisted: "any",
       cards: [{ min: 1, max: null }],
     });
-    const piles = at("Atraxa (deck)", "piles");
+    const piles = at("Atraxa (decklist)", "piles");
     if (piles?.type !== "arrangement") throw new Error("not an arrangement");
     expect(piles.piles.map((p) => p.name)).toEqual(["Ramp", "Draw"]);
-    expect(piles.of).toEqual({ byName: false, rooted: true, names: ["Atraxa (deck)"], facets: [] });
+    expect(piles.of).toEqual({ byName: false, rooted: true, names: ["Atraxa (decklist)"], facets: [] });
 
     const text = dumpV5(library);
     expect(text).toContain("[asset.zones]\ncommander = [");
@@ -120,7 +120,7 @@ describe("convert v4 → 5", () => {
 
   it("renames on a clash between a collection and a deck, and reports it", () => {
     expect(report.renamed).toEqual([
-      { from: "Atraxa", to: "Atraxa (deck)", why: 'another asset is already called "Atraxa"' },
+      { from: "Atraxa", to: "Atraxa (decklist)", why: 'another asset is already called "Atraxa"' },
     ]);
   });
 
@@ -144,6 +144,6 @@ describe("convert v4 → 5", () => {
     const text = formatReport(report);
     expect(text).toContain("finish dropped: Paper: 1 line(s), 1 copy not nonfoil");
     expect(text).toContain('convert by hand: Wants was kind "wishlist"');
-    expect(text).toContain("renamed: Atraxa → /Atraxa (deck)");
+    expect(text).toContain("renamed: Atraxa → /Atraxa (decklist)");
   });
 });

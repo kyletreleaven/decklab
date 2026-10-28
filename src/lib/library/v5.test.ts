@@ -42,7 +42,7 @@ function sample(): V5Library {
       { path: ["pools", "cheap blue"], type: "query pool", query: "c:u usd<1" },
       {
         path: ["Decks", "Atraxa v1.2"],
-        type: "deck",
+        type: "decklist",
         format: "commander",
         shows: { byName: false, rooted: false, names: [], facets: ["arranged", "by_mana"] },
         created: T1,
@@ -189,10 +189,17 @@ cards = []
       [`[[asset]]\npath = '/a'\ntype = "checklist"\nunlisted = "any"\ncards = [ { card = "X", min = 3, max = 1 } ]`, /below/],
       [`[[asset]]\npath = '/a'\ntype = "place"\n\n[[asset]]\npath = '/a'\ntype = "place"`, /two assets/],
       [`[[asset]]\npath = '/a/b'\ntype = "place"\n\n[[asset]]\npath = '/a'\ntype = "place"`, /before its parent/],
-      [`[[asset]]\npath = '/d'\ntype = "deck"\n\n[asset.zones]\nmain = '/nowhere'`, /nothing at \/nowhere/],
-      [`[[asset]]\npath = '/p'\ntype = "place"\n\n[[asset]]\npath = '/d'\ntype = "deck"\n\n[asset.zones]\nmaybe = '/p'`, /unknown key `maybe`/],
-      [`[[asset]]\npath = '/d'\ntype = "deck"\n\n[[asset]]\npath = '/x'\ntype = "arrangement"\nof = '/d.oracle.arranged.by_size'\npiles = []`, /no facet/],
-      [`[[asset]]\npath = '/f'\ntype = "folder"\n\n[[asset]]\npath = '/x'\ntype = "arrangement"\nof = '/f'\npiles = []`, /a folder, not a deck/],
+      [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[asset.zones]\nmain = '/nowhere'`, /nothing at \/nowhere/],
+      [`[[asset]]\npath = '/p'\ntype = "place"\n\n[[asset]]\npath = '/d'\ntype = "decklist"\n\n[asset.zones]\nmaybe = '/p'`, /unknown key `maybe`/],
+      [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[[asset]]\npath = '/x'\ntype = "arrangement"\nof = '/d.oracle.arranged.by_size'\npiles = []`, /no facet/],
+      [`[[asset]]\npath = '/f'\ntype = "folder"\n\n[[asset]]\npath = '/x'\ntype = "arrangement"\nof = '/f'\npiles = []`, /a folder, not a decklist/],
+      // A deck: zones are places, `list` a decklist, `shows` one of its arrangements.
+      [`[[asset]]\npath = '/c'\ntype = "checklist"\nunlisted = "any"\n\n[[asset]]\npath = '/k'\ntype = "deck"\n\n[asset.zones]\nmain = '/c'`, /a checklist, not a place/],
+      [`[[asset]]\npath = '/k'\ntype = "deck"\nformat = "commander"`, /unknown key `format`/],
+      [`[[asset]]\npath = '/d'\ntype = "decklist"\nlist = '/d'`, /unknown key `list`/],
+      [`[[asset]]\npath = '/p'\ntype = "place"\n\n[[asset]]\npath = '/k'\ntype = "deck"\nlist = '/p'`, /a place, not a decklist/],
+      [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[[asset]]\npath = '/k'\ntype = "deck"\nshows = '/d.arranged.by_mana'`, /needs `list`/],
+      [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[[asset]]\npath = '/e'\ntype = "decklist"\n\n[[asset]]\npath = '/k'\ntype = "deck"\nlist = '/d'\nshows = '/e.arranged.by_mana'`, /not an arrangement of its decklist/],
     ];
     for (const [body, error] of cases) {
       expect(() => load(body), body).toThrow(LibraryFormatError);
@@ -205,13 +212,61 @@ cards = []
       load(`
 [[asset]]
 path = '/d'
-type = "deck"
+type = "decklist"
 shows = '.oracle.arranged.by_type'
 
 [asset.zones]
 main = '&/not yet'
 `),
     ).not.toThrow();
+  });
+
+  it("takes a deck: places for zones, written inline like a decklist's, and its decklist's arrangement", () => {
+    const text = `format = "decklab-library"
+version = 5
+
+[[asset]]
+path = '/Decklists/Izzet'
+type = "decklist"
+
+[asset.zones]
+main = [
+  { card = "Lightning Bolt", qty = 1 },
+]
+
+[[asset]]
+path = '/Decklists/Izzet/piles'
+type = "arrangement"
+of = '/Decklists/Izzet'
+piles = [
+  { name = "Burn", query = "o:damage" },
+]
+
+[[asset]]
+path = '/Decks/Izzet'
+type = "deck"
+list = '/Decklists/Izzet'
+shows = '/Decklists/Izzet/piles'
+
+[asset.zones]
+main = [
+  { card = "Lightning Bolt", qty = 1, set = "m10", number = "146" },
+]
+side = '/Boxes/Sideboards'
+
+[[asset]]
+path = '/Boxes/Sideboards'
+type = "place"
+storage = "deck box"
+cards = []
+`;
+    const lib = loadV5(text);
+    const main = lib.assets.find((a) => a.path.join("/") === "Decks/Izzet/main");
+    expect(main).toMatchObject({ type: "place", cards: [{ qty: 1 }] });
+    expect(dumpV5(loadV5(dumpV5(lib)))).toBe(dumpV5(lib));
+    expect(dumpV5(lib)).toContain("main = [\n  { card = \"Lightning Bolt\", qty = 1, set = \"m10\", number = \"146\" },\n]");
+    // A facet of its decklist does as well as a stored arrangement of it.
+    expect(() => loadV5(text.replace("shows = '/Decklists/Izzet/piles'", "shows = '/Decklists/Izzet.oracle.arranged.by_type'"))).not.toThrow();
   });
 
   it("points a schema 4 file at the converter", () => {

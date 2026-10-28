@@ -1,5 +1,5 @@
 import { rowToCard, type CardRow } from "./db";
-import { parseRef, pathKey } from "./paths";
+import { badName, parseRef, pathKey } from "./paths";
 import type { Sql } from "./sql";
 import { scryfallLayer, standIns, type Layer } from "./standIn";
 import type { Card } from "./types";
@@ -147,14 +147,15 @@ export async function checklistContents(lab: Sql, store: Sql, id: string, layers
 
 export interface ZoneContents {
   zone: string;
-  /** The checklist the zone names; absent when the reference is broken. */
+  /** The asset the zone names; absent when the reference is broken. */
   target?: { id: string; path: string[] };
   tiles: Tile[];
 }
 
 /**
- * A deck, zone by zone. A zone's reference is followed to its checklist:
- * pinned by id, or by name through the tree.
+ * A decklist or deck, zone by zone. A zone's reference is followed to its
+ * asset — a decklist's to a checklist, a deck's to a place — pinned by id,
+ * or by name through the tree.
  */
 export async function deckContents(lab: Sql, store: Sql, deckId: string, layers = [scryfallLayer(store)]): Promise<ZoneContents[]> {
   const tree = await assetTree(lab);
@@ -188,8 +189,121 @@ export async function deckContents(lab: Sql, store: Sql, deckId: string, layers 
     out.push({
       zone,
       ...(target && { target: { id: target.id, path: target.path } }),
-      tiles: target ? await checklistContents(lab, store, target.id, layers) : [],
+      tiles: !target
+        ? []
+        : deck.type === "deck"
+          ? await placeContents(lab, store, target.id, layers)
+          : await checklistContents(lab, store, target.id, layers),
     });
   }
   return out;
+}
+
+/* ---------- editing the tree ---------- */
+
+/** What the tree's menu can create; the others need more than a name. */
+export const CREATABLE = ["folder", "place", "checklist", "list pool", "decklist", "deck"] as const;
+export type Creatable = (typeof CREATABLE)[number];
+
+/** An edit the tree refuses, with a message to show as it stands. */
+export class AssetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AssetError";
+  }
+}
+
+const DEFAULT_NAME: Record<Creatable, string> = {
+  folder: "New folder",
+  place: "New place",
+  checklist: "New checklist",
+  "list pool": "New pool",
+  decklist: "New decklist",
+  deck: "New deck",
+};
+
+/**
+ * A new, empty asset, last among `parentId`'s children, named "New <type>"
+ * (numbered past any sibling already called that). Returns its id.
+ */
+export async function createAsset(lab: Sql, parentId: string, type: Creatable, at = new Date().toISOString()): Promise<string> {
+  const siblings = await lab.select<{ name: string; position: number }>(
+    "SELECT name, position FROM assets WHERE parent_id = $1",
+    [parentId],
+  );
+  const taken = new Set(siblings.map((s) => s.name));
+  let name = DEFAULT_NAME[type];
+  for (let n = 2; taken.has(name); n++) name = `${DEFAULT_NAME[type]} ${n}`;
+  const position = siblings.reduce((m, s) => Math.max(m, s.position + 1), 0);
+  const id = crypto.randomUUID();
+  await lab.execute(
+    `INSERT INTO assets (id, parent_id, position, name, type, created_at, updated_at, unlisted)
+     VALUES ($1, $2, $3, $4, $5, $6, $6, $7)`,
+    [id, parentId, position, name, type, at, type === "checklist" ? "any" : null],
+  );
+  return id;
+}
+
+/**
+ * Rename an asset. Pinned references follow it; by-name ones keep the old
+ * name, which is what *by name* means (docs/inventory.md → *Naming a set in
+ * a query*).
+ */
+export async function renameAsset(lab: Sql, id: string, name: string, at = new Date().toISOString()): Promise<void> {
+  const bad = badName(name);
+  if (bad) throw new AssetError(`Cannot rename: ${bad}.`);
+  const clash = await lab.select<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM assets
+      WHERE parent_id = (SELECT parent_id FROM assets WHERE id = $1) AND name = $2 AND id <> $1`,
+    [id, name],
+  );
+  if (clash[0].n) throw new AssetError(`Cannot rename: something beside it is already called “${name}”.`);
+  await lab.execute("UPDATE assets SET name = $2, updated_at = $3 WHERE id = $1", [id, name, at]);
+}
+
+/** An asset and everything below it: ids, the asset's first. */
+async function subtree(lab: Sql, id: string): Promise<string[]> {
+  const rows = await lab.select<{ id: string }>(
+    `WITH RECURSIVE below(id) AS (
+       SELECT $1 UNION ALL SELECT a.id FROM assets a JOIN below b ON a.parent_id = b.id
+     ) SELECT id FROM below`,
+    [id],
+  );
+  return rows.map((r) => r.id);
+}
+
+/** How many assets deleting `id` would delete, itself included. */
+export async function subtreeSize(lab: Sql, id: string): Promise<number> {
+  return (await subtree(lab, id)).length;
+}
+
+/**
+ * Delete an asset and everything below it, in one statement: the schema
+ * cascades to children, lines and references. Refused while an asset outside
+ * pins something inside, since the dump could not write that reference.
+ */
+export async function deleteAsset(lab: Sql, id: string): Promise<void> {
+  if (id === "root") throw new AssetError("The root cannot be deleted.");
+  const fk = await lab.select<{ foreign_keys: number }>("PRAGMA foreign_keys");
+  if (!fk[0]?.foreign_keys) throw new AssetError("Cannot delete: foreign keys are off, so nothing would cascade.");
+  const ids = await subtree(lab, id);
+  const inside = new Set(ids);
+  const pins = await lab.select<{ asset_id: string; role: string; target_id: string }>(
+    "SELECT asset_id, role, target_id FROM asset_refs WHERE target_id IS NOT NULL",
+  );
+  const from = pins.filter((p) => inside.has(p.target_id) && !inside.has(p.asset_id));
+  if (from.length) {
+    const tree = await assetTree(lab);
+    const paths = new Map<string, string>();
+    const index = (nodes: AssetNode[]) => {
+      for (const n of nodes) {
+        paths.set(n.id, "/" + n.path.join("/"));
+        index(n.children);
+      }
+    };
+    index(tree);
+    const list = from.map((p) => `${paths.get(p.asset_id)} (its ${p.role})`).join("\n");
+    throw new AssetError(`Cannot delete: other assets refer to it.\n\n${list}`);
+  }
+  await lab.execute("DELETE FROM assets WHERE id = $1", [id]);
 }

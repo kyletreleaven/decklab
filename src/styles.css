@@ -1596,3 +1596,55 @@ a.external:hover {
   padding: 24px;
   color: var(--text-dim);
 }
+
+.nav-item.asset-row.menu-open {
+  background: var(--bg-hover);
+}
+
+.asset-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent-dim);
+  border-radius: 3px;
+}
+
+/* The asset tree's right-click menu. */
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu button {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  text-align: left;
+  color: var(--text);
+}
+
+.context-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.context-menu button.danger {
+  color: var(--danger);
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}

@@ -14,7 +14,16 @@ import { ManaCost } from "./components/ManaCost";
 import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import { AssetTree } from "./components/AssetTree";
-import { assetTree, type AssetNode } from "./lib/assets";
+import { ask, message } from "@tauri-apps/plugin-dialog";
+import {
+  assetTree,
+  createAsset,
+  deleteAsset,
+  renameAsset,
+  subtreeSize,
+  type AssetNode,
+  type Creatable,
+} from "./lib/assets";
 import { execute, processKind, select } from "./lib/db";
 import * as collectionsApi from "./lib/collections";
 import { UNIVERSE_ID, UNIVERSE_NAME } from "./lib/collections";
@@ -214,18 +223,48 @@ export default function App() {
   }, [reloadDecks, reloadCollections]);
 
   // The lab shows the new model's assets in place of today's decks and
-  // collections. Read-only for now, so read once.
+  // collections. Read once, and again after each edit to the tree.
   const [lab, setLab] = useState(false);
   const [assets, setAssets] = useState<AssetNode[]>([]);
+  const labSql = useMemo(() => ({ select, execute }), []);
+  const reloadAssets = useCallback(async () => setAssets(await assetTree(labSql)), [labSql]);
   useEffect(() => {
     processKind()
       .then(async (kind) => {
         if (kind !== "lab") return;
         setLab(true);
-        setAssets(await assetTree({ select, execute }));
+        await reloadAssets();
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, []);
+  }, [reloadAssets]);
+
+  /** An edit to the tree, then the tree again; a refusal shown as it stands. */
+  async function editTree<T>(edit: () => Promise<T>): Promise<T | null> {
+    try {
+      return await edit();
+    } catch (err) {
+      await message(err instanceof Error ? err.message : String(err), { title: "Assets", kind: "error" });
+      return null;
+    } finally {
+      await reloadAssets();
+    }
+  }
+  const createIn = (parent: AssetNode | null, type: Creatable) =>
+    editTree(() => createAsset(labSql, parent?.id ?? "root", type));
+  const renameTo = async (node: AssetNode, name: string) => {
+    await editTree(() => renameAsset(labSql, node.id, name));
+  };
+  const remove = async (node: AssetNode) => {
+    const below = (await subtreeSize(labSql, node.id)) - 1;
+    const what = below ? `“${node.name}” and the ${below} asset${below === 1 ? "" : "s"} inside it` : `“${node.name}”`;
+    const yes = await ask(`Delete ${what}? This cannot be undone.`, {
+      title: "Delete",
+      kind: "warning",
+      okLabel: "Delete",
+      cancelLabel: "Cancel",
+    });
+    if (yes) await editTree(() => deleteAsset(labSql, node.id));
+  };
   const currentAsset = useMemo(() => {
     if (view.kind !== "asset") return null;
     const find = (nodes: AssetNode[]): AssetNode | null => {
@@ -238,6 +277,10 @@ export default function App() {
     };
     return find(assets);
   }, [view, assets]);
+  // The open asset deleted: back to All Magic rather than an empty pane.
+  useEffect(() => {
+    if (view.kind === "asset" && !currentAsset) setView(UNIVERSE_VIEW);
+  }, [view, currentAsset]);
 
   const currentDeck =
     view.kind === "deck" ? (decks.find((d) => d.id === view.id) ?? null) : null;
@@ -644,25 +687,25 @@ export default function App() {
 
         {lab && (
           <div className="nav-section">
-            <div className="nav-header">
-              <span>Assets</span>
-            </div>
-            {/* Built in, not in the tree: always first, never moved. */}
-            <button
-              className={`nav-item ${viewingUniverse ? "active" : ""}`}
-              onClick={() => setView(UNIVERSE_VIEW)}
-              title={`${UNIVERSE_NAME} — every card that exists`}
-            >
-              <span className="name">{UNIVERSE_NAME}</span>
-              <span className="count">∞</span>
-            </button>
-            <div className="nav-divider" />
-            {assets.length === 0 && <div className="nav-empty">No assets yet.</div>}
             <AssetTree
               nodes={assets}
               activeId={currentAsset?.id ?? null}
               onOpen={(node) => setView({ kind: "asset", id: node.id })}
-            />
+              onCreate={createIn}
+              onRename={renameTo}
+              onDelete={remove}
+            >
+              {/* Built in, not in the tree: always first, never moved, no menu. */}
+              <button
+                className={`nav-item ${viewingUniverse ? "active" : ""}`}
+                onClick={() => setView(UNIVERSE_VIEW)}
+                title={`${UNIVERSE_NAME} — every card that exists`}
+              >
+                <span className="name">{UNIVERSE_NAME}</span>
+                <span className="count">∞</span>
+              </button>
+              <div className="nav-divider" />
+            </AssetTree>
           </div>
         )}
 

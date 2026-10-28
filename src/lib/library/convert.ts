@@ -160,13 +160,14 @@ export function convertV4(v4: V4Library, lookups: Lookups): { library: V5Library
     });
   }
 
-  // Decks → decks with inline zones; `maybe` → a child checklist; piles →
-  // one arrangement.
+  // Decks → decklists with inline zones; `maybe` → a child checklist; piles
+  // → one arrangement. A v4 deck is a list: whether it is built, and where,
+  // v4 never said, so no deck (a collection of places) comes of it.
   for (const d of v4.decks) {
-    const path = place(d.name, "deck");
-    const deck: AssetOf<"deck"> = {
+    const path = place(d.name, "decklist");
+    const deck: AssetOf<"decklist"> = {
       path,
-      type: "deck",
+      type: "decklist",
       format: d.format,
       ...(d.notes !== "" && { notes: d.notes }),
       created: d.createdAt,

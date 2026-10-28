@@ -1,6 +1,6 @@
 -- The lab schema for the new model: assets, buckets, places, checklists,
--- pools, decks and arrangements. FOR REVIEW: not yet wired into
--- `lab::migrations()`, so nothing runs it.
+-- pools, decklists, decks and arrangements. The lab's migration 1000
+-- (`lab::migrations()`).
 --
 -- One schema behind library file version 5 (docs/library-format-5.md), whose
 -- load and dump are written against it. The model is docs/inventory.md.
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS assets (
   -- A node of the static ontology (src/lib/ontology.ts).
   type       TEXT NOT NULL CHECK (type IN (
                'folder', 'checklist', 'place', 'list pool', 'query pool',
-               'deck', 'arrangement')),
+               'decklist', 'deck', 'arrangement')),
   notes      TEXT,
   created_at TEXT,
   updated_at TEXT,
@@ -37,14 +37,14 @@ CREATE TABLE IF NOT EXISTS assets (
   storage    TEXT,                        -- place: binder, box, … (a note)
   unlisted   TEXT CHECK (unlisted IN ('any', 'excluded')),  -- checklist
   query      TEXT,                        -- query pool
-  format     TEXT,                        -- deck
+  format     TEXT,                        -- decklist
 
   UNIQUE (parent_id, name),
   CHECK (id = 'root' OR (parent_id IS NOT NULL AND name <> '' AND name NOT IN ('.', '..'))),
   CHECK (storage IS NULL OR type = 'place'),
   CHECK ((unlisted IS NOT NULL) = (type = 'checklist')),
   CHECK ((query IS NOT NULL) = (type = 'query pool')),
-  CHECK (format IS NULL OR type = 'deck')
+  CHECK (format IS NULL OR type = 'decklist')
 );
 
 INSERT OR IGNORE INTO assets (id, parent_id, position, name, type)
@@ -53,21 +53,21 @@ VALUES ('root', NULL, 0, '', 'folder');
 CREATE INDEX IF NOT EXISTS idx_assets_parent ON assets (parent_id, position);
 
 -- ---------------------------------------------------------- references
--- One row per reference an asset makes: a checklist's `on`, a deck's zones
--- and `shows`, an arrangement's `of`. docs/inventory.md → *Naming a set in a
+-- One row per reference an asset makes: a checklist's `on`, a decklist's
+-- or deck's zones and `shows`, a deck's `list`, an arrangement's `of`. docs/inventory.md → *Naming a set in a
 -- query*.
 --
 --   pinned   (no `&`): target_id, which follows the asset anywhere.
 --   by name  (`&`):    path, the text after `&`, resolved each time.
 --
 -- `rooted` is how the reference was written, which matters even when pinned:
--- a copied deck's relative zones are the copy's own. A pinned reference whose
+-- a copied decklist's relative zones are the copy's own. A pinned reference whose
 -- target is deleted keeps its row with both NULL: broken, shown as such.
 
 CREATE TABLE IF NOT EXISTS asset_refs (
   asset_id  TEXT NOT NULL REFERENCES assets (id) ON DELETE CASCADE,
   role      TEXT NOT NULL CHECK (role IN (
-              'on', 'shows', 'of', 'commander', 'main', 'side')),
+              'on', 'shows', 'list', 'of', 'commander', 'main', 'side')),
   target_id TEXT REFERENCES assets (id) ON DELETE SET NULL,
   path      TEXT,
   rooted    INTEGER NOT NULL CHECK (rooted IN (0, 1)),

@@ -311,7 +311,7 @@ export async function writeLab(
       storage: a.type === "place" ? a.storage : undefined,
       unlisted: a.type === "checklist" ? a.unlisted : undefined,
       query: a.type === "query pool" ? a.query : undefined,
-      format: a.type === "deck" ? a.format : undefined,
+      format: a.type === "decklist" ? a.format : undefined,
     });
   }
 
@@ -349,9 +349,11 @@ export async function writeLab(
       case "list pool":
         for (const l of a.cards) poolMembers.push([id, ...bucket(l.bucket), l.added ?? null]);
         break;
+      case "decklist":
       case "deck":
         for (const zone of ZONES) if (a.zones[zone]) addRef(a, zone, a.zones[zone]!);
         if (a.shows) addRef(a, "shows", a.shows);
+        if (a.type === "deck" && a.list) addRef(a, "list", a.list);
         break;
       case "arrangement":
         addRef(a, "of", a.of);
@@ -586,6 +588,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
       case "query pool":
         assets.push({ ...common, type: "query pool", query: row.query! });
         break;
+      case "decklist":
       case "deck": {
         const zones: Partial<Record<Zone, Ref>> = {};
         for (const zone of ZONES) {
@@ -593,13 +596,23 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
           if (r) zones[zone] = refOf(r, path);
         }
         const shows = myRefs.get("shows");
-        const deck: AssetOf<"deck"> = {
-          ...common,
-          type: "deck",
-          ...(row.format !== null && { format: row.format }),
-          ...(shows && { shows: refOf(shows, path) }),
-          zones,
-        };
+        const list = myRefs.get("list");
+        const deck: AssetOf<"decklist" | "deck"> =
+          row.type === "decklist"
+            ? {
+                ...common,
+                type: "decklist",
+                ...(row.format !== null && { format: row.format }),
+                ...(shows && { shows: refOf(shows, path) }),
+                zones,
+              }
+            : {
+                ...common,
+                type: "deck",
+                ...(list && { list: refOf(list, path) }),
+                ...(shows && { shows: refOf(shows, path) }),
+                zones,
+              };
         assets.push(deck);
         break;
       }
