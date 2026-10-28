@@ -66,7 +66,7 @@ updated = 2026-10-20T09:15:40.000Z
   or one with notes.
 - **`type` names one node of a static ontology**, in users' words: `place`
   (a location), `checklist` (a goal), `pool`, `list pool` and `query pool`
-  (ω sets), `deck`, `arrangement`, `folder`. Later, without a version change: `union`,
+  (ω sets), `decklist`, `deck`, `arrangement`, `folder`. Later, without a version change: `union`,
   `move`. The ontology is an is-a graph fixed in code and described in
   [`inventory.md`](inventory.md); a node may have more than one parent,
   though that should be rare. The file never encodes the hierarchy: it names
@@ -180,26 +180,37 @@ type = "pool"
 query = "c:u usd<1"
 ```
 
-**A deck** is a decklist: zones and a format. Piles are not part of it but
-an *arrangement*, an asset of its own (below). Zones are a deck's
-concept, and only a deck's: it maps each zone name (`commander`, `main`,
-`side`) to the checklist that fills it, and format checks run across them.
-**Every zone is a checklist asset**, and the deck always refers to it.
-*Inline* is only how the file writes the common case: a list of lines in
-place of a reference.
+**A decklist and a deck** are two types, as a list and a built deck are two
+things (`inventory.md` → *Every decklist has an oracle projection*):
+
+| | Its zones name | What it says |
+| --- | --- | --- |
+| **decklist** | checklists | what a deck should hold; `format`, and the arrangements |
+| **deck** | places | what a deck does hold: a deck box, its sideboard in another |
+
+Zones are these two types' concept, and only theirs: each maps a zone name
+(`commander`, `main`, `side`) to the asset that fills it. **Every zone is an
+asset**, and the decklist or deck always refers to it. *Inline* is only how
+the file writes the common case: a list of lines in place of a reference.
 
 ```toml
 main = [ { card = "Sol Ring", oracle = "6ad8011d-…", qty = 1 } ]
 ```
 
-means a child checklist at `<deck>/main`, with `qty` exact and unlisted
-cards excluded (which is what a decklist is, so neither is written), and
-the deck's zone `main` a pinned relative reference to it.
+On a **decklist** this means a child checklist at `<decklist>/main`, with
+`qty` exact and unlisted cards excluded (which is what a decklist is, so
+neither is written); on a **deck**, a child place at `<deck>/main` holding
+those copies. Either way the zone `main` is a pinned relative reference to
+it.
+
+**A decklist** has zones and a `format`, which format checks read across the
+zones. Piles are not part of it but an *arrangement*, an asset of its own
+(below).
 
 ```toml
 [[asset]]
 path = "/Decks/Atraxa Superfriends"
-type = "deck"
+type = "decklist"
 format = "commander"
 
 [asset.zones]
@@ -226,57 +237,82 @@ piles = [
 ]
 ```
 
-So the tree under the deck holds `commander`, `main`, `maybe` and `piles`.
+So the tree under the decklist holds `commander`, `main`, `maybe` and
+`piles`.
+
+**A deck** has zones that are places, and optionally **`list`**, the
+decklist it builds: its zones are checked zone by zone against the
+decklist's. No `format`: that is the list's. A deck without a `list` is a
+sectioned box and nothing more.
+
+```toml
+[[asset]]
+path = "/Deck boxes/Atraxa"
+type = "deck"
+list = "/Decks/Atraxa Superfriends"
+shows = "/Decks/Atraxa Superfriends/piles"
+
+[asset.zones]
+commander = [
+  { card = "Atraxa, Praetors' Voice", oracle = "…", qty = 1, set = "2xm", number = "190" },
+]
+main = [
+  { card = "Sol Ring", oracle = "6ad8011d-…", qty = 1, set = "c21", number = "263" },
+]
+side = "/Deck boxes/Sideboards"            # a place of its own, shared
+```
 
 **An arrangement** lays a decklist out on screen: an ordered list of named
 piles over the decklist's cards, with *Unsorted* for what is left. It is how
-the deck is shown, not what it holds, so one decklist can have several: by
-type while building, by role while tuning, a sideboard plan.
+the decklist is shown, not what it holds, so one decklist can have several:
+by type while building, by role while tuning, a sideboard plan.
 
 - **`of` names the decklist**, as the model says an arrangement does
   (`inventory.md` → *Decks*). It points up, which a relative reference
-  cannot, so a dump writes it rooted; pinned, it follows the deck anyway.
+  cannot, so a dump writes it rooted; pinned, it follows the decklist anyway.
 - **A pile lists buckets without counts**, like a list pool, so every copy
   in one bucket sits in the same pile (two printings of a card can sit in
   two piles, as `deck_cards.pile_id` allows today); or it has a `query`
   instead, so an automatic arrangement stays live.
-- **Which arrangement a deck shows** is the first one under it, unless the
-  deck says `shows = "by role"`, a pinned relative reference. It can name a
-  facet as well: `shows = ".arranged.by_mana"`. Whether a deck with no
-  arrangement of its own shows a facet by default is open.
+- **Which arrangement a decklist shows** is the first one under it, unless
+  the decklist says `shows = "by role"`, a pinned relative reference. It
+  can name a facet as well: `shows = ".arranged.by_mana"`. Whether a
+  decklist with no arrangement of its own shows a facet by default is open.
+- **A deck has no arrangements of its own: it shows one of its decklist's.**
+  Its `shows` names a facet of its `list` or an arrangement `of` it, and is
+  refused otherwise, or without a `list`. Left out, the deck shows what its
+  decklist shows.
 
 **The maybeboard is not a zone.** It is an ordinary checklist (unlisted
-cards allowed, `min` counts) that happens to sit under the deck, which does
-not refer to it (`inventory.md` → *Decks*). Being its child is only
-tidiness: a folder sums nothing. Anything else beside a deck, a sideboard
-plan for a later build, say, is the same.
-
-A physical deck, a place tied to the decklist, is left until the model
-needs it; it would be a `place` with `builds = "/Decks/Atraxa Superfriends"`,
-and zones of its own that are places.
+cards allowed, `min` counts) that happens to sit under the decklist, which
+does not refer to it (`inventory.md` → *Decks*). Being its child is only
+tidiness: a folder sums nothing. Anything else beside a decklist, a
+sideboard plan for a later build, say, is the same.
 
 **When a zone is written inline.** For a dump to be lossless, exactly when
 all of these hold:
 
-- the zone's checklist is a direct child of the deck, named after the zone;
-- the deck refers to it pinned and relative (`main`);
-- it has a decklist's defaults (exact counts, unlisted excluded) and nothing
-  of its own: no notes, no children.
+- the zone's asset is a direct child of the decklist or deck, named after
+  the zone;
+- the owner refers to it pinned and relative (`main`);
+- it has an inline zone's defaults and nothing of its own: no notes, no
+  children. For a decklist, a checklist with exact counts and unlisted
+  excluded; for a deck, a place with no `storage`.
 
-Otherwise the checklist is written as its own `[[asset]]` and the zone as a
-reference. Renaming the child (`main` → `core`) is followed by the pinned
-reference, so the deck keeps working, and the next dump writes
-`main = "core"` with the checklist as a block. Moving it out from under the
-deck is the same: it was always its own asset, the reference becomes rooted
-(*References*), and the deck plays the same cards. Only the file layout
+Otherwise the zone's asset is written as its own `[[asset]]` and the zone as
+a reference. Renaming the child (`main` → `core`) is followed by the pinned
+reference, so the owner keeps working, and the next dump writes
+`main = "core"` with the child as a block. Moving it out from under the
+owner is the same: it was always its own asset, the reference becomes rooted
+(*References*), and the decklist plays the same cards. Only the file layout
 changes.
 
-A deck with **referenced zones**, one shared core and its own commander:
+A decklist with **referenced zones**, one shared core and its own commander:
 
 ```toml
 [[asset]]
 path = "/Decks/Atraxa Superfriends"
-type = "deck"
+type = "decklist"
 format = "commander"
 
 [asset.zones]
@@ -285,10 +321,10 @@ main = "/Cores/Superfriends core"           # pinned: follows the core if it mov
 side = "&/Sideboards/current"               # whatever sits at that path
 ```
 
-A deck whose zones are all `&` references to its children is the
+A decklist whose zones are all `&` references to its children is the
 *conventional* deck of `inventory.md` → *Decks*: it needs no type of its
 own. No *extract zone* action is needed either: an inline zone is already a
-checklist in the tree, and another deck can refer to it as it is.
+checklist in the tree, and another decklist can refer to it as it is.
 
 ## References
 
@@ -343,9 +379,9 @@ than burying it.
 | `condition = "NM"` | `absent` |
 | any other condition | `attrs = { condition = … }`, with the attribute declared |
 | an item's `notes` | `attrs = { note = … }`. A distinct note makes a distinct bucket, as it made a distinct row in v4 |
-| a deck | a `deck` at `/<name>`, printings kept; `commander`, `main` and `side` as inline zones |
-| the `maybe` zone | not a zone: a child checklist, `/<deck>/maybe`, unlisted cards allowed, each line `min = qty` |
-| piles | one arrangement per deck, `/<deck>/piles`, `of` the deck, piles in their order, each listing its cards; a card's `pile` moves off its line |
+| a deck | a `decklist` at `/<name>`, printings kept; `commander`, `main` and `side` as inline zones. No `deck`: v4 never said whether a deck was built, or where |
+| the `maybe` zone | not a zone: a child checklist, `/<decklist>/maybe`, unlisted cards allowed, each line `min = qty` |
+| piles | one arrangement per decklist, `/<decklist>/piles`, `of` the decklist, piles in their order, each listing its cards; a card's `pile` moves off its line |
 | tags (`card_tags`) | one literal pool per tag, at `/pools/<tag>` |
 
 - **Oracle ids come from the card store**, read-only, by printing. Convert
