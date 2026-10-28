@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import {
   checklistContents,
   deckContents,
+  deckList,
   placeContents,
   type AssetNode,
+  type DeckList,
   type HeldBucket,
   type Tile,
 } from "../lib/assets";
@@ -91,13 +93,22 @@ export function AssetView({
   selectedId,
   onSelect,
   onHoverCard,
+  decklists = [],
+  onSetList,
 }: {
   node: AssetNode;
   selectedId: string | null;
   onSelect: (card: Card) => void;
   onHoverCard?: (card: Card | null) => void;
+  /** Every decklist in the tree, for a deck's *Builds*. */
+  decklists?: AssetNode[];
+  /** Points a deck at a decklist (null: none). Absent, *Builds* is read-only. */
+  onSetList?: (deck: AssetNode, decklistId: string | null) => Promise<void>;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
+  const [list, setList] = useState<DeckList | null>(null);
+  // Bumped by an edit made here, to read the asset again.
+  const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [shown, setShown] = useState<Record<string, number>>({});
 
@@ -109,6 +120,7 @@ export function AssetView({
     (async () => {
       const lab = { select, execute };
       const store = await cardStore();
+      setList(node.type === "deck" ? await deckList(lab, node.id) : null);
       if (node.type === "place")
         return [{ tiles: await placeContents(lab, store, node.id) }];
       if (node.type === "checklist")
@@ -134,7 +146,7 @@ export function AssetView({
     };
     // The path as text: a reloaded tree hands over new arrays for the same path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node.id, node.type, node.path.join("/")]);
+  }, [node.id, node.type, node.path.join("/"), version]);
 
   const all = sections?.flatMap((s) => s.tiles) ?? [];
   const copies = all.reduce((n, t) => n + t.count, 0);
@@ -148,6 +160,27 @@ export function AssetView({
         <span className="asset-view-path">
           /{node.path.join("/")} · {node.type}
         </span>
+        {node.type === "deck" && (
+          <label className="asset-builds" title="The decklist this deck builds">
+            Builds
+            <select
+              value={list?.id ?? (list ? "by-name" : "")}
+              disabled={!onSetList}
+              onChange={async (e) => {
+                await onSetList?.(node, e.target.value === "" ? null : e.target.value);
+                setVersion((v) => v + 1);
+              }}
+            >
+              <option value="">none</option>
+              {list?.byName && <option value="by-name">&amp;/{list.path.join("/")}</option>}
+              {decklists.map((d) => (
+                <option key={d.id} value={d.id}>
+                  /{d.path.join("/")}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {sections && (

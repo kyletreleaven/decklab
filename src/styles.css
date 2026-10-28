@@ -1730,3 +1730,16 @@ a.external:hover {
   font-weight: 500;
   color: var(--text-faint);
 }
+
+.asset-builds {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.asset-builds select {
+  max-width: 280px;
+}

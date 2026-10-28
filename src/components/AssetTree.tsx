@@ -59,6 +59,7 @@ export function AssetTree({
   onRename,
   onDelete,
   onMove,
+  onBuildDeck,
   children,
 }: {
   nodes: AssetNode[];
@@ -70,6 +71,8 @@ export function AssetTree({
   onDelete: (node: AssetNode) => Promise<void>;
   /** Moves `node` under `parent` (null: the top). */
   onMove: (node: AssetNode, parent: AssetNode | null) => Promise<void>;
+  /** Makes a deck building this decklist, as its child; resolves to the new id. */
+  onBuildDeck: (decklist: AssetNode) => Promise<string | null>;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState<Set<string>>(
@@ -107,12 +110,21 @@ export function AssetTree({
     };
   }, [menu]);
 
-  const create = async (parent: AssetNode | null, type: Creatable) => {
-    setMenu(null);
-    const id = await onCreate(parent, type);
+  /** After an asset is made under `parent`: show it, and open its name. */
+  const created = (parent: AssetNode | null, id: string | null) => {
     if (!id) return;
     if (parent) setOpen((s) => new Set(s).add(parent.id));
     setRenaming(id);
+  };
+
+  const create = async (parent: AssetNode | null, type: Creatable) => {
+    setMenu(null);
+    created(parent, await onCreate(parent, type));
+  };
+
+  const buildDeck = async (decklist: AssetNode) => {
+    setMenu(null);
+    created(decklist, await onBuildDeck(decklist));
   };
 
   const commitRename = async (node: AssetNode, name: string) => {
@@ -297,6 +309,14 @@ export function AssetTree({
               New {LABEL[type]}
             </button>
           ))}
+          {menu.node?.type === "decklist" && (
+            <>
+              <div className="context-menu-divider" />
+              <button role="menuitem" onClick={() => void buildDeck(menu.node!)}>
+                New deck from this decklist
+              </button>
+            </>
+          )}
           {menu.node && (
             <>
               <div className="context-menu-divider" />

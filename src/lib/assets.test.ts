@@ -2,9 +2,22 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
-import { AssetError, assetTree, createAsset, deckContents, deleteAsset, moveAsset, placeContents, renameAsset } from "./assets";
+import {
+  AssetError,
+  assetTree,
+  createAsset,
+  deckContents,
+  deckList,
+  deleteAsset,
+  moveAsset,
+  newDeckFrom,
+  placeContents,
+  renameAsset,
+  setDeckList,
+} from "./assets";
+import { readLab } from "./library/labdb";
 import { writeLab } from "./library/labdb";
-import { loadV5 } from "./library/v5";
+import { dumpV5, loadV5 } from "./library/v5";
 import { sqlOver } from "./sqlOver";
 
 const MIGRATIONS = join(__dirname, "../../src-tauri/migrations");
@@ -180,5 +193,38 @@ describe("the lab's assets, for display", () => {
     await expect(moveAsset(sqlOver(db), fresh, burn)).rejects.toThrow(/already called “main”/);
     await moveAsset(sqlOver(db), red, "root");
     expect(await find("Red")).toBe(red);
+  });
+
+  it("makes a deck from a decklist: its child, building it, with an empty place per zone", async () => {
+    const burn = await find("Decks/Burn");
+    const id = await newDeckFrom(sqlOver(db), burn);
+    expect(await find("Decks/Burn/deck")).toBe(id);
+    expect(await deckList(sqlOver(db), id)).toEqual({ id: burn, path: ["Decks", "Burn"], byName: false });
+    const zones = await deckContents(sqlOver(db), sqlOver(cards), id);
+    expect(zones.map((z) => [z.zone, z.target?.path.join("/"), z.tiles.length])).toEqual([
+      ["main", "Decks/Burn/deck/main", 0],
+      ["side", "Decks/Burn/deck/side", 0],
+    ]);
+    expect(await newDeckFrom(sqlOver(db), burn)).toBe(await find("Decks/Burn/deck 2"));
+    // It dumps, and the dump loads.
+    const text = dumpV5(await readLab(sqlOver(db), sqlOver(cards)));
+    expect(text).toContain("path = '/Decks/Burn/deck'\ntype = \"deck\"\nlist = '/Decks/Burn'");
+    expect(() => loadV5(text)).not.toThrow();
+  });
+
+  it("repoints a deck, dropping its old `shows` and keeping zones it has", async () => {
+    const box = await find("Decks/Burn box");
+    const other = await createAsset(sqlOver(db), "root", "decklist");
+    db.prepare("INSERT INTO asset_refs VALUES (?, 'shows', NULL, 'Decks/Burn.arranged.by_mana', 1, '')").run(box);
+    await setDeckList(sqlOver(db), box, other);
+    expect(db.prepare("SELECT role FROM asset_refs WHERE asset_id = ? ORDER BY role").all(box)).toEqual([
+      { role: "list" },
+      { role: "main" },
+      { role: "side" },
+    ]);
+    await setDeckList(sqlOver(db), box, null);
+    expect(await deckList(sqlOver(db), box)).toBeNull();
+    await expect(setDeckList(sqlOver(db), box, await find("Binders/Red"))).rejects.toThrow(/only build a decklist/);
+    await expect(setDeckList(sqlOver(db), other, box)).rejects.toThrow(/Only a deck/);
   });
 });

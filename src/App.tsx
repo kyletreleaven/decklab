@@ -21,7 +21,9 @@ import {
   createAsset,
   deleteAsset,
   moveAsset,
+  newDeckFrom,
   renameAsset,
+  setDeckList,
   subtreeSize,
   type AssetNode,
   type Creatable,
@@ -259,6 +261,21 @@ export default function App() {
   const moveTo = async (node: AssetNode, parent: AssetNode | null) => {
     await editTree(() => moveAsset(labSql, node.id, parent?.id ?? "root"));
   };
+  const buildDeck = (decklist: AssetNode) => editTree(() => newDeckFrom(labSql, decklist.id));
+  const setList = async (deck: AssetNode, decklistId: string | null) => {
+    await editTree(() => setDeckList(labSql, deck.id, decklistId));
+  };
+  const decklists = useMemo(() => {
+    const out: AssetNode[] = [];
+    const walk = (nodes: AssetNode[]) => {
+      for (const n of nodes) {
+        if (n.type === "decklist") out.push(n);
+        walk(n.children);
+      }
+    };
+    walk(assets);
+    return out;
+  }, [assets]);
   const remove = async (node: AssetNode) => {
     const below = (await subtreeSize(labSql, node.id)) - 1;
     const what = below ? `“${node.name}” and the ${below} asset${below === 1 ? "" : "s"} inside it` : `“${node.name}”`;
@@ -700,6 +717,7 @@ export default function App() {
               onRename={renameTo}
               onDelete={remove}
               onMove={moveTo}
+              onBuildDeck={buildDeck}
             >
               {/* Built in, not in the tree: always first, never moved, no menu. */}
               <button
@@ -964,6 +982,8 @@ export default function App() {
         {currentAsset && (
           <AssetView
             node={currentAsset}
+            decklists={decklists}
+            onSetList={setList}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}

@@ -232,17 +232,22 @@ const DEFAULT_NAME: Record<Creatable, string> = {
 };
 
 /**
- * A new, empty asset under `parentId`, named "New <type>" (numbered past any
- * sibling already called that). Returns its id.
+ * A new, empty asset under `parentId`, named `name` — by default "New
+ * <type>" — numbered past any sibling already called that. Returns its id.
  */
-export async function createAsset(lab: Sql, parentId: string, type: Creatable, at = new Date().toISOString()): Promise<string> {
+export async function createAsset(
+  lab: Sql,
+  parentId: string,
+  type: Creatable,
+  { name: base = DEFAULT_NAME[type], at = new Date().toISOString() }: { name?: string; at?: string } = {},
+): Promise<string> {
   const siblings = await lab.select<{ name: string }>(
     "SELECT name FROM assets WHERE parent_id = $1",
     [parentId],
   );
   const taken = new Set(siblings.map((s) => s.name));
-  let name = DEFAULT_NAME[type];
-  for (let n = 2; taken.has(name); n++) name = `${DEFAULT_NAME[type]} ${n}`;
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
   const id = crypto.randomUUID();
   await lab.execute(
     `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at, unlisted)
@@ -337,4 +342,98 @@ export async function moveAsset(lab: Sql, id: string, parentId: string, at = new
   );
   if (clash[0].n) throw new AssetError(`Cannot move: something there is already called “${me.name}”.`);
   await lab.execute("UPDATE assets SET parent_id = $2, updated_at = $3 WHERE id = $1", [id, parentId, at]);
+}
+
+/* ---------- a deck and its decklist ---------- */
+
+const ZONE_ROLES = ["commander", "main", "side"] as const;
+
+/** The decklist a deck builds: pinned, as an asset; by name, as its path. */
+export interface DeckList {
+  id?: string;
+  path: string[];
+  byName: boolean;
+}
+
+/** Which decklist a deck builds, if any. */
+export async function deckList(lab: Sql, deckId: string): Promise<DeckList | null> {
+  const [r] = await lab.select<{ target_id: string | null; path: string | null; rooted: number }>(
+    "SELECT target_id, path, rooted FROM asset_refs WHERE asset_id = $1 AND role = 'list'",
+    [deckId],
+  );
+  if (!r) return null;
+  if (r.target_id === null) return { path: r.path ? parseRef(r.path).names : [], byName: true };
+  const tree = await assetTree(lab);
+  const find = (nodes: AssetNode[]): AssetNode | undefined => {
+    for (const n of nodes) {
+      if (n.id === r.target_id) return n;
+      const below = find(n.children);
+      if (below) return below;
+    }
+  };
+  const target = find(tree);
+  return target ? { id: target.id, path: target.path, byName: false } : null;
+}
+
+/**
+ * Point a deck at the decklist it builds (`null`: none), pinned, so it
+ * follows the decklist anywhere. Its `shows` goes, being one of the old
+ * decklist's arrangements. A deck with no zones yet gets an empty place for
+ * each zone the decklist has, as its children; zones it has are kept.
+ *
+ * Written so that stopping between statements leaves a valid lab: the plugin
+ * holds no transaction across calls.
+ */
+export async function setDeckList(lab: Sql, deckId: string, decklistId: string | null, at = new Date().toISOString()): Promise<void> {
+  const types = await lab.select<{ id: string; type: string }>(
+    "SELECT id, type FROM assets WHERE id IN ($1, $2)",
+    [deckId, decklistId ?? deckId],
+  );
+  const typeOf = (id: string) => types.find((t) => t.id === id)?.type;
+  if (typeOf(deckId) !== "deck") throw new AssetError("Only a deck builds a decklist.");
+  if (decklistId !== null && typeOf(decklistId) !== "decklist") throw new AssetError("A deck can only build a decklist.");
+
+  await lab.execute("DELETE FROM asset_refs WHERE asset_id = $1 AND role IN ('list', 'shows')", [deckId]);
+  if (decklistId !== null) {
+    await lab.execute(
+      "INSERT INTO asset_refs (asset_id, role, target_id, path, rooted, facets) VALUES ($1, 'list', $2, NULL, 1, '')",
+      [deckId, decklistId],
+    );
+    const zones = await lab.select<{ role: string }>(
+      "SELECT role FROM asset_refs WHERE asset_id = $1 AND role IN ('commander', 'main', 'side')",
+      [deckId],
+    );
+    if (!zones.length) {
+      const theirs = await lab.select<{ role: string }>(
+        "SELECT role FROM asset_refs WHERE asset_id = $1 AND role IN ('commander', 'main', 'side')",
+        [decklistId],
+      );
+      for (const zone of ZONE_ROLES.filter((z) => theirs.some((t) => t.role === z))) {
+        const [child] = await lab.select<{ id: string; type: string }>(
+          "SELECT id, type FROM assets WHERE parent_id = $1 AND name = $2",
+          [deckId, zone],
+        );
+        if (child && child.type !== "place") continue; // something else by that name: leave the zone unset
+        const id = child?.id ?? crypto.randomUUID();
+        if (!child) {
+          await lab.execute(
+            "INSERT INTO assets (id, parent_id, name, type, created_at, updated_at) VALUES ($1, $2, $3, 'place', $4, $4)",
+            [id, deckId, zone, at],
+          );
+        }
+        await lab.execute(
+          "INSERT INTO asset_refs (asset_id, role, target_id, path, rooted, facets) VALUES ($1, $2, $3, NULL, 0, '')",
+          [deckId, zone, id],
+        );
+      }
+    }
+  }
+  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [deckId, at]);
+}
+
+/** A new deck building `decklistId`, as its child, named "deck". Returns its id. */
+export async function newDeckFrom(lab: Sql, decklistId: string, at = new Date().toISOString()): Promise<string> {
+  const id = await createAsset(lab, decklistId, "deck", { name: "deck", at });
+  await setDeckList(lab, id, decklistId, at);
+  return id;
 }
