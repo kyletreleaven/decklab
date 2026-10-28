@@ -213,13 +213,17 @@ export default function App() {
     );
   }, [reloadDecks, reloadCollections]);
 
-  // The new model's assets: lab only, and only once a version 5 seed has
-  // filled them. Read-only for now, so read once.
+  // The lab shows the new model's assets in place of today's decks and
+  // collections. Read-only for now, so read once.
+  const [lab, setLab] = useState(false);
   const [assets, setAssets] = useState<AssetNode[]>([]);
   useEffect(() => {
     processKind()
-      .then((kind) => (kind === "lab" ? assetTree({ select, execute }) : []))
-      .then(setAssets)
+      .then(async (kind) => {
+        if (kind !== "lab") return;
+        setLab(true);
+        setAssets(await assetTree({ select, execute }));
+      })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
   const currentAsset = useMemo(() => {
@@ -638,11 +642,22 @@ export default function App() {
       <nav className="sidebar">
         <div className="brand">DECKLAB</div>
 
-        {assets.length > 0 && (
+        {lab && (
           <div className="nav-section">
             <div className="nav-header">
               <span>Assets</span>
             </div>
+            {/* Built in, not in the tree: always first, never moved. */}
+            <button
+              className={`nav-item ${viewingUniverse ? "active" : ""}`}
+              onClick={() => setView(UNIVERSE_VIEW)}
+              title={`${UNIVERSE_NAME} — every card that exists`}
+            >
+              <span className="name">{UNIVERSE_NAME}</span>
+              <span className="count">∞</span>
+            </button>
+            <div className="nav-divider" />
+            {assets.length === 0 && <div className="nav-empty">No assets yet.</div>}
             <AssetTree
               nodes={assets}
               activeId={currentAsset?.id ?? null}
@@ -651,7 +666,8 @@ export default function App() {
           </div>
         )}
 
-
+        {/* Today's model: not for the lab, which shows assets instead. */}
+        {!lab && (<>
         <div className="nav-section">
           <div className="nav-header">
             <span>Decks</span>
@@ -753,6 +769,7 @@ export default function App() {
             </button>
           ))}
         </div>
+        </>)}
       </nav>
 
       <main className="main">
