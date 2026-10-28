@@ -535,7 +535,8 @@ its own:
   through where it sits in the tree.
 
 Today piles live inside the deck (`deck_piles`, `deck_cards.pile_id`), and
-the v4 library file keeps them there.
+the v4 library file keeps them there. From v5 on, an arrangement is an asset
+of its own, and v4's piles convert to one per deck.
 
 ## Moves and plans
 
@@ -734,6 +735,50 @@ owner, rooted otherwise. The same tables, for the library file, are in
 - **The token says which references a rename rewrites**: pinned ones are
   rewritten, `&` ones never are. None needs an identifier.
 
+**Facets: implicit assets.** Some assets come with every asset of a type:
+derived, never stored, never made by hand. They are **facets** of their
+asset, written as a suffix: `/` is *contains*, `.` is *derived from*.
+
+| Facet | Is |
+| --- | --- |
+| `MyDeck.arranged.by_mana`, `.by_type`, `.by_colour` | automatic arrangements of a decklist |
+| `MyDeck.oracle` | the decklist's oracle projection (*Every decklist has an oracle projection*) |
+| perhaps `Binder.surplus`, `Wishlist.missing` | derived from goals and contents (*Plans*) |
+
+- **The ontology declares them.** Each type says which facets its assets
+  have; facet names are identifiers from code (`by_mana`), not user names.
+- **A facet holds nothing.** It is not a place in the tree, so nothing sits
+  under it. The tree may show an asset's facets, set apart.
+- **Facets chain** where the facet's own type declares facets:
+  `MyDeck.oracle.arranged.by_type` arranges the oracle projection.
+- **Referenced like any asset.** Relative to its owner, a facet starts with
+  the dot: a deck's `shows = ".arranged.by_mana"` is its own, and a copied
+  deck's is the copy's. A facet never moves or is renamed on its own, so
+  pinned and by-name references to one differ only as relative and rooted
+  do.
+- **Materialise to edit.** A facet cannot be edited; copying it makes an
+  ordinary asset that starts as an exact snapshot, as rendering a live pool
+  to a literal one does.
+- **Never in a library file.** A dump skips facets, so adding one needs no
+  new version.
+
+All Magic stays a built-in asset of its own, not a facet.
+
+**Quoting in paths.** A path segment containing anything special — `.`,
+`/`, `&`, `:`, a quote, or a space where the context needs one — is wrapped
+in quotes, as Windows quotes a path with spaces; a quote inside a name is
+doubled. An unquoted `.` always starts a facet.
+
+```
+/Decks/"Atraxa v1.2".arranged.by_mana
+/Binders/"St. Louis"/"Trade/Keep"
+```
+
+So names can hold any character, and the text alone says what a path
+means: reading one never depends on the asset's type. Queries needed a rule
+for names with spaces anyway (`:"Atraxa v1.2"`), and it is the one Scryfall
+syntax already uses for values (`o:"draw a card"`).
+
 ## What falls out
 
 - **Sum or max** stops being one open question. Locations combine by `Sum`.
@@ -795,8 +840,9 @@ decklist does not refer to.
   breaks something. References outside the app (an exported list, a
   note) are not rewritten, which an identifier would not fix either.
 - **Rendering `absent` printings and finishes:** the rule, and its scopes.
-- **Arrangements:** whether piles become their own asset (see *Decks*),
-  and whether an entry may sit in more than one pile.
+- **Arrangements:** whether a card may sit in more than one pile of one
+  arrangement. That arrangements are assets of their own is settled (see
+  *Decks*, and [`library-format-5.md`](library-format-5.md)).
 - **The ontology of asset types.** Every asset's type is a node in a
   static is-a graph, fixed in code; users do not add types. The relations
   this doc states as facts become its edges: a place is a refinement of an
