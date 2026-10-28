@@ -427,8 +427,17 @@ Design in [`docs/lab.md`](docs/lab.md).
       schema (`lab/1000_assets.sql`), its load and dump (`labdb.ts`), and
       the lab keeping its data between runs, a seed replacing it. Built and
       round-tripped on the real library; not yet run in the app.
-- ⬜ **Today's UI on the new model's tables.** A version 5 seed loads into
-      tables nothing on screen reads yet.
+- 🚧 **Today's UI on the new model's tables.** The lab's sidebar is the
+      asset tree, with All Magic built in at the top, always first and never
+      moved; Decks and Collections are not shown in the lab. Opening a place
+      or deck shows a placeholder until the place and deck views exist.
+- 🚧 **A right-click menu on the asset tree**, where editing the tree
+      starts. **Built (lab):** new child (folder, place, checklist, pool,
+      decklist, deck; `+` on the header for the top), rename in place, delete with a
+      confirm. Delete is refused while an asset outside pins something
+      inside; a by-name reference just keeps its path. All Magic has no
+      menu. **Not yet:** move (needs drag or a destination picker),
+      duplicate, and which items each type offers.
 - ⬜ **Compress the library file with identifiers of its own.** Every line
       repeats the card's name and 36-character oracle id; the real library's
       version 5 file is 4,000 lines, most of them that. A file-local key per
