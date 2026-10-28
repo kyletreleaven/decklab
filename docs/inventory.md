@@ -156,6 +156,33 @@ rules scoped per project or per asset, to **rulesets as assets** of their
 own. So implement for flexibility: one place resolves a stand-in, given the
 bucket and its context, and whatever configures it can change behind it.
 
+**The lean: printing selectors, layered.** A **selector** is an asset type
+that maps a bucket to a printing, or abstains. Selectors stack, and the
+first that answers wins:
+
+- **Scryfall's pick is the bottom layer**, built in as All Magic is, and
+  always answers, so a tile always has something to show.
+- **Layers above it** are a list (*my art for Sol Ring: the C21 foil*), a
+  rule (*newest*, *oldest*, *prefer foil*), or contextual (*the most common
+  printing among my copies in this place*).
+- **Display only.** A selector never changes a bucket.
+
+```toml
+[[asset]]
+path = '/Preferences/my art'
+type = "selector"
+over = '/Preferences/newest'      # the layer below; left out, Scryfall's pick
+cards = [ { card = "Sol Ring", set = "c21", number = "263" } ]
+```
+
+How a view finds its selector is open. The lean is an **active selector**,
+chosen in the UI as the active collection is, and later an **explicit
+reference** for an asset that wants its own (`printings = '/Preferences/my
+art'`, as a deck says `shows`). *Not* by the folder a selector sits in:
+that would make containment mean something, which *The asset tree* rules
+out. Until selectors exist, the resolver is the chain with Scryfall's layer
+alone.
+
 Whatever the rule, the tile must say it is a stand-in, so it is not read as
 a known printing. This is the same question as the *active printing* in
 `TODO.md` (bug 002), seen from storage.
