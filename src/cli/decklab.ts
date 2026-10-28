@@ -1,9 +1,11 @@
 import { constants, Database } from "bun:sqlite";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { dumpV4 } from "../lib/library/v4";
+import { convertV4, formatReport, type Lookups } from "../lib/library/convert";
+import { dumpV4, loadV4, type V4Printing } from "../lib/library/v4";
 import { readV4 } from "../lib/library/v4db";
+import { dumpV5, loadV5 } from "../lib/library/v5";
 import type { Sql } from "../lib/sql";
 import { sqlOver } from "../lib/sqlOver";
 
@@ -16,10 +18,14 @@ import { sqlOver } from "../lib/sqlOver";
 const USAGE = `usage: decklab <command> [options]
 
 commands:
-  dump [file]    write the library as a library file, to file or standard output
+  dump [file]           write the library as a library file, to file or standard output
+  convert <in> [out]    convert a schema 4 library file to version 5, to out or
+                        standard output; what was lost goes to standard error
 
 options:
-  --db <path>    the database to read (default: the app's decklab.db)
+  --db <path>       the database to read (default: the app's decklab.db)
+  --store <path>    the card store convert reads oracle ids from
+                    (default: the app's card-cache.db)
 `;
 
 /** Thrown for a mistake in the command line itself: exit 2, with usage. */
@@ -29,7 +35,7 @@ class UsageError extends Error {}
  * Where the app keeps its databases: Tauri's app config directory, which the
  * SQL plugin resolves `sqlite:decklab.db` against.
  */
-function appDatabase(): string {
+function appDatabase(name = "decklab.db"): string {
   const id = "dev.treleaven.decklab";
   const dir =
     process.platform === "darwin"
@@ -37,7 +43,7 @@ function appDatabase(): string {
       : process.platform === "win32"
         ? (process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"))
         : process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(dir, id, "decklab.db");
+  return join(dir, id, name);
 }
 
 /** A dump for each user schema the CLI knows, by migration version. */
@@ -101,15 +107,52 @@ async function dump(path: string, out: string | undefined): Promise<void> {
   }
 }
 
-function parse(argv: string[]): { command: string; args: string[]; db: string } {
+/**
+ * v4 → 5, file to file. Oracle ids and names come from the card store, read
+ * only: this sends nothing to Scryfall, and a printing the store lacks is
+ * reported, not fetched. The result is loaded back before it is written, so
+ * a converter bug cannot produce a file version 5 refuses.
+ */
+function convert(input: string, out: string | undefined, store: string): void {
+  const v4 = loadV4(readFileSync(input, "utf8"));
+  const db = openToRead(store);
+  try {
+    const byPrinting = db.prepare(
+      `SELECT oracle_id FROM cards
+        WHERE set_code = ? AND collector_number = ?
+          AND COALESCE(json_extract(data, '$.lang'), 'en') = ?
+        LIMIT 1`,
+    );
+    const byOracle = db.prepare("SELECT name FROM cards WHERE oracle_id = ? LIMIT 1");
+    const lookups: Lookups = {
+      oracleOf: (p: V4Printing) =>
+        (byPrinting.all(...([p.set, p.number, p.lang] as never[]))[0] as { oracle_id: string } | undefined)
+          ?.oracle_id,
+      nameOf: (oracle: string) =>
+        (byOracle.all(...([oracle] as never[]))[0] as { name: string } | undefined)?.name,
+    };
+    const { library, report } = convertV4(v4, lookups);
+    const text = dumpV5(library);
+    loadV5(text);
+    if (out === undefined) process.stdout.write(text);
+    else writeFileSync(out, text);
+    process.stderr.write(formatReport(report) || "nothing lost\n");
+  } finally {
+    db.close();
+  }
+}
+
+function parse(argv: string[]): { command: string; args: string[]; db: string; store: string } {
   const args: string[] = [];
   let db = appDatabase();
+  let store = appDatabase("card-cache.db");
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--db") {
+    if (arg === "--db" || arg === "--store") {
       const value = argv[++i];
-      if (value === undefined) throw new UsageError("--db needs a path");
-      db = value;
+      if (value === undefined) throw new UsageError(`${arg} needs a path`);
+      if (arg === "--db") db = value;
+      else store = value;
     } else if (arg === "-h" || arg === "--help") {
       args.unshift("help");
     } else if (arg.startsWith("-")) {
@@ -119,11 +162,11 @@ function parse(argv: string[]): { command: string; args: string[]; db: string } 
     }
   }
   const [command = "help", ...rest] = args;
-  return { command, args: rest, db };
+  return { command, args: rest, db, store };
 }
 
 async function main(argv: string[]): Promise<number> {
-  const { command, args, db } = parse(argv);
+  const { command, args, db, store } = parse(argv);
   switch (command) {
     case "help":
       process.stdout.write(USAGE);
@@ -131,6 +174,10 @@ async function main(argv: string[]): Promise<number> {
     case "dump":
       if (args.length > 1) throw new UsageError("dump takes at most one file");
       await dump(db, args[0]);
+      return 0;
+    case "convert":
+      if (args.length < 1 || args.length > 2) throw new UsageError("convert takes a file, and optionally where to write");
+      convert(args[0], args[1], store);
       return 0;
     default:
       throw new UsageError(`unknown command ${command}`);
