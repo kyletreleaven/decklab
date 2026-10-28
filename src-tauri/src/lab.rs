@@ -1,14 +1,14 @@
-//! Lab mode: the app on a throwaway database.
+//! Lab mode: the app on a database of its own.
 //!
-//! `DECKLAB_LAB=1` (`npm run lab`) opens `lab.db` instead of `decklab.db`, and
-//! every launch starts it over, empty. The webview asks `prepare_lab_db`
-//! first, which deletes the last lab database (`src/lib/db.ts`). Card data
-//! comes from the card store, which every mode shares (`card_store.rs`), so
-//! loading a library into the lab fetches nothing the store already has. See
-//! `docs/lab.md` → *Lab mode*.
+//! `DECKLAB_LAB=1` (`npm run lab`) opens `lab.db` instead of `decklab.db`,
+//! which keeps its data from run to run. Card data comes from the card store,
+//! which every mode shares (`card_store.rs`), so loading a library into the
+//! lab fetches nothing the store already has. See `docs/lab.md` → *Lab mode*.
 //!
-//! `DECKLAB_LAB_SEED=<file>` names a library file to load into the new lab at
-//! launch; the webview asks `lab_seed` for it before showing anything.
+//! `DECKLAB_LAB_SEED=<file>` names a library file that replaces the lab's
+//! data at launch: the webview asks `prepare_lab_db` first, which then
+//! deletes the last lab database (`src/lib/db.ts`), and `lab_seed` for the
+//! file before showing anything.
 //!
 //! Both happen once per launch, not once per page load: reloading the window
 //! keeps the lab as it is.
@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
-use tauri_plugin_sql::Migration;
+use tauri_plugin_sql::{Migration, MigrationKind};
 
 use crate::card_store::{database_dir, remove_database};
 
@@ -32,10 +32,17 @@ pub fn enabled() -> bool {
 /// Experimental migrations, applied to `lab.db` only, after the real ones.
 ///
 /// Number them from 1000 so they never collide with the real list. One that
-/// graduates is rewritten as the next real migration; one that loses is
-/// deleted, and the next launch's fresh database has never heard of it.
+/// graduates is rewritten as the next real migration. The lab keeps its data
+/// between runs, so editing or deleting one already applied makes the lab
+/// refuse to open: dump the lab first, then relaunch with that dump as the
+/// seed, which starts a fresh `lab.db`.
 pub fn migrations() -> Vec<Migration> {
-    vec![]
+    vec![Migration {
+        version: 1000,
+        description: "assets",
+        sql: include_str!("../migrations/lab/1000_assets.sql"),
+        kind: MigrationKind::Up,
+    }]
 }
 
 /// Mark the window, so a lab session is never mistaken for the real one.
@@ -46,14 +53,20 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Whether this is lab mode; if so, and this launch has not yet, delete the
-/// last lab database.
+/// Whether a seed was given: then it replaces the lab's data.
+fn seeded() -> bool {
+    std::env::var_os("DECKLAB_LAB_SEED").is_some_and(|v| !v.is_empty())
+}
+
+/// Whether this is lab mode. With a seed, and the first time this launch
+/// asks, the last lab database is deleted, so the seed replaces it. Without
+/// one, the lab keeps what it had.
 #[tauri::command]
 pub fn prepare_lab_db(app: AppHandle) -> Result<bool, String> {
     if !enabled() {
         return Ok(false);
     }
-    if !PREPARED.swap(true, Ordering::SeqCst) {
+    if !PREPARED.swap(true, Ordering::SeqCst) && seeded() {
         remove_database(&database_dir(&app)?.join("lab.db"))?;
     }
     Ok(true)

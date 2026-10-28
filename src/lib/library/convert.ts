@@ -196,7 +196,14 @@ export function convertV4(v4: V4Library, lookups: Lookups): { library: V5Library
 
     const maybe = zoneLines("maybe").map((l) => ({ ...l, max: null }));
     if (maybe.length) {
-      assets.push({ path: [...path, "maybe"], type: "checklist", unlisted: "any", cards: maybe });
+      assets.push({
+        path: [...path, "maybe"],
+        type: "checklist",
+        unlisted: "any",
+        created: d.createdAt,
+        updated: d.updatedAt,
+        cards: maybe,
+      });
     }
 
     if (d.piles.length) {
@@ -215,6 +222,8 @@ export function convertV4(v4: V4Library, lookups: Lookups): { library: V5Library
         path: [...path, "piles"],
         type: "arrangement",
         of: { byName: false, rooted: true, names: path, facets: [] },
+        created: d.createdAt,
+        updated: d.updatedAt,
         piles,
       });
     }

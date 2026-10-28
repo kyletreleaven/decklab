@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { convertV4, formatReport, type Lookups } from "../lib/library/convert";
 import { dumpV4, loadV4, type V4Printing } from "../lib/library/v4";
 import { readV4 } from "../lib/library/v4db";
+import { readLab } from "../lib/library/labdb";
 import { dumpV5, loadV5 } from "../lib/library/v5";
 import type { Sql } from "../lib/sql";
 import { sqlOver } from "../lib/sqlOver";
@@ -18,14 +19,16 @@ import { sqlOver } from "../lib/sqlOver";
 const USAGE = `usage: decklab <command> [options]
 
 commands:
-  dump [file]           write the library as a library file, to file or standard output
+  dump [file]           write the library as a library file, to file or standard output:
+                        schema 4 for the app's database, version 5 for the lab's
   convert <in> [out]    convert a schema 4 library file to version 5, to out or
                         standard output; what was lost goes to standard error
 
 options:
-  --db <path>       the database to read (default: the app's decklab.db)
-  --store <path>    the card store convert reads oracle ids from
-                    (default: the app's card-cache.db)
+  --db <path>       the database to read (default: the app's decklab.db;
+                    the lab's is lab.db, beside it)
+  --store <path>    the card store, which says what cards are, for convert
+                    and a lab dump (default: the app's card-cache.db)
 `;
 
 /** Thrown for a mistake in the command line itself: exit 2, with usage. */
@@ -46,9 +49,14 @@ function appDatabase(name = "decklab.db"): string {
   return join(dir, id, name);
 }
 
-/** A dump for each user schema the CLI knows, by migration version. */
-const DUMPS: Record<number, (sql: Sql) => Promise<string>> = {
+/**
+ * A dump for each user schema the CLI knows, by migration version. 1000 is
+ * the lab's (`src-tauri/migrations/lab/`), which names cards by id only and
+ * reads what they are from the card store.
+ */
+const DUMPS: Record<number, (sql: Sql, store: () => Sql) => Promise<string>> = {
   4: async (sql) => dumpV4(await readV4(sql)),
+  1000: async (sql, store) => dumpV5(await readLab(sql, store())),
 };
 
 async function schemaOf(sql: Sql): Promise<number> {
@@ -82,8 +90,10 @@ function openToRead(path: string): Database {
  * snapshot even if the app commits an edit meanwhile. In WAL mode the app
  * is not held up by it.
  */
-async function dump(path: string, out: string | undefined): Promise<void> {
+async function dump(path: string, out: string | undefined, storePath: string): Promise<void> {
   const db = openToRead(path);
+  let storeDb: Database | undefined;
+  const store = () => sqlOver((storeDb ??= openToRead(storePath)));
   try {
     const sql = sqlOver(db);
     db.run("BEGIN");
@@ -96,7 +106,7 @@ async function dump(path: string, out: string | undefined): Promise<void> {
           `${path} is at schema ${schema}; this decklab dumps schema ${Object.keys(DUMPS).join(", ")}`,
         );
       }
-      text = await dumpOf(sql);
+      text = await dumpOf(sql, store);
     } finally {
       db.run("COMMIT");
     }
@@ -104,6 +114,7 @@ async function dump(path: string, out: string | undefined): Promise<void> {
     else writeFileSync(out, text);
   } finally {
     db.close();
+    storeDb?.close();
   }
 }
 
@@ -173,7 +184,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "dump":
       if (args.length > 1) throw new UsageError("dump takes at most one file");
-      await dump(db, args[0]);
+      await dump(db, args[0], store);
       return 0;
     case "convert":
       if (args.length < 1 || args.length > 2) throw new UsageError("convert takes a file, and optionally where to write");

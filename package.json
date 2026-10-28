@@ -15,7 +15,7 @@
     "cli": "bun src/cli/decklab.ts",
     "cli:build": "mkdir -p build && cd build && bun build --compile ../src/cli/decklab.ts --outfile decklab",
     "test:sql": "QUERY_SQL=1 vitest run src/lib/query/compile.integration.test.ts",
-    "test:library": "LIBRARY_DB=1 vitest run --testTimeout=120000 src/lib/library/v4db.integration.test.ts"
+    "test:library": "LIBRARY_DB=1 vitest run --testTimeout=120000 src/lib/library/v4db.integration.test.ts src/lib/library/labdb.integration.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.24",
