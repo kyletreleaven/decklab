@@ -14,6 +14,7 @@ import { ManaCost } from "./components/ManaCost";
 import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import { AssetTree } from "./components/AssetTree";
+import { AssetView } from "./components/AssetView";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   assetTree,
@@ -960,13 +961,12 @@ export default function App() {
         )}
 
         {currentAsset && (
-          <div className="asset-stub">
-            <h2>{currentAsset.name}</h2>
-            <p>
-              /{currentAsset.path.join("/")} — {currentAsset.type}. Its contents
-              come with the place and deck views.
-            </p>
-          </div>
+          <AssetView
+            node={currentAsset}
+            selectedId={selectedCard?.id ?? null}
+            onSelect={setSelectedCard}
+            onHoverCard={hoverCard}
+          />
         )}
 
         {view.kind === "collection" && currentCollection && withPool(

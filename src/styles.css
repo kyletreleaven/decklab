@@ -1592,11 +1592,6 @@ a.external:hover {
   cursor: default;
 }
 
-.asset-stub {
-  padding: 24px;
-  color: var(--text-dim);
-}
-
 .nav-item.asset-row.menu-open {
   background: var(--bg-hover);
 }
@@ -1670,4 +1665,58 @@ a.external:hover {
 .asset-row .asset-rename {
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* The lab's view of a place, checklist, decklist or deck. */
+.asset-view-path {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.asset-section + .asset-section {
+  margin-top: 8px;
+}
+
+.asset-zone {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+}
+
+.asset-zone-count {
+  font-weight: 400;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.asset-zone-where {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+/* A tile drawn as a stand-in: no printing recorded, so the image is only
+   Scryfall's pick for the card. */
+.card-tile.stand-in img {
+  opacity: 0.8;
+}
+
+.stand-in-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-dim);
+  font-size: 10px;
+  pointer-events: none;
 }

@@ -42,6 +42,8 @@ export async function assetTree(lab: Sql): Promise<AssetNode[]> {
 export interface HeldBucket {
   /** Absent when the printing was not recorded. */
   printingId?: string;
+  /** Its set and collector number, for saying which printing. */
+  printing?: { set: string; number: string };
   finish?: string;
   attrs: Record<string, unknown>;
   qty: number;
@@ -92,7 +94,10 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[]): Promise<Til
   }
   for (const [oracle, id] of await standIns(layers, unprinted)) drawn.set(oracle, { id, standIn: true });
 
-  const ids = [...new Set([...drawn.values()].map((d) => d.id))];
+  // The drawn printings, and every bucket's, to say which it is.
+  const ids = [
+    ...new Set([...[...drawn.values()].map((d) => d.id), ...lines.map((l) => l.printing_id).filter((p) => p !== "")]),
+  ];
   const cards = new Map<string, Card>();
   for (let i = 0; i < ids.length; i += 400) {
     const chunk = ids.slice(i, i + 400);
@@ -115,6 +120,9 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[]): Promise<Til
       count: ls.reduce((n, l) => n + l.qty, 0),
       buckets: ls.map((l) => ({
         ...(l.printing_id !== "" && { printingId: l.printing_id }),
+        ...(cards.has(l.printing_id) && {
+          printing: { set: cards.get(l.printing_id)!.setCode, number: cards.get(l.printing_id)!.collectorNumber },
+        }),
         ...(l.finish !== "" && { finish: l.finish }),
         attrs: JSON.parse(l.attrs) as Record<string, unknown>,
         qty: l.qty,
