@@ -475,6 +475,32 @@ build. The empty goal is the top of this order: every goal implies it.
 build and a box relate; no tools for chains of goals are promised. Probably
 nothing more than a goal remembering the decklist it came from.
 
+### Checking a deck against its decklist
+
+**At card grain, nothing needs matching.** Both sides project to the card
+and are summed: the list asks for 7 Islands, the deck holds 3. This is how a
+deck builds its decklist today (`builtContents`): each card's copies split
+into runs — held, missing, extra — and a tile is never partly there.
+
+**Finer than that, copies must be matched to lines**, because one held copy
+can satisfy more than one line. The list asks *Sol Ring, any* and *Sol Ring,
+C21*; the deck holds a C21 and a CMR. Right: C21 to the C21 line, CMR to
+*any*. A pass that hands C21 to *any* first reports the C21 line missing
+when nothing is.
+
+**Most specific line first** fixes that while patterns nest — *C21* inside
+*any* — but they can cross. The list asks *Sol Ring, foil* and *Sol Ring,
+C21*; the deck holds a C21 foil and a CMR foil. The C21 foil fits both, the
+CMR foil only the first, and neither line is narrower than the other.
+
+**So the general form is matching with counts — max flow, per card**: lines
+on one side with what they ask, held buckets on the other with what they
+hold, an edge where a bucket fits a line. A card has a handful of each, so
+it costs nothing at decklist size, and it says *which* lines are unmet —
+*missing: Sol Ring, C21*, not *one Sol Ring short*. **Lean:** stay at card
+grain until a view wants *right card, wrong printing*, then match by flow
+rather than by a greedy rule that is right only while patterns nest.
+
 ### Goals as deck constraints
 
 Goals are a simplified class of deck constraints, and a sensible one: the
