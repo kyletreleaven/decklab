@@ -429,6 +429,27 @@ Design in [`docs/lab.md`](docs/lab.md).
       round-tripped on the real library; not yet run in the app.
 - ⬜ **Today's UI on the new model's tables.** A version 5 seed loads into
       tables nothing on screen reads yet.
+- ⬜ **Compress the library file with identifiers of its own.** Every line
+      repeats the card's name and 36-character oracle id; the real library's
+      version 5 file is 4,000 lines, most of them that. A file-local key per
+      card (a `[cards]` table defining it once, lines referring to it) would
+      shrink it without putting ids in the model: the identifiers exist only
+      in the file, and a load resolves them away. Weigh against readability
+      and `git diff`, which a line naming its card in full does well. See
+      [`docs/library-format-5.md`](docs/library-format-5.md) → *Open*.
+- ⬜ **Interned keys in the schema, only once a measurement asks.** The same
+      idea in the database: store each distinct value once, refer to it by a
+      small integer, give it no meaning. A table of card keys (oracle and
+      printing ids to integers), and above all a `buckets` table (integer id,
+      unique over oracle, printing, finish, attributes), so lines become
+      `(asset, bucket, qty)`: two-column keys instead of five, "every place
+      holding this bucket" an integer index lookup, and how many copies each
+      bucket holds grouped on one integer instead of four text columns. Still
+      "a bucket is a value": the id is never dumped, never referenced, never
+      shown, and a load interns afresh. Costs a join on read, interning on
+      write, and unused buckets to sweep or leave. Not at today's ~2,700
+      lines; try it in the lab when the 50k-card binder (*Virtualise long
+      grids*) makes it measurable. The format does not change.
 - ⬜ **Lab loads a file at launch:** `DECKLAB_LAB_SEED=path`, loaded into the
       empty `lab.db` before the UI starts. Design in
       [`docs/lab.md`](docs/lab.md) → *Lab mode*.
