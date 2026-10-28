@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS assets (
   -- NULL only for the root row, so UNIQUE (parent_id, name) below holds for
   -- every real asset, top level included.
   parent_id  TEXT REFERENCES assets (id) ON DELETE CASCADE,
-  position   INTEGER NOT NULL,            -- order among siblings
   name       TEXT NOT NULL,
   -- A node of the static ontology (src/lib/ontology.ts).
   type       TEXT NOT NULL CHECK (type IN (
@@ -39,6 +38,8 @@ CREATE TABLE IF NOT EXISTS assets (
   query      TEXT,                        -- query pool
   format     TEXT,                        -- decklist
 
+  -- Siblings are told apart by name, and have no order of their own: a
+  -- custom order would be a view's, if ever. Also the index on parent_id.
   UNIQUE (parent_id, name),
   CHECK (id = 'root' OR (parent_id IS NOT NULL AND name <> '' AND name NOT IN ('.', '..'))),
   CHECK (storage IS NULL OR type = 'place'),
@@ -47,10 +48,8 @@ CREATE TABLE IF NOT EXISTS assets (
   CHECK (format IS NULL OR type = 'decklist')
 );
 
-INSERT OR IGNORE INTO assets (id, parent_id, position, name, type)
-VALUES ('root', NULL, 0, '', 'folder');
-
-CREATE INDEX IF NOT EXISTS idx_assets_parent ON assets (parent_id, position);
+INSERT OR IGNORE INTO assets (id, parent_id, name, type)
+VALUES ('root', NULL, '', 'folder');
 
 -- ---------------------------------------------------------- references
 -- One row per reference an asset makes: a checklist's `on`, a decklist's

@@ -34,14 +34,22 @@ interface Menu {
   node: AssetNode | null;
 }
 
+/** Where a drag would land: an asset to become its child, or the top. */
+type DropTarget = AssetNode | "top";
+
+/** How long a drag rests on a closed row before it opens. */
+const SPRING_MS = 600;
+
 /**
  * The lab's asset tree (docs/inventory.md → *The asset tree*): the section's
  * header, `children` (All Magic, built in), then the tree. Folders and
- * anything with children expand; top-level folders start open.
+ * anything with children expand; top-level folders start open. Siblings come
+ * in name order: the tree has no order of its own.
  *
  * Right-click an asset, or `+` for the top, for a menu: new child, rename,
- * delete. The edits themselves are the caller's; a new asset comes back by
- * id and opens for renaming.
+ * delete. Drag an asset onto another to make it a child — any asset can hold
+ * children — or onto the header to move it to the top. The edits themselves
+ * are the caller's; a new asset comes back by id and opens for renaming.
  */
 export function AssetTree({
   nodes,
@@ -50,6 +58,7 @@ export function AssetTree({
   onCreate,
   onRename,
   onDelete,
+  onMove,
   children,
 }: {
   nodes: AssetNode[];
@@ -59,6 +68,8 @@ export function AssetTree({
   onCreate: (parent: AssetNode | null, type: Creatable) => Promise<string | null>;
   onRename: (node: AssetNode, name: string) => Promise<void>;
   onDelete: (node: AssetNode) => Promise<void>;
+  /** Moves `node` under `parent` (null: the top). */
+  onMove: (node: AssetNode, parent: AssetNode | null) => Promise<void>;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState<Set<string>>(
@@ -66,7 +77,10 @@ export function AssetTree({
   );
   const [menu, setMenu] = useState<Menu | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<AssetNode | null>(null);
+  const [over, setOver] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const spring = useRef<{ id: string; timer: number } | null>(null);
 
   const toggle = (id: string) =>
     setOpen((s) => {
@@ -106,23 +120,115 @@ export function AssetTree({
     if (name !== node.name) await onRename(node, name);
   };
 
+  /* ---------- dragging ---------- */
+
+  const isUnder = (path: string[], ancestor: string[]) =>
+    path.length >= ancestor.length && ancestor.every((n, i) => path[i] === n);
+
+  /** Whether the dragged asset may land here: not on itself or below it, nor where it is. */
+  const accepts = (target: DropTarget): boolean => {
+    if (!dragging) return false;
+    if (target === "top") return dragging.path.length > 1;
+    if (isUnder(target.path, dragging.path)) return false;
+    return target.path.join("/") !== dragging.path.slice(0, -1).join("/");
+  };
+
+  const stopSpring = () => {
+    if (spring.current) window.clearTimeout(spring.current.timer);
+    spring.current = null;
+  };
+
+  const endDrag = () => {
+    stopSpring();
+    setDragging(null);
+    setOver(null);
+  };
+
+  const dropOn = (target: DropTarget) => {
+    const node = dragging;
+    const ok = accepts(target);
+    endDrag();
+    if (!node || !ok) return;
+    if (target !== "top") setOpen((s) => new Set(s).add(target.id));
+    void onMove(node, target === "top" ? null : target);
+  };
+
+  /** Drop-target handlers, for a row or the header. */
+  const target = (t: DropTarget) => {
+    const key = t === "top" ? "top" : t.id;
+    return {
+      onDragOver: (e: React.DragEvent) => {
+        if (!accepts(t)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (over !== key) setOver(key);
+        // A closed row opens once the drag rests on it.
+        if (t !== "top" && t.children.length && !open.has(t.id) && spring.current?.id !== t.id) {
+          stopSpring();
+          spring.current = {
+            id: t.id,
+            timer: window.setTimeout(() => setOpen((s) => new Set(s).add(t.id)), SPRING_MS),
+          };
+        }
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+        if (over === key) setOver(null);
+        if (spring.current?.id === key) stopSpring();
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        dropOn(t);
+      },
+    };
+  };
+
   const rows = (list: AssetNode[], depth: number): ReactNode[] =>
     list.flatMap((n) => {
       const expandable = n.children.length > 0;
       const isOpen = open.has(n.id);
       const openable = OPENABLE.has(n.type);
+      const activate = () => {
+        if (renaming === n.id) return;
+        if (openable) onOpen(n);
+        else if (expandable) toggle(n.id);
+      };
       const row = (
-        <button
+        <div
           key={n.id}
-          className={`nav-item asset-row ${activeId === n.id ? "active" : ""} ${openable ? "" : "inert"} ${
-            menu?.node?.id === n.id ? "menu-open" : ""
-          }`}
+          role="treeitem"
+          tabIndex={0}
+          aria-expanded={expandable ? isOpen : undefined}
+          className={[
+            "nav-item",
+            "asset-row",
+            activeId === n.id && "active",
+            !openable && "inert",
+            menu?.node?.id === n.id && "menu-open",
+            dragging?.id === n.id && "dragging",
+            over === n.id && "drop-into",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           style={{ paddingLeft: 8 + depth * 12 }}
           title={`/${n.path.join("/")} — ${n.type}`}
-          onClick={() => {
-            if (renaming === n.id) return;
-            if (openable) onOpen(n);
-            else if (expandable) toggle(n.id);
+          draggable={renaming !== n.id}
+          onDragStart={(e) => {
+            setMenu(null);
+            setDragging(n);
+            e.dataTransfer.effectAllowed = "move";
+            // Firefox refuses to start a drag without payload on the transfer.
+            e.dataTransfer.setData("text/plain", n.path.join("/"));
+          }}
+          onDragEnd={endDrag}
+          {...target(n)}
+          onClick={activate}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              activate();
+            }
           }}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -148,7 +254,6 @@ export function AssetTree({
               onFocus={(e) => e.currentTarget.select()}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
-                // A button would take Space and Enter as clicks.
                 e.stopPropagation();
                 if (e.key === "Enter") e.currentTarget.blur();
                 if (e.key === "Escape") {
@@ -156,20 +261,19 @@ export function AssetTree({
                   e.currentTarget.blur();
                 }
               }}
-              onKeyUp={(e) => e.preventDefault()}
               onBlur={(e) => void commitRename(n, e.currentTarget.value)}
             />
           ) : (
             <span className="name">{n.name}</span>
           )}
-        </button>
+        </div>
       );
       return expandable && isOpen ? [row, ...rows(n.children, depth + 1)] : [row];
     });
 
   return (
     <>
-      <div className="nav-header">
+      <div className={`nav-header ${over === "top" ? "drop-into" : ""}`} {...target("top")}>
         <span>Assets</span>
         <button
           className="ghost"
@@ -185,7 +289,7 @@ export function AssetTree({
       </div>
       {children}
       {nodes.length === 0 && <div className="nav-empty">No assets yet.</div>}
-      {rows(nodes, 0)}
+      <div role="tree">{rows(nodes, 0)}</div>
       {menu && (
         <div ref={menuRef} className="context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
           {CREATABLE.map((type) => (

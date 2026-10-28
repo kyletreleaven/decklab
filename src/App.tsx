@@ -19,6 +19,7 @@ import {
   assetTree,
   createAsset,
   deleteAsset,
+  moveAsset,
   renameAsset,
   subtreeSize,
   type AssetNode,
@@ -253,6 +254,9 @@ export default function App() {
     editTree(() => createAsset(labSql, parent?.id ?? "root", type));
   const renameTo = async (node: AssetNode, name: string) => {
     await editTree(() => renameAsset(labSql, node.id, name));
+  };
+  const moveTo = async (node: AssetNode, parent: AssetNode | null) => {
+    await editTree(() => moveAsset(labSql, node.id, parent?.id ?? "root"));
   };
   const remove = async (node: AssetNode) => {
     const below = (await subtreeSize(labSql, node.id)) - 1;
@@ -694,6 +698,7 @@ export default function App() {
               onCreate={createIn}
               onRename={renameTo}
               onDelete={remove}
+              onMove={moveTo}
             >
               {/* Built in, not in the tree: always first, never moved, no menu. */}
               <button

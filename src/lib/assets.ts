@@ -25,7 +25,8 @@ export interface AssetNode {
 /** The asset tree, below the root, siblings in order. */
 export async function assetTree(lab: Sql): Promise<AssetNode[]> {
   const rows = await lab.select<{ id: string; parent_id: string | null; name: string; type: AssetType }>(
-    "SELECT id, parent_id, name, type FROM assets WHERE id <> 'root' ORDER BY position, name",
+    // No order of their own: by name, as a reader expects.
+    "SELECT id, parent_id, name, type FROM assets WHERE id <> 'root' ORDER BY name COLLATE NOCASE, name",
   );
   const byParent = new Map<string, typeof rows>();
   for (const r of rows) byParent.set(r.parent_id!, [...(byParent.get(r.parent_id!) ?? []), r]);
@@ -223,23 +224,22 @@ const DEFAULT_NAME: Record<Creatable, string> = {
 };
 
 /**
- * A new, empty asset, last among `parentId`'s children, named "New <type>"
- * (numbered past any sibling already called that). Returns its id.
+ * A new, empty asset under `parentId`, named "New <type>" (numbered past any
+ * sibling already called that). Returns its id.
  */
 export async function createAsset(lab: Sql, parentId: string, type: Creatable, at = new Date().toISOString()): Promise<string> {
-  const siblings = await lab.select<{ name: string; position: number }>(
-    "SELECT name, position FROM assets WHERE parent_id = $1",
+  const siblings = await lab.select<{ name: string }>(
+    "SELECT name FROM assets WHERE parent_id = $1",
     [parentId],
   );
   const taken = new Set(siblings.map((s) => s.name));
   let name = DEFAULT_NAME[type];
   for (let n = 2; taken.has(name); n++) name = `${DEFAULT_NAME[type]} ${n}`;
-  const position = siblings.reduce((m, s) => Math.max(m, s.position + 1), 0);
   const id = crypto.randomUUID();
   await lab.execute(
-    `INSERT INTO assets (id, parent_id, position, name, type, created_at, updated_at, unlisted)
-     VALUES ($1, $2, $3, $4, $5, $6, $6, $7)`,
-    [id, parentId, position, name, type, at, type === "checklist" ? "any" : null],
+    `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at, unlisted)
+     VALUES ($1, $2, $3, $4, $5, $5, $6)`,
+    [id, parentId, name, type, at, type === "checklist" ? "any" : null],
   );
   return id;
 }
@@ -306,4 +306,27 @@ export async function deleteAsset(lab: Sql, id: string): Promise<void> {
     throw new AssetError(`Cannot delete: other assets refer to it.\n\n${list}`);
   }
   await lab.execute("DELETE FROM assets WHERE id = $1", [id]);
+}
+
+/**
+ * Move an asset, and everything below it, under `parentId` (`"root"` for
+ * the top). Any asset can hold children. Pinned references follow it; a
+ * by-name one keeps its path. Refused into itself or below itself, or beside
+ * something of the same name.
+ */
+export async function moveAsset(lab: Sql, id: string, parentId: string, at = new Date().toISOString()): Promise<void> {
+  if (id === "root") throw new AssetError("The root cannot be moved.");
+  if ((await subtree(lab, id)).includes(parentId)) throw new AssetError("Cannot move an asset into itself.");
+  const [me] = await lab.select<{ name: string; parent_id: string }>(
+    "SELECT name, parent_id FROM assets WHERE id = $1",
+    [id],
+  );
+  if (!me) throw new AssetError("That asset no longer exists.");
+  if (me.parent_id === parentId) return;
+  const clash = await lab.select<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM assets WHERE parent_id = $1 AND name = $2",
+    [parentId, me.name],
+  );
+  if (clash[0].n) throw new AssetError(`Cannot move: something there is already called “${me.name}”.`);
+  await lab.execute("UPDATE assets SET parent_id = $2, updated_at = $3 WHERE id = $1", [id, parentId, at]);
 }

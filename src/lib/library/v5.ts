@@ -111,7 +111,10 @@ export type AssetOf<T extends AssetType> = Extract<Asset, { type: T }>;
 
 export interface V5Library {
   attributes: Record<string, AttributeType>;
-  /** In tree order: a parent before its children, siblings as they sit. */
+  /**
+   * In tree order: a parent before its children. Siblings have no order of
+   * their own; a dump writes them in the canonical one (`canonicalV5`).
+   */
   assets: Asset[];
 }
 
@@ -148,12 +151,53 @@ const byBucket = <L extends { bucket: Bucket }>(lines: L[]) =>
  * Lines sorted into the order a dump writes them, so equal libraries dump to
  * equal text. Assets keep their order: it is the tree's.
  */
+/**
+ * The tree, parents first, siblings in the canonical order: a decklist's or
+ * deck's zones that could be written inline come first, in zone order —
+ * where a load puts inline zones back — then the rest by name. The tree has
+ * no order of its own (docs/inventory.md → *The asset tree*).
+ */
+function treeOrder(assets: Asset[]): Asset[] {
+  const byPath = new Map(assets.map((a) => [pathKey(a.path), a]));
+  const children = new Map<string, Map<string, string[]>>();
+  for (const a of assets) {
+    for (let n = 1; n <= a.path.length; n++) {
+      const parent = pathKey(a.path.slice(0, n - 1));
+      if (!children.has(parent)) children.set(parent, new Map());
+      children.get(parent)!.set(a.path[n - 1], a.path.slice(0, n));
+    }
+  }
+  const rank = (parent: Asset | undefined, name: string): number => {
+    if (parent?.type !== "decklist" && parent?.type !== "deck") return ZONES.length;
+    const zone = ZONES.findIndex((z) => {
+      const ref = parent.zones[z];
+      return !!ref && !ref.byName && !ref.rooted && ref.facets.length === 0 && ref.names.length === 1 && ref.names[0] === name;
+    });
+    return zone === -1 ? ZONES.length : zone;
+  };
+  const out: Asset[] = [];
+  const walk = (path: string[]) => {
+    const key = pathKey(path);
+    const parent = byPath.get(key);
+    const kids = [...(children.get(key) ?? new Map<string, string[]>())].sort(
+      ([a], [b]) => rank(parent, a) - rank(parent, b) || byText(a, b),
+    );
+    for (const [, child] of kids) {
+      const asset = byPath.get(pathKey(child));
+      if (asset) out.push(asset);
+      walk(child);
+    }
+  };
+  walk([]);
+  return out;
+}
+
 export function canonicalV5(lib: V5Library): V5Library {
   return {
     attributes: Object.fromEntries(
       Object.entries(lib.attributes).sort(([a], [b]) => byText(a, b)),
     ),
-    assets: lib.assets.map((a): Asset => {
+    assets: treeOrder(lib.assets).map((a): Asset => {
       switch (a.type) {
         case "place":
         case "checklist":

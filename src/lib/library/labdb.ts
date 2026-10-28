@@ -284,16 +284,13 @@ export async function writeLab(
 
   // The tree. A path segment with no asset of its own is an implied folder.
   const ids = new Map<string, string>([[pathKey([]), "root"]]);
-  const nextPosition = new Map<string, number>();
   const assetRows: unknown[][] = [];
   const addRow = (path: string[], fields: Record<string, unknown>) => {
     const parent = ids.get(pathKey(path.slice(0, -1)))!;
-    const position = nextPosition.get(parent) ?? 0;
-    nextPosition.set(parent, position + 1);
     const id = newId();
     ids.set(pathKey(path), id);
     assetRows.push([
-      id, parent, position, path[path.length - 1],
+      id, parent, path[path.length - 1],
       fields.type, fields.notes ?? null, fields.created ?? null, fields.updated ?? null,
       fields.storage ?? null, fields.unlisted ?? null, fields.query ?? null, fields.format ?? null,
     ]);
@@ -372,7 +369,7 @@ export async function writeLab(
   await insertRows(
     sql,
     "assets",
-    ["id", "parent_id", "position", "name", "type", "notes", "created_at", "updated_at", "storage", "unlisted", "query", "format"],
+    ["id", "parent_id", "name", "type", "notes", "created_at", "updated_at", "storage", "unlisted", "query", "format"],
     assetRows,
   );
   await insertRows(sql, "asset_refs", ["asset_id", "role", "target_id", "path", "rooted", "facets"], refRows);
@@ -394,7 +391,6 @@ export async function writeLab(
 interface AssetRow {
   id: string;
   parent_id: string | null;
-  position: number;
   name: string;
   type: Asset["type"];
   notes: string | null;
@@ -434,9 +430,9 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
   }
 
   const rows = await sql.select<AssetRow>(
-    `SELECT id, parent_id, position, name, type, notes, created_at, updated_at,
+    `SELECT id, parent_id, name, type, notes, created_at, updated_at,
             storage, unlisted, query, format
-       FROM assets ORDER BY position, name`,
+       FROM assets`,
   );
   const children = new Map<string, AssetRow[]>();
   for (const r of rows) {
@@ -444,7 +440,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
     children.set(r.parent_id, [...(children.get(r.parent_id) ?? []), r]);
   }
 
-  // Tree order: a parent before its children, siblings by position.
+  // Tree order: a parent before its children; `canonicalV5` orders siblings.
   const ordered: { row: AssetRow; path: string[] }[] = [];
   const paths = new Map<string, string[]>([["root", []]]);
   const walk = (id: string, path: string[]) => {

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
-import { AssetError, assetTree, createAsset, deckContents, deleteAsset, placeContents, renameAsset } from "./assets";
+import { AssetError, assetTree, createAsset, deckContents, deleteAsset, moveAsset, placeContents, renameAsset } from "./assets";
 import { writeLab } from "./library/labdb";
 import { loadV5 } from "./library/v5";
 import { sqlOver } from "./sqlOver";
@@ -134,13 +134,13 @@ describe("the lab's assets, for display", () => {
     return walk(await assetTree(sqlOver(db)))!;
   };
 
-  it("creates an empty asset last among its siblings, numbering a taken name", async () => {
+  it("creates an empty asset, numbering a taken name", async () => {
     const binders = await find("Binders");
     await createAsset(sqlOver(db), binders, "place");
     await createAsset(sqlOver(db), binders, "place");
     await createAsset(sqlOver(db), "root", "checklist");
-    expect((await assetTree(sqlOver(db)))[0].children.map((n) => n.name)).toEqual(["Red", "New place", "New place 2"]);
-    expect((await assetTree(sqlOver(db))).slice(-1)[0]).toMatchObject({ name: "New checklist", type: "checklist" });
+    expect((await assetTree(sqlOver(db)))[0].children.map((n) => n.name)).toEqual(["New place", "New place 2", "Red"]);
+    expect((await assetTree(sqlOver(db))).find((n) => n.name === "New checklist")).toMatchObject({ name: "New checklist", type: "checklist" });
   });
 
   it("renames, refusing a reserved name or one a sibling has", async () => {
@@ -162,5 +162,23 @@ describe("the lab's assets, for display", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM checklist_lines").get()).toEqual({ n: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM asset_refs").get()).toEqual({ n: 0 });
     expect((await assetTree(sqlOver(db))).map((n) => n.name)).toEqual(["Binders"]);
+  });
+
+  it("moves an asset under any other, its pins following, and refuses a loop or a clash", async () => {
+    const red = await find("Binders/Red");
+    const burn = await find("Decks/Burn");
+    await moveAsset(sqlOver(db), red, burn);
+    expect(await find("Decks/Burn/Red")).toBe(red);
+    // The deck box pins Red as its sideboard: still Red, wherever it is.
+    const box = await find("Decks/Burn box");
+    const zones = await deckContents(sqlOver(db), sqlOver(cards), box);
+    expect(zones.find((z) => z.zone === "side")?.target?.path.join("/")).toBe("Decks/Burn/Red");
+    await expect(moveAsset(sqlOver(db), await find("Decks"), burn)).rejects.toThrow(/into itself/);
+    await createAsset(sqlOver(db), "root", "place");
+    const fresh = await find("New place");
+    await renameAsset(sqlOver(db), fresh, "main");
+    await expect(moveAsset(sqlOver(db), fresh, burn)).rejects.toThrow(/already called “main”/);
+    await moveAsset(sqlOver(db), red, "root");
+    expect(await find("Red")).toBe(red);
   });
 });

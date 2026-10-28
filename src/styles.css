@@ -1648,3 +1648,26 @@ a.external:hover {
   margin: 4px 2px;
   background: var(--border);
 }
+
+/* Dragging in the asset tree. WebKit starts no drag under the body's
+   -webkit-user-select: none unless the element opts back in (as .pile-card). */
+.nav-item.asset-row {
+  -webkit-user-drag: element;
+  cursor: default;
+}
+
+.nav-item.asset-row.dragging {
+  opacity: 0.45;
+}
+
+.nav-item.asset-row.drop-into,
+.nav-header.drop-into {
+  background: rgba(216, 166, 87, 0.18);
+  box-shadow: inset 0 0 0 1px var(--accent-dim);
+  border-radius: var(--radius);
+}
+
+.asset-row .asset-rename {
+  -webkit-user-select: text;
+  user-select: text;
+}
