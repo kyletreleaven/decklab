@@ -40,9 +40,12 @@ hand-written file is an error, not something silently ignored.
 ## Assets
 
 Every asset is one `[[asset]]` table, in tree order: a parent before its
-children, siblings in the order they sit. One array rather than one per
-type (`[[place]]`, `[[deck]]`), because TOML parses separate arrays
-separately and the order across them would be lost.
+children. One array rather than one per type (`[[place]]`, `[[deck]]`),
+because TOML parses separate arrays separately and the order across them
+would be lost. **Siblings have no order of their own** (`inventory.md` →
+*The asset tree*): load takes them in any order, and a dump writes them
+canonically — a decklist's or deck's inline zones first, in zone order, then
+the rest by name.
 
 ```toml
 [[asset]]

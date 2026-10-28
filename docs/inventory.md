@@ -719,6 +719,13 @@ make that transaction simpler (store a reference by id, render it as the
 current path); a dump writes paths and elides the ids, and a load assigns
 fresh ones.
 
+**Siblings have no order.** A hand-made order is a viewing preference, not a
+fact about the collection, so the tree stores none: it shows siblings by
+name, and a file writes them in a canonical order. A custom order could come
+back someday, as a view's. So moving an asset is only ever *into* another,
+never *between* two. (An arrangement's piles do keep their order: that is
+order inside one asset, and it means something.)
+
 | Unity | Here |
 | --- | --- |
 | Every asset has a GUID; references go by GUID | a goal names its decklist, a move its locations, by path; renaming or moving rewrites those references in one transaction, so it never breaks a link, with no GUID needed |

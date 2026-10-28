@@ -436,8 +436,10 @@ Design in [`docs/lab.md`](docs/lab.md).
       decklist, deck; `+` on the header for the top), rename in place, delete with a
       confirm. Delete is refused while an asset outside pins something
       inside; a by-name reference just keeps its path. All Magic has no
-      menu. **Not yet:** move (needs drag or a destination picker),
-      duplicate, and which items each type offers.
+      menu. **Move by dragging**: onto any asset to make it a child, onto
+      the Assets header for the top; no between-row drops, since siblings
+      have no order. **Not yet:** duplicate, and which items each type
+      offers.
 - ⬜ **Compress the library file with identifiers of its own.** Every line
       repeats the card's name and 36-character oracle id; the real library's
       version 5 file is 4,000 lines, most of them that. A file-local key per
