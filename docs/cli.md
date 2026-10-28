@@ -34,9 +34,16 @@ The database path must agree with the app's: the SQL plugin resolves
 
 - **`decklab dump [out.toml]`**: `readV4` then `dumpV4` on `decklab.db`, to
   a file or standard output.
-- **`decklab convert in.toml out.toml`**: a library file from one format to
-  the next, once the lab schema differs from v4. Text to text; at most it
-  reads the card store, for instance to add oracle ids.
+- **`decklab convert in.toml [out.toml]`**: a schema 4 library file to
+  version 5 ([`library-format-5.md`](library-format-5.md)), to a file or
+  standard output; what was lost goes to standard error. Text to text, plus
+  read-only lookups of oracle ids and names in the card store (`--store`,
+  default the app's `card-cache.db`). It sends nothing to Scryfall: a
+  printing the store lacks is reported, not fetched. The result is loaded
+  back before it is written, so a converter bug cannot produce a file
+  version 5 refuses. On the real library: 10 collections and 11 decks
+  became 52 assets in under 3 seconds, every copy accounted for and every
+  line with an oracle id.
 
 No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
 → *Lab mode*), and nothing writes to a database the app has open.

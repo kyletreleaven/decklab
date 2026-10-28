@@ -419,9 +419,13 @@ Design in [`docs/lab.md`](docs/lab.md).
 - ⬜ **Rate channels:** one channel per group of endpoints, groups that
       overlap, a request needing a slot on every channel it falls in.
       Proposal in [`docs/rate-channels.md`](docs/rate-channels.md).
-- ⬜ **The `decklab` CLI:** the app's TypeScript compiled into a standalone
-      executable (Bun first), read-only. `dump` first; `convert` once the
-      lab schema differs. Design in [`docs/cli.md`](docs/cli.md).
+- 🚧 **The `decklab` CLI:** the app's TypeScript compiled into a standalone
+      executable (Bun first), read-only. `dump` and `convert` (v4 → 5)
+      built, not yet checked by you. Design in [`docs/cli.md`](docs/cli.md).
+- ⬜ **The lab on library file version 5**
+      ([`docs/library-format-5.md`](docs/library-format-5.md)): the lab
+      schema, written as SQL for review first; its load and dump; the lab
+      keeping its data between runs, a seed replacing it.
 - ⬜ **Lab loads a file at launch:** `DECKLAB_LAB_SEED=path`, loaded into the
       empty `lab.db` before the UI starts. Design in
       [`docs/lab.md`](docs/lab.md) → *Lab mode*.

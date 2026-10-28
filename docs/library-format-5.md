@@ -1,6 +1,10 @@
 # Library file, version 5 — proposal
 
-**Status: proposal, not built.** The library file for the new model
+**Status: the format and `decklab convert` are built; the lab schema, its
+load and its dump are not.** Code: `src/lib/paths.ts` (paths and
+references), `src/lib/ontology.ts` (the asset types),
+`src/lib/library/v5.ts` (the format), `src/lib/library/convert.ts` (v4 →
+5). The library file for the new model
 ([`inventory.md`](inventory.md)), to replace v4 ([`lab.md`](lab.md) → *The
 library file*) as the format the lab loads and dumps.
 
@@ -88,20 +92,24 @@ recorded*. Nothing is filled in on load.
 
 | Key | Is |
 | --- | --- |
-| `card` | the name: for reading, and a check |
-| `oracle` | Scryfall's oracle id: the card. Names change; this does not |
-| `set`, `number`, `lang` | the printing: all or none. `lang` only when not English |
+| `card` | the card's name |
+| `oracle` | the card's Scryfall oracle id. Names change; this does not |
+| `set`, `number`, `lang` | the printing, which also says which card: all or none. `lang` only when not English |
 | `finish` | `nonfoil`, `foil`, `etched`, … Can be known without the printing |
 | `attrs` | user attributes, sparse |
 | `qty` | the count; what it means depends on the asset (below) |
 | `added` | when, optional, as for assets |
 
-- **`oracle` is written by every dump.** A scenario may leave it out, and
-  load finds the card by its exact name; a name that matches no card, or
-  more than one, is refused. That lookup goes through the card store, so it
-  may cost a request, once.
-- **The name is checked** against the oracle id, and against the printing
-  when there is one, as v4 does.
+- **A line must say which card, by any means**: name, oracle id, printing,
+  or any mix. The format asks nothing more; which of them a line carries
+  is not its grain (the printing, finish and attributes are).
+- **Whatever it gives must agree.** A load into a database checks that
+  against the card store, as v4 checks the name against the printing; a
+  name that matches no card, or more than one, is refused. Resolving a
+  scenario's name or printing goes through the card store, so it may cost a
+  request, once.
+- **A dump writes all it knows**: name and oracle id always, so a dump stays
+  readable and checks itself.
 - **User attributes go under `attrs`**, never beside the reserved keys, so
   a user attribute named `set` or `qty` cannot collide with them.
   They are declared once, per file:
