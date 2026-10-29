@@ -1731,6 +1731,10 @@ a.external:hover {
   color: var(--text-faint);
 }
 
+.asset-category.over {
+  color: var(--danger);
+}
+
 .asset-builds {
   display: flex;
   align-items: center;

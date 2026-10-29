@@ -10,8 +10,7 @@
 -- Conventions:
 --   * `absent` is '' (or '{}' for attributes), never NULL, wherever it is
 --     part of a unique key: SQLite treats NULLs as distinct there.
---   * NULL means "not given" only outside keys: notes, timestamps, an upper
---     bound of ∞.
+--   * NULL means "not given" only outside keys: notes, timestamps.
 --   * Assets refer to each other by id. A dump writes paths and elides ids;
 --     a load assigns fresh ones. So a rename or move rewrites nothing.
 
@@ -25,8 +24,8 @@ CREATE TABLE IF NOT EXISTS assets (
   name       TEXT NOT NULL,
   -- A node of the static ontology (src/lib/ontology.ts).
   type       TEXT NOT NULL CHECK (type IN (
-               'folder', 'checklist', 'place', 'list pool', 'query pool',
-               'decklist', 'deck', 'arrangement')),
+               'folder', 'checklist', 'exact checklist', 'place', 'list pool',
+               'query pool', 'decklist', 'deck', 'arrangement')),
   notes      TEXT,
   created_at TEXT,
   updated_at TEXT,
@@ -34,7 +33,6 @@ CREATE TABLE IF NOT EXISTS assets (
   -- Per-type fields. A handful, so columns here rather than a table each;
   -- the CHECKs keep each to its type.
   storage    TEXT,                        -- place: binder, box, … (a note)
-  unlisted   TEXT CHECK (unlisted IN ('any', 'excluded')),  -- checklist
   query      TEXT,                        -- query pool
   format     TEXT,                        -- decklist
 
@@ -43,7 +41,6 @@ CREATE TABLE IF NOT EXISTS assets (
   UNIQUE (parent_id, name),
   CHECK (id = 'root' OR (parent_id IS NOT NULL AND name <> '' AND name NOT IN ('.', '..'))),
   CHECK (storage IS NULL OR type = 'place'),
-  CHECK ((unlisted IS NOT NULL) = (type = 'checklist')),
   CHECK ((query IS NOT NULL) = (type = 'query pool')),
   CHECK (format IS NULL OR type = 'decklist')
 );
@@ -96,28 +93,18 @@ CREATE TABLE IF NOT EXISTS attributes (
 
 -- ---------------------------------------------------------- contents
 
--- A place's residual counts: copies known exactly this much about.
-CREATE TABLE IF NOT EXISTS place_lines (
+-- Counted lines: a bucket and a count, which the asset's type reads. A
+-- place holds exactly `qty` (copies known exactly this much about); a
+-- checklist asks for at least `qty`; an exact checklist for exactly `qty`
+-- and nothing unlisted. One table, so converting between them is a change
+-- of type alone (docs/inventory.md → *Kinds of checklist*).
+CREATE TABLE IF NOT EXISTS lines (
   asset_id    TEXT NOT NULL REFERENCES assets (id) ON DELETE CASCADE,
   oracle_id   TEXT NOT NULL,
   printing_id TEXT NOT NULL DEFAULT '',
   finish      TEXT NOT NULL DEFAULT '',
   attrs       TEXT NOT NULL DEFAULT '{}',
   qty         INTEGER NOT NULL CHECK (qty >= 1),
-  added_at    TEXT,
-  PRIMARY KEY (asset_id, oracle_id, printing_id, finish, attrs)
-);
-
--- A checklist's items: an interval on the bucket's population. A deck's
--- zones are checklists, so their lines are here too.
-CREATE TABLE IF NOT EXISTS checklist_lines (
-  asset_id    TEXT NOT NULL REFERENCES assets (id) ON DELETE CASCADE,
-  oracle_id   TEXT NOT NULL,
-  printing_id TEXT NOT NULL DEFAULT '',
-  finish      TEXT NOT NULL DEFAULT '',
-  attrs       TEXT NOT NULL DEFAULT '{}',
-  min_qty     INTEGER NOT NULL CHECK (min_qty >= 0),
-  max_qty     INTEGER CHECK (max_qty IS NULL OR max_qty >= min_qty),  -- NULL: ∞
   added_at    TEXT,
   PRIMARY KEY (asset_id, oracle_id, printing_id, finish, attrs)
 );
@@ -133,9 +120,8 @@ CREATE TABLE IF NOT EXISTS pool_members (
   PRIMARY KEY (asset_id, oracle_id, printing_id, finish, attrs)
 );
 
-CREATE INDEX IF NOT EXISTS idx_place_lines_oracle     ON place_lines (oracle_id);
-CREATE INDEX IF NOT EXISTS idx_checklist_lines_oracle ON checklist_lines (oracle_id);
-CREATE INDEX IF NOT EXISTS idx_pool_members_oracle    ON pool_members (oracle_id);
+CREATE INDEX IF NOT EXISTS idx_lines_oracle        ON lines (oracle_id);
+CREATE INDEX IF NOT EXISTS idx_pool_members_oracle ON pool_members (oracle_id);
 
 -- ---------------------------------------------------------- arrangements
 

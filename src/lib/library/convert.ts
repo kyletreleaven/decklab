@@ -176,10 +176,10 @@ export function convertV4(v4: V4Library, lookups: Lookups): { library: V5Library
     };
     assets.push(deck);
 
-    const zoneLines = (zone: string): ChecklistLine[] =>
+    const zoneLines = (zone: string): PlaceLine[] =>
       d.cards
         .filter((card) => card.zone === zone)
-        .map((card) => ({ bucket: bucketOf(card), min: card.quantity, max: card.quantity, added: card.addedAt }));
+        .map((card) => ({ bucket: bucketOf(card), qty: card.quantity, added: card.addedAt }));
 
     for (const zone of ["commander", "main", "side"] as Zone[]) {
       const cards = zoneLines(zone);
@@ -187,20 +187,18 @@ export function convertV4(v4: V4Library, lookups: Lookups): { library: V5Library
       deck.zones[zone] = { byName: false, rooted: false, names: [zone], facets: [] };
       assets.push({
         path: [...path, zone],
-        type: "checklist",
-        unlisted: "excluded",
+        type: "exact checklist",
         created: d.createdAt,
         updated: d.updatedAt,
         cards,
       });
     }
 
-    const maybe = zoneLines("maybe").map((l) => ({ ...l, max: null }));
+    const maybe = zoneLines("maybe").map(({ qty, ...l }): ChecklistLine => ({ ...l, min: qty }));
     if (maybe.length) {
       assets.push({
         path: [...path, "maybe"],
         type: "checklist",
-        unlisted: "any",
         created: d.createdAt,
         updated: d.updatedAt,
         cards: maybe,

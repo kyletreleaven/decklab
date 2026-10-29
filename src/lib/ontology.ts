@@ -10,7 +10,9 @@
 
 export const TYPES = [
   "folder",
+  "collection",
   "checklist",
+  "exact checklist",
   "place",
   "pool",
   "list pool",
@@ -30,16 +32,24 @@ interface Node {
 
 const ONTOLOGY: Record<AssetType, Node> = {
   folder: { parents: [], facets: [] },
+  // What holds cards: a place, and someday a filtered collection. Not a type
+  // an asset has, only one to name: a checklist is checked `on` one. Any
+  // collection converts to a checklist, its lines read as minimums; a
+  // checklist converts back to a place (docs/inventory.md → *Kinds of
+  // checklist*). A deck is not a collection.
+  collection: { parents: [], facets: [] },
+  place: { parents: ["collection"], facets: [] },
+  // A checklist asks for at least its counts. An exact one asks for exactly
+  // them and nothing unlisted, so it refines the checklist with its lines.
   checklist: { parents: [], facets: [] },
-  // A place is a refinement of an exact checklist; a pool is a checklist
-  // whose items are all `[0, ∞]` (docs/inventory.md → *Locations and
-  // collections*).
-  place: { parents: ["checklist"], facets: [] },
+  "exact checklist": { parents: ["checklist"], facets: [] },
+  // A pool is a checklist whose items are all `[0, ∞]`.
   pool: { parents: ["checklist"], facets: [] },
   "list pool": { parents: ["pool"], facets: [] },
   "query pool": { parents: ["pool"], facets: [] },
-  // A decklist's zones are checklists: what a deck should hold. A deck's
-  // zones are places: what it does hold. Arrangements are the decklist's; a
+  // A decklist's zones are checklists: what a deck should hold — its
+  // commander and main exact. A deck's zones are places: what it does hold,
+  // and it always builds a decklist. Arrangements are the decklist's; a
   // deck shows one of its decklist's (docs/inventory.md → *Every decklist
   // has an oracle projection*).
   decklist: {

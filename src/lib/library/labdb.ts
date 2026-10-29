@@ -248,6 +248,7 @@ function bucketsOf(a: Asset): Bucket[] {
   switch (a.type) {
     case "place":
     case "checklist":
+    case "exact checklist":
     case "list pool":
       return (a.cards as { bucket: Bucket }[]).map((l) => l.bucket);
     case "arrangement":
@@ -292,7 +293,7 @@ export async function writeLab(
     assetRows.push([
       id, parent, path[path.length - 1],
       fields.type, fields.notes ?? null, fields.created ?? null, fields.updated ?? null,
-      fields.storage ?? null, fields.unlisted ?? null, fields.query ?? null, fields.format ?? null,
+      fields.storage ?? null, fields.query ?? null, fields.format ?? null,
     ]);
     return id;
   };
@@ -306,7 +307,6 @@ export async function writeLab(
       created: a.created ?? stamp,
       updated: a.updated ?? stamp,
       storage: a.type === "place" ? a.storage : undefined,
-      unlisted: a.type === "checklist" ? a.unlisted : undefined,
       query: a.type === "query pool" ? a.query : undefined,
       format: a.type === "decklist" ? a.format : undefined,
     });
@@ -324,8 +324,7 @@ export async function writeLab(
     }
   };
 
-  const placeLines: unknown[][] = [];
-  const checklistLines: unknown[][] = [];
+  const lineRows: unknown[][] = [];
   const poolMembers: unknown[][] = [];
   const pileRows: unknown[][] = [];
   const pileMembers: unknown[][] = [];
@@ -335,13 +334,13 @@ export async function writeLab(
     const id = ids.get(pathKey(a.path))!;
     switch (a.type) {
       case "place":
-        for (const l of a.cards) placeLines.push([id, ...bucket(l.bucket), l.qty, l.added ?? null]);
+      case "exact checklist":
+        if (a.type === "exact checklist" && a.on) addRef(a, "on", a.on);
+        for (const l of a.cards) lineRows.push([id, ...bucket(l.bucket), l.qty, l.added ?? null]);
         break;
       case "checklist":
         if (a.on) addRef(a, "on", a.on);
-        for (const l of a.cards) {
-          checklistLines.push([id, ...bucket(l.bucket), l.min, l.max, l.added ?? null]);
-        }
+        for (const l of a.cards) lineRows.push([id, ...bucket(l.bucket), l.min, l.added ?? null]);
         break;
       case "list pool":
         for (const l of a.cards) poolMembers.push([id, ...bucket(l.bucket), l.added ?? null]);
@@ -350,7 +349,7 @@ export async function writeLab(
       case "deck":
         for (const zone of ZONES) if (a.zones[zone]) addRef(a, zone, a.zones[zone]!);
         if (a.shows) addRef(a, "shows", a.shows);
-        if (a.type === "deck" && a.list) addRef(a, "list", a.list);
+        if (a.type === "deck") addRef(a, "list", a.list);
         break;
       case "arrangement":
         addRef(a, "of", a.of);
@@ -369,19 +368,18 @@ export async function writeLab(
   await insertRows(
     sql,
     "assets",
-    ["id", "parent_id", "name", "type", "notes", "created_at", "updated_at", "storage", "unlisted", "query", "format"],
+    ["id", "parent_id", "name", "type", "notes", "created_at", "updated_at", "storage", "query", "format"],
     assetRows,
   );
   await insertRows(sql, "asset_refs", ["asset_id", "role", "target_id", "path", "rooted", "facets"], refRows);
-  await insertRows(sql, "place_lines", ["asset_id", ...BUCKET_COLUMNS, "qty", "added_at"], placeLines);
-  await insertRows(sql, "checklist_lines", ["asset_id", ...BUCKET_COLUMNS, "min_qty", "max_qty", "added_at"], checklistLines);
+  await insertRows(sql, "lines", ["asset_id", ...BUCKET_COLUMNS, "qty", "added_at"], lineRows);
   await insertRows(sql, "pool_members", ["asset_id", ...BUCKET_COLUMNS, "added_at"], poolMembers);
   await insertRows(sql, "piles", ["id", "arrangement_id", "position", "name", "query"], pileRows);
   await insertRows(sql, "pile_members", ["pile_id", ...BUCKET_COLUMNS, "added_at"], pileMembers);
 
   return {
     assets: assetRows.length,
-    lines: placeLines.length + checklistLines.length + poolMembers.length + pileMembers.length,
+    lines: lineRows.length + poolMembers.length + pileMembers.length,
     fetched,
   };
 }
@@ -397,7 +395,6 @@ interface AssetRow {
   created_at: string | null;
   updated_at: string | null;
   storage: string | null;
-  unlisted: "any" | "excluded" | null;
   query: string | null;
   format: string | null;
 }
@@ -431,7 +428,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
 
   const rows = await sql.select<AssetRow>(
     `SELECT id, parent_id, name, type, notes, created_at, updated_at,
-            storage, unlisted, query, format
+            storage, query, format
        FROM assets`,
   );
   const children = new Map<string, AssetRow[]>();
@@ -464,8 +461,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
     for (const r of list) out.set(r.owner, [...(out.get(r.owner) ?? []), r]);
     return out;
   };
-  const placeLines = await lines("place_lines", ", qty");
-  const checklistLines = await lines("checklist_lines", ", min_qty, max_qty");
+  const countedLines = await lines("lines", ", qty");
   const poolMembers = await lines("pool_members", "");
   const pileMembers = await lines("pile_members", "");
   const piles = await sql.select<{ id: string; arrangement_id: string; position: number; name: string; query: string | null }>(
@@ -474,7 +470,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
   const refs = await sql.select<RefRow>("SELECT asset_id, role, target_id, path, rooted, facets FROM asset_refs");
 
   // What the file says about each card, from the store.
-  const all = [...placeLines, ...checklistLines, ...poolMembers, ...pileMembers];
+  const all = [...countedLines, ...poolMembers, ...pileMembers];
   const printingIds = [...new Set(all.map((l) => l.printing_id).filter((p) => p !== ""))];
   const printingRows = await inChunks(printingIds, (chunk) =>
     cards.select<PrintingRow>(
@@ -502,8 +498,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
   };
   const added = (l: { added_at: string | null }) => (l.added_at === null ? {} : { added: l.added_at });
 
-  const placeBy = group(placeLines);
-  const checklistBy = group(checklistLines);
+  const linesBy = group(countedLines);
   const poolBy = group(poolMembers);
   const pileMembersBy = group(pileMembers);
   const pilesBy = new Map<string, typeof piles>();
@@ -555,23 +550,19 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
           ...common,
           type: "place",
           ...(row.storage !== null && { storage: row.storage }),
-          cards: (placeBy.get(row.id) ?? []).map((l) => ({ bucket: bucketOf(l), qty: Number(l.qty), ...added(l) })),
+          cards: (linesBy.get(row.id) ?? []).map((l) => ({ bucket: bucketOf(l), qty: Number(l.qty), ...added(l) })),
         });
         break;
-      case "checklist": {
+      case "checklist":
+      case "exact checklist": {
         const on = myRefs.get("on");
-        assets.push({
-          ...common,
-          type: "checklist",
-          ...(on && { on: refOf(on, path) }),
-          unlisted: row.unlisted!,
-          cards: (checklistBy.get(row.id) ?? []).map((l) => ({
-            bucket: bucketOf(l),
-            min: Number(l.min_qty),
-            max: l.max_qty === null ? null : Number(l.max_qty),
-            ...added(l),
-          })),
-        });
+        const cards = (linesBy.get(row.id) ?? []).map((l) => ({ bucket: bucketOf(l), n: Number(l.qty), ...added(l) }));
+        const withOn = { ...common, ...(on && { on: refOf(on, path) }) };
+        assets.push(
+          row.type === "checklist"
+            ? { ...withOn, type: "checklist", cards: cards.map(({ n, ...l }) => ({ ...l, min: n })) }
+            : { ...withOn, type: "exact checklist", cards: cards.map(({ n, ...l }) => ({ ...l, qty: n })) },
+        );
         break;
       }
       case "list pool":
@@ -593,6 +584,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
         }
         const shows = myRefs.get("shows");
         const list = myRefs.get("list");
+        if (row.type === "deck" && !list) problems.push(`${pathKey(path)}: a deck with no \`list\``);
         const deck: AssetOf<"decklist" | "deck"> =
           row.type === "decklist"
             ? {
@@ -605,7 +597,7 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
             : {
                 ...common,
                 type: "deck",
-                ...(list && { list: refOf(list, path) }),
+                list: list ? refOf(list, path) : { byName: false, rooted: true, names: [], facets: [] },
                 ...(shows && { shows: refOf(shows, path) }),
                 zones,
               };

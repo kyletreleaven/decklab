@@ -82,7 +82,6 @@ side = '&/Sideboards/current'
 path = '/Decks/Izzet/maybe'
 type = "checklist"
 on = '/Binders/"St. Louis"'
-unlisted = "any"
 created = 2026-03-01T14:02:11.000Z
 updated = 2026-03-01T14:02:11.000Z
 cards = [
@@ -141,7 +140,7 @@ describe("the lab database, against library file version 5", () => {
   it("stores absent as '' and '{}', never NULL, and implied folders as rows", async () => {
     await writeLab(sqlOver(db), sqlOver(cards), loadV5(FILE), { fetchMissing: noFetch });
     const sol = db
-      .prepare("SELECT printing_id, finish, attrs FROM place_lines WHERE oracle_id = ? AND printing_id = ''")
+      .prepare("SELECT printing_id, finish, attrs FROM lines WHERE oracle_id = ? AND printing_id = ''")
       .get(SOL);
     expect(sol).toEqual({ printing_id: "", finish: "", attrs: "{}" });
     const folders = db.prepare("SELECT name FROM assets WHERE type = 'folder' AND id <> 'root' ORDER BY name").all();

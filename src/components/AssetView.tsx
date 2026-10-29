@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import {
   builtContents,
-  checklistContents,
   deckContents,
   deckList,
-  placeContents,
+  lineContents,
   type AssetNode,
   type BuiltZone,
   type ZoneContents,
@@ -13,6 +12,7 @@ import {
   type Tile,
 } from "../lib/assets";
 import { cardStore, execute, select } from "../lib/db";
+import type { AssetType } from "../lib/ontology";
 import type { Card } from "../lib/types";
 import { CATEGORY_ORDER, categoryOf } from "../lib/deckstats";
 import { CardImage } from "./CardImage";
@@ -33,16 +33,19 @@ interface Section {
   elsewhere?: string;
   /** The zone names nothing that exists. */
   broken?: boolean;
-  /** A deck drawn as its decklist: copies the zone asks for, and holds of them. */
-  built?: { asked: number; held: number };
+  /**
+   * A deck drawn as its decklist: copies the zone asks for, and holds of
+   * them; `exact` when the zone allows nothing more.
+   */
+  built?: { asked: number; held: number; exact: boolean };
+  /** The counts are minimums: a checklist's, not exact. */
+  atLeast?: boolean;
   tiles: Tile[];
 }
 
-/** A checklist line's bounds, as a badge says them. */
-function bounds(t: Tile): string {
-  if (t.max === undefined) return `${t.count}×`;
-  if (t.max === null) return t.count ? `≥${t.count}` : "any";
-  return t.count === t.max ? `${t.count}×` : `${t.count}–${t.max}`;
+/** A line's count, as a badge says it. */
+function bounds(t: Tile, atLeast: boolean | undefined): string {
+  return atLeast && !t.state ? `≥${t.count}` : `${t.count}×`;
 }
 
 /**
@@ -92,11 +95,13 @@ function describe(b: HeldBucket): string {
 }
 
 /**
- * A place, checklist, decklist or deck of the new model, in the lab:
- * read-only, one tile per card (every copy of every printing counted
- * together). A decklist's zones show their checklists, a deck's their places.
- * Data comes from `lab.db` and the card store, so opening one makes no
- * requests but for images not yet on disk, paged as the pool pages them.
+ * A place, checklist, decklist or deck of the new model, in the lab: one
+ * tile per card (every copy of every printing counted together). A
+ * decklist's zones show their checklists; a deck is drawn as the decklist it
+ * builds, what it lacks dimmed. A checklist says whether it is exact, and
+ * can be switched. Data comes from `lab.db` and the card store, so opening
+ * one makes no requests but for images not yet on disk, paged as the pool
+ * pages them.
  */
 export function AssetView({
   node,
@@ -105,6 +110,7 @@ export function AssetView({
   onHoverCard,
   decklists = [],
   onSetList,
+  onConvert,
 }: {
   node: AssetNode;
   selectedId: string | null;
@@ -112,34 +118,47 @@ export function AssetView({
   onHoverCard?: (card: Card | null) => void;
   /** Every decklist in the tree, for a deck's *Builds*. */
   decklists?: AssetNode[];
-  /** Points a deck at a decklist (null: none). Absent, *Builds* is read-only. */
-  onSetList?: (deck: AssetNode, decklistId: string | null) => Promise<void>;
+  /** Points a deck at another decklist. Absent, *Builds* is read-only. */
+  onSetList?: (deck: AssetNode, decklistId: string) => Promise<void>;
+  /** Changes the asset's type: here, a checklist exact or not. */
+  onConvert?: (node: AssetNode, to: AssetType) => Promise<void>;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
   const [list, setList] = useState<DeckList | null>(null);
   // Bumped by an edit made here, to read the asset again.
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // A deck whose decklist no longer exists: drawn from its places instead.
+  const [lost, setLost] = useState(false);
   const [shown, setShown] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let live = true;
     setSections(null);
     setError(null);
+    setLost(false);
     setShown({});
     (async (): Promise<Section[]> => {
       const lab = { select, execute };
       const store = await cardStore();
       setList(node.type === "deck" ? await deckList(lab, node.id) : null);
-      if (node.type === "place")
-        return [{ tiles: await placeContents(lab, store, node.id) }];
-      if (node.type === "checklist")
-        return [{ tiles: await checklistContents(lab, store, node.id) }];
-      // A deck that builds a decklist is drawn as it, missing copies dimmed.
+      if (
+        node.type === "place" ||
+        node.type === "checklist" ||
+        node.type === "exact checklist"
+      )
+        return [
+          {
+            tiles: await lineContents(lab, store, node.id),
+            atLeast: node.type === "checklist",
+          },
+        ];
+      // A deck is drawn as the decklist it builds, missing copies dimmed.
       const built =
         node.type === "deck" ? await builtContents(lab, store, node.id) : null;
+      if (node.type === "deck" && !built) setLost(true);
       const zones: (ZoneContents &
-        Partial<Pick<BuiltZone, "asked" | "held">>)[] =
+        Partial<Pick<BuiltZone, "asked" | "held" | "exact">>)[] =
         built ?? (await deckContents(lab, store, node.id));
       const own = node.path.join("/");
       return zones.map((z) => {
@@ -149,8 +168,9 @@ export function AssetView({
           // A deck missing a zone its decklist has: everything there is missing.
           broken: !z.target && z.asked === undefined,
           ...(z.asked !== undefined && {
-            built: { asked: z.asked, held: z.held ?? 0 },
+            built: { asked: z.asked, held: z.held ?? 0, exact: !!z.exact },
           }),
+          atLeast: z.target?.type === "checklist",
           ...(at !== undefined &&
             at !== `${own}/${z.zone}` && { elsewhere: `/${at}` }),
           tiles: z.tiles,
@@ -171,7 +191,10 @@ export function AssetView({
   const all = sections?.flatMap((s) => s.tiles) ?? [];
   const copies = all.reduce((n, t) => n + t.count, 0);
   const standIns = all.filter((t) => t.standIn).length;
-  const isChecklist = node.type === "checklist" || node.type === "decklist";
+  const isChecklist =
+    node.type === "checklist" ||
+    node.type === "exact checklist" ||
+    node.type === "decklist";
   const built =
     sections?.every((s) => s.built) && sections.length > 0
       ? sections.reduce(
@@ -188,8 +211,46 @@ export function AssetView({
       <div className="toolbar">
         <h1>{node.name}</h1>
         <span className="asset-view-path">
-          /{node.path.join("/")} · {node.type}
+          {/* One kind to the eye: the toggle says whether it is exact. */}/
+          {node.path.join("/")} ·{" "}
+          {node.type === "exact checklist" ? "checklist" : node.type}
         </span>
+        {(node.type === "checklist" || node.type === "exact checklist") && (
+          <div
+            className="segmented"
+            role="radiogroup"
+            aria-label="What the counts ask for"
+          >
+            {(
+              [
+                [
+                  "checklist",
+                  "At least",
+                  "Each count is a minimum; anything else may be there too",
+                ],
+                [
+                  "exact checklist",
+                  "Exactly",
+                  "Each count is exact, and nothing unlisted may be there",
+                ],
+              ] as const
+            ).map(([type, label, title]) => (
+              <button
+                key={type}
+                role="radio"
+                aria-checked={node.type === type}
+                className={node.type === type ? "on" : ""}
+                disabled={!onConvert}
+                title={title}
+                onClick={() =>
+                  node.type !== type && void onConvert?.(node, type)
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {node.type === "deck" && (
           <label className="asset-builds" title="The decklist this deck builds">
             Builds
@@ -197,14 +258,13 @@ export function AssetView({
               value={list?.id ?? (list ? "by-name" : "")}
               disabled={!onSetList}
               onChange={async (e) => {
-                await onSetList?.(
-                  node,
-                  e.target.value === "" ? null : e.target.value,
-                );
+                if (e.target.value === "by-name" || e.target.value === "")
+                  return;
+                await onSetList?.(node, e.target.value);
                 setVersion((v) => v + 1);
               }}
             >
-              <option value="">none</option>
+              {!list && <option value="">(no longer exists)</option>}
               {list?.byName && (
                 <option value="by-name">&amp;/{list.path.join("/")}</option>
               )}
@@ -235,11 +295,7 @@ export function AssetView({
               decklist's 100 counts its seven Islands seven times. */}
           <div
             className="stat"
-            title={
-              isChecklist
-                ? "Copies asked for; for a range, its minimum"
-                : "Copies held"
-            }
+            title={isChecklist ? "Copies asked for" : "Copies held"}
           >
             <span className="label">Cards</span>
             <span className="value">{copies}</span>
@@ -261,6 +317,11 @@ export function AssetView({
       )}
 
       {error && <div className="status error">{error}</div>}
+      {lost && (
+        <div className="status error">
+          The decklist this deck builds no longer exists: showing what it holds.
+        </div>
+      )}
 
       <div className="scroll">
         {!sections && !error && <div className="empty">Loading…</div>}
@@ -294,8 +355,19 @@ export function AssetView({
               {groups(s, limit).map((g) => (
                 <div key={g.category ?? ""}>
                   {g.category && (
-                    <h3 className="asset-category">
-                      {g.category}
+                    <h3
+                      className={`asset-category ${g.category === "Extra" && s.built?.exact ? "over" : ""}`}
+                      title={
+                        g.category !== "Extra"
+                          ? undefined
+                          : s.built?.exact
+                            ? "More than this zone allows: it is exact"
+                            : "More than this zone asks for: it asks for at least its counts"
+                      }
+                    >
+                      {g.category === "Extra" && s.built?.exact
+                        ? "Extra — over the list"
+                        : g.category}
                       <span className="asset-zone-count">{g.count}</span>
                     </h3>
                   )}
@@ -330,7 +402,9 @@ export function AssetView({
                           .join("\n")}
                       >
                         <CardImage card={t.card} size="small" />
-                        <span className="qty-badge">{bounds(t)}</span>
+                        <span className="qty-badge">
+                          {bounds(t, s.atLeast)}
+                        </span>
                         {t.standIn && (
                           <span className="stand-in-badge">stand-in</span>
                         )}

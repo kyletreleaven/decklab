@@ -2,10 +2,15 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CREATABLE, type AssetNode, type Creatable } from "../lib/assets";
 import type { AssetType } from "../lib/ontology";
 
-/** A glyph per type, so a place and a deck tell apart at a glance. */
+/**
+ * A glyph per type, so a place and a deck tell apart at a glance. A
+ * checklist is one thing to the eye, exact or not: its view says which.
+ */
 const GLYPH: Record<AssetType, string> = {
   folder: "",
+  collection: "",
   checklist: "☐",
+  "exact checklist": "☐",
   place: "▤",
   pool: "◌",
   "list pool": "◌",
@@ -21,11 +26,20 @@ const LABEL: Record<Creatable, string> = {
   checklist: "checklist",
   "list pool": "pool",
   decklist: "decklist",
-  deck: "deck",
 };
 
 /** What opening an asset shows: places and decks have views; the rest not yet. */
-export const OPENABLE: ReadonlySet<AssetType> = new Set(["place", "decklist", "deck", "checklist"]);
+export const OPENABLE: ReadonlySet<AssetType> = new Set(["place", "decklist", "deck", "checklist", "exact checklist"]);
+
+/**
+ * The menu's conversions: a place to a checklist, a checklist (either kind)
+ * to a place. Exact or not is the checklist view's toggle.
+ */
+const CONVERT_TO: Partial<Record<AssetType, { to: AssetType; label: string }>> = {
+  place: { to: "checklist", label: "Convert to checklist" },
+  checklist: { to: "place", label: "Convert to place" },
+  "exact checklist": { to: "place", label: "Convert to place" },
+};
 
 /** Where the menu is, and what it is for: an asset, or the top of the tree. */
 interface Menu {
@@ -46,8 +60,8 @@ const SPRING_MS = 600;
  * anything with children expand; top-level folders start open. Siblings come
  * in name order: the tree has no order of its own.
  *
- * Right-click an asset, or `+` for the top, for a menu: new child, rename,
- * delete. Drag an asset onto another to make it a child — any asset can hold
+ * Right-click an asset, or `+` for the top, for a menu: new child, a new
+ * deck from a decklist, converting a place or checklist, rename, delete. Drag an asset onto another to make it a child — any asset can hold
  * children — or onto the header to move it to the top. The edits themselves
  * are the caller's; a new asset comes back by id and opens for renaming.
  */
@@ -60,6 +74,7 @@ export function AssetTree({
   onDelete,
   onMove,
   onBuildDeck,
+  onConvert,
   children,
 }: {
   nodes: AssetNode[];
@@ -73,6 +88,8 @@ export function AssetTree({
   onMove: (node: AssetNode, parent: AssetNode | null) => Promise<void>;
   /** Makes a deck building this decklist, as its child; resolves to the new id. */
   onBuildDeck: (decklist: AssetNode) => Promise<string | null>;
+  /** Changes `node`'s type: lines kept, read anew. */
+  onConvert: (node: AssetNode, to: AssetType) => Promise<void>;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState<Set<string>>(
@@ -314,6 +331,21 @@ export function AssetTree({
               <div className="context-menu-divider" />
               <button role="menuitem" onClick={() => void buildDeck(menu.node!)}>
                 New deck from this decklist
+              </button>
+            </>
+          )}
+          {menu.node && CONVERT_TO[menu.node.type] && (
+            <>
+              <div className="context-menu-divider" />
+              <button
+                role="menuitem"
+                onClick={() => {
+                  const node = menu.node!;
+                  setMenu(null);
+                  void onConvert(node, CONVERT_TO[node.type]!.to);
+                }}
+              >
+                {CONVERT_TO[menu.node.type]!.label}
               </button>
             </>
           )}

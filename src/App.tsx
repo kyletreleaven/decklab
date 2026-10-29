@@ -18,6 +18,7 @@ import { AssetView } from "./components/AssetView";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   assetTree,
+  convertAsset,
   createAsset,
   deleteAsset,
   moveAsset,
@@ -28,6 +29,7 @@ import {
   type AssetNode,
   type Creatable,
 } from "./lib/assets";
+import type { AssetType } from "./lib/ontology";
 import { execute, processKind, select } from "./lib/db";
 import * as collectionsApi from "./lib/collections";
 import { UNIVERSE_ID, UNIVERSE_NAME } from "./lib/collections";
@@ -262,8 +264,11 @@ export default function App() {
     await editTree(() => moveAsset(labSql, node.id, parent?.id ?? "root"));
   };
   const buildDeck = (decklist: AssetNode) => editTree(() => newDeckFrom(labSql, decklist.id));
-  const setList = async (deck: AssetNode, decklistId: string | null) => {
+  const setList = async (deck: AssetNode, decklistId: string) => {
     await editTree(() => setDeckList(labSql, deck.id, decklistId));
+  };
+  const convert = async (node: AssetNode, to: AssetType) => {
+    await editTree(() => convertAsset(labSql, node.id, to));
   };
   const decklists = useMemo(() => {
     const out: AssetNode[] = [];
@@ -718,6 +723,7 @@ export default function App() {
               onDelete={remove}
               onMove={moveTo}
               onBuildDeck={buildDeck}
+              onConvert={convert}
             >
               {/* Built in, not in the tree: always first, never moved, no menu. */}
               <button
@@ -984,6 +990,7 @@ export default function App() {
             node={currentAsset}
             decklists={decklists}
             onSetList={setList}
+            onConvert={convert}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}

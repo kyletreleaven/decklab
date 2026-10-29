@@ -6,13 +6,14 @@ import {
   AssetError,
   assetTree,
   builtContents,
+  convertAsset,
   createAsset,
   deckContents,
   deckList,
   deleteAsset,
   moveAsset,
+  lineContents,
   newDeckFrom,
-  placeContents,
   renameAsset,
   setDeckList,
 } from "./assets";
@@ -82,8 +83,7 @@ side = '/Binders/Red'
 [[asset]]
 path = '/Sideboards/Burn'
 type = "checklist"
-unlisted = "excluded"
-cards = [ { oracle = "sol", min = 0, max = 1 } ]
+cards = [ { oracle = "sol", min = 1 } ]
 `;
 
 describe("the lab's assets, for display", () => {
@@ -111,7 +111,7 @@ describe("the lab's assets, for display", () => {
 
   it("counts every copy of a card together, and draws the printing it holds most of", async () => {
     const red = (await assetTree(sqlOver(db)))[0].children[0];
-    const tiles = await placeContents(sqlOver(db), sqlOver(cards), red.id);
+    const tiles = await lineContents(sqlOver(db), sqlOver(cards), red.id);
     expect(tiles.map((t) => [t.card.name, t.count, t.card.id, t.standIn, t.buckets.length])).toEqual([
       ["Lightning Bolt", 6, "bolt-2x2", false, 3],
       ["Sol Ring", 2, "sol-cmr", true, 1],
@@ -122,18 +122,18 @@ describe("the lab's assets, for display", () => {
     const box = (await assetTree(sqlOver(db)))[1].children[1];
     expect(box.name).toBe("Burn box");
     const zones = await deckContents(sqlOver(db), sqlOver(cards), box.id);
-    expect(zones.map((z) => [z.zone, z.target?.path.join("/"), z.tiles.map((t) => [t.card.id, t.count, t.max])])).toEqual([
-      ["main", "Decks/Burn box/main", [["bolt-m10", 3, undefined]]],
-      ["side", "Binders/Red", [["bolt-2x2", 6, undefined], ["sol-cmr", 2, undefined]]],
+    expect(zones.map((z) => [z.zone, z.target?.path.join("/"), z.tiles.map((t) => [t.card.id, t.count])])).toEqual([
+      ["main", "Decks/Burn box/main", [["bolt-m10", 3]]],
+      ["side", "Binders/Red", [["bolt-2x2", 6], ["sol-cmr", 2]]],
     ]);
   });
 
   it("draws Scryfall's pick for a card with no printing, else the newest", async () => {
     const tree = await assetTree(sqlOver(db));
     const zones = await deckContents(sqlOver(db), sqlOver(cards), tree[1].children[0].id);
-    expect(zones.map((z) => [z.zone, z.target?.path.join("/"), z.tiles.map((t) => [t.card.id, t.count, t.max])])).toEqual([
-      ["main", "Decks/Burn/main", [["bolt-2x2", 4, 4]]],
-      ["side", "Sideboards/Burn", [["sol-cmr", 0, 1]]],
+    expect(zones.map((z) => [z.zone, z.target?.path.join("/"), z.tiles.map((t) => [t.card.id, t.count])])).toEqual([
+      ["main", "Decks/Burn/main", [["bolt-2x2", 4]]],
+      ["side", "Sideboards/Burn", [["sol-cmr", 1]]],
     ]);
   });
 
@@ -157,6 +157,44 @@ describe("the lab's assets, for display", () => {
     expect((await assetTree(sqlOver(db))).find((n) => n.name === "New checklist")).toMatchObject({ name: "New checklist", type: "checklist" });
   });
 
+  it("creates a decklist with an empty, exact main", async () => {
+    const id = await createAsset(sqlOver(db), "root", "decklist");
+    const zones = await deckContents(sqlOver(db), sqlOver(cards), id);
+    expect(zones.map((z) => [z.zone, z.target?.path.join("/"), z.target?.type])).toEqual([
+      ["main", "New decklist/main", "exact checklist"],
+    ]);
+  });
+
+  it("converts a place to a checklist and back, and a checklist exact or not, keeping its lines", async () => {
+    const id = await createAsset(sqlOver(db), "root", "place");
+    db.prepare("INSERT INTO lines (asset_id, oracle_id, qty) VALUES (?, 'bolt', 3)").run(id);
+    const kind = () => (db.prepare("SELECT type FROM assets WHERE id = ?").get(id) as { type: string }).type;
+    for (const to of ["checklist", "exact checklist", "checklist", "place"] as const) {
+      await convertAsset(sqlOver(db), id, to);
+      expect(kind()).toBe(to);
+    }
+    expect(db.prepare("SELECT oracle_id, qty FROM lines WHERE asset_id = ?").all(id)).toEqual([{ oracle_id: "bolt", qty: 3 }]);
+    await expect(convertAsset(sqlOver(db), await find("Decks"), "place")).rejects.toThrow(/folder cannot become a place/);
+  });
+
+  it("refuses to convert a zone into what its owner cannot have", async () => {
+    // A decklist's main is exact; a deck's zones are places.
+    await expect(convertAsset(sqlOver(db), await find("Decks/Burn/main"), "checklist")).rejects.toThrow(
+      /main zone of decklist “Burn”, which must be an exact checklist/,
+    );
+    await expect(convertAsset(sqlOver(db), await find("Binders/Red"), "checklist")).rejects.toThrow(
+      /side zone of deck “Burn box”, which must be a place/,
+    );
+    // A decklist's sideboard may be either checklist.
+    const side = await createAsset(sqlOver(db), await find("Decks/Burn"), "checklist", { name: "side" });
+    db.prepare("UPDATE asset_refs SET target_id = ?, path = NULL, rooted = 0 WHERE role = 'side' AND asset_id = ?").run(
+      side,
+      await find("Decks/Burn"),
+    );
+    await convertAsset(sqlOver(db), side, "exact checklist");
+    await expect(convertAsset(sqlOver(db), side, "place")).rejects.toThrow(/which must be a checklist/);
+  });
+
   it("renames, refusing a reserved name or one a sibling has", async () => {
     const red = await find("Binders/Red");
     await renameAsset(sqlOver(db), red, "Crimson");
@@ -173,7 +211,8 @@ describe("the lab's assets, for display", () => {
     const side = db.prepare("SELECT path FROM asset_refs WHERE role = 'side'").get();
     expect(side).toEqual({ path: "Sideboards/Burn" });
     await deleteAsset(sqlOver(db), await find("Decks"));
-    expect(db.prepare("SELECT COUNT(*) AS n FROM checklist_lines").get()).toEqual({ n: 0 });
+    // Red's lines, and no one else's.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM lines").get()).toEqual({ n: 4 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM asset_refs").get()).toEqual({ n: 0 });
     expect((await assetTree(sqlOver(db))).map((n) => n.name)).toEqual(["Binders"]);
   });
@@ -223,8 +262,8 @@ describe("the lab's assets, for display", () => {
       { role: "main" },
       { role: "side" },
     ]);
-    await setDeckList(sqlOver(db), box, null);
-    expect(await deckList(sqlOver(db), box)).toBeNull();
+    // Every deck builds one: the decklist it builds cannot go from under it.
+    await expect(deleteAsset(sqlOver(db), other)).rejects.toThrow(/Burn box \(its list\)/);
     await expect(setDeckList(sqlOver(db), box, await find("Binders/Red"))).rejects.toThrow(/only build a decklist/);
     await expect(setDeckList(sqlOver(db), other, box)).rejects.toThrow(/Only a deck/);
   });
@@ -232,12 +271,13 @@ describe("the lab's assets, for display", () => {
   it("draws a deck as its decklist: each card's copies split into held, missing and extra", async () => {
     const box = await find("Decks/Burn box");
     const zones = await builtContents(sqlOver(db), sqlOver(cards), box);
-    expect(zones!.map((z) => [z.zone, z.asked, z.held, z.tiles.map((t) => [t.card.id, t.count, t.state])])).toEqual([
-      ["main", 4, 3, [["bolt-m10", 3, "held"], ["bolt-2x2", 1, "missing"]]],
-      // The list's sideboard asks for 0–1 Sol Ring: one of two is within it.
-      ["side", 0, 0, [["bolt-2x2", 6, "extra"], ["sol-cmr", 1, "held"], ["sol-cmr", 1, "extra"]]],
+    expect(zones!.map((z) => [z.zone, z.exact, z.asked, z.held, z.tiles.map((t) => [t.card.id, t.count, t.state])])).toEqual([
+      ["main", true, 4, 3, [["bolt-m10", 3, "held"], ["bolt-2x2", 1, "missing"]]],
+      // The list's sideboard asks for at least one Sol Ring: the second is more, not over.
+      ["side", false, 1, 1, [["bolt-2x2", 6, "extra"], ["sol-cmr", 1, "held"], ["sol-cmr", 1, "extra"]]],
     ]);
-    await setDeckList(sqlOver(db), box, null);
+    // Its decklist gone (only by going around the tree's refusal): nothing to draw it as.
+    db.prepare("DELETE FROM assets WHERE id = ?").run(await find("Decks/Burn"));
     expect(await builtContents(sqlOver(db), sqlOver(cards), box)).toBeNull();
   });
 });

@@ -57,19 +57,20 @@ export interface Bucket {
   attrs: Record<string, AttributeValue>;
 }
 
-/** A place's line: copies known exactly this much about. */
+/**
+ * A place's line: copies known exactly this much about. Also an exact
+ * checklist's: exactly this many asked for.
+ */
 export interface PlaceLine {
   bucket: Bucket;
   qty: number;
   added?: string;
 }
 
-/** A checklist's line: an interval on the bucket's population. */
+/** A checklist's line: at least this many of the bucket. */
 export interface ChecklistLine {
   bucket: Bucket;
   min: number;
-  /** null: no upper bound. */
-  max: number | null;
   added?: string;
 }
 
@@ -78,8 +79,6 @@ export interface MemberLine {
   bucket: Bucket;
   added?: string;
 }
-
-export type Unlisted = "any" | "excluded";
 
 export type Pile = { name: string; cards: MemberLine[] } | { name: string; query: string };
 
@@ -94,16 +93,19 @@ export type Asset = Common &
   (
     | { type: "folder" }
     | { type: "place"; storage?: string; cards: PlaceLine[] }
-    | { type: "checklist"; on?: Ref; unlisted: Unlisted; cards: ChecklistLine[] }
+    | { type: "checklist"; on?: Ref; cards: ChecklistLine[] }
+    /** Exactly its counts, and nothing it does not list. */
+    | { type: "exact checklist"; on?: Ref; cards: PlaceLine[] }
     | { type: "list pool"; cards: MemberLine[] }
     | { type: "query pool"; query: string }
-    /** Zones name checklists: what a deck should hold. */
+    /** Zones name checklists: what a deck should hold. Commander and main are exact. */
     | { type: "decklist"; format?: string; zones: Partial<Record<Zone, Ref>>; shows?: Ref }
     /**
      * Zones name places: what it does hold. `list` is the decklist it builds,
-     * zone by zone; `shows`, one of that decklist's arrangements.
+     * zone by zone — every deck builds one; `shows`, one of that decklist's
+     * arrangements.
      */
-    | { type: "deck"; list?: Ref; zones: Partial<Record<Zone, Ref>>; shows?: Ref }
+    | { type: "deck"; list: Ref; zones: Partial<Record<Zone, Ref>>; shows?: Ref }
     | { type: "arrangement"; of: Ref; piles: Pile[] }
   );
 
@@ -201,6 +203,7 @@ export function canonicalV5(lib: V5Library): V5Library {
       switch (a.type) {
         case "place":
         case "checklist":
+        case "exact checklist":
         case "list pool":
           return { ...a, cards: byBucket(a.cards as { bucket: Bucket }[]) } as Asset;
         case "arrangement":
@@ -278,14 +281,6 @@ function line(b: Bucket, counts: Field[], added: string | undefined): string {
   return inline(fields);
 }
 
-function checklistCounts(l: ChecklistLine): Field[] {
-  if (l.max !== null && l.min === l.max) return [["qty", String(l.min)]];
-  const fields: Field[] = [];
-  if (l.min !== 0) fields.push(["min", String(l.min)]);
-  if (l.max !== null) fields.push(["max", String(l.max)]);
-  return fields;
-}
-
 function list(name: string, lines: string[]): string {
   if (!lines.length) return `${name} = []`;
   return `${name} = [\n${lines.map((l) => `  ${l},`).join("\n")}\n]`;
@@ -321,10 +316,7 @@ function inlineZones(deck: AssetOf<"decklist" | "deck">, at: number, assets: Ass
       ref.names[0] === zone &&
       child !== undefined &&
       (deck.type === "decklist"
-        ? child.type === "checklist" &&
-          child.unlisted === "excluded" &&
-          child.on === undefined &&
-          child.cards.every((l) => l.max !== null && l.min === l.max)
+        ? child.type === "exact checklist" && child.on === undefined
         : child.type === "place" && child.storage === undefined) &&
       isChildOf(child.path, deck.path) &&
       child.path[child.path.length - 1] === zone &&
@@ -364,8 +356,11 @@ export function dumpV5(library: V5Library): string {
         break;
       case "checklist":
         if (a.on) head.push(["on", lit(formatRef(a.on))]);
-        head.push(["unlisted", str(a.unlisted)]);
-        body.push(list("cards", a.cards.map((l) => line(l.bucket, checklistCounts(l), l.added))));
+        body.push(list("cards", a.cards.map((l) => line(l.bucket, [["min", String(l.min)]], l.added))));
+        break;
+      case "exact checklist":
+        if (a.on) head.push(["on", lit(formatRef(a.on))]);
+        body.push(list("cards", a.cards.map((l) => line(l.bucket, [["qty", String(l.qty)]], l.added))));
         break;
       case "list pool":
         body.push(list("cards", a.cards.map((l) => line(l.bucket, [], l.added))));
@@ -376,7 +371,7 @@ export function dumpV5(library: V5Library): string {
       case "decklist":
       case "deck": {
         if (a.type === "decklist" && a.format !== undefined) head.push(["format", str(a.format)]);
-        if (a.type === "deck" && a.list) head.push(["list", lit(formatRef(a.list))]);
+        if (a.type === "deck") head.push(["list", lit(formatRef(a.list))]);
         if (a.shows) head.push(["shows", lit(formatRef(a.shows))]);
         const inline = inlineZones(a, i, lib.assets);
         const zones = ZONES.filter((z) => a.zones[z]);
@@ -384,12 +379,8 @@ export function dumpV5(library: V5Library): string {
           body.push("", "[asset.zones]");
           for (const zone of zones) {
             if (inline.includes(zone)) {
-              const child = lib.assets[i + 1 + inline.indexOf(zone)] as AssetOf<"checklist" | "place">;
-              const lines =
-                child.type === "checklist"
-                  ? child.cards.map((l) => line(l.bucket, [["qty", String(l.min)]], l.added))
-                  : child.cards.map((l) => line(l.bucket, [["qty", String(l.qty)]], l.added));
-              body.push(list(zone, lines));
+              const child = lib.assets[i + 1 + inline.indexOf(zone)] as AssetOf<"exact checklist" | "place">;
+              body.push(list(zone, child.cards.map((l) => line(l.bucket, [["qty", String(l.qty)]], l.added))));
             } else {
               body.push(`${zone} = ${lit(formatRef(a.zones[zone]!))}`);
             }
@@ -688,35 +679,38 @@ export function loadV5(text: string): V5Library {
         assets.push({ ...common(r), type: "place", ...(storage !== undefined && { storage }), cards });
         break;
       }
-      case "checklist": {
-        const r: Reader = new Reader(table, where, [...ASSET_KEYS, "on", "unlisted", "cards"]);
-        const text = r.text("unlisted");
-        if (text !== "any" && text !== "excluded") r.fail('`unlisted` must be "any" or "excluded"');
-        const unlisted: Unlisted = text;
-        const cards = lines(r, "cards", ["qty", "min", "max"]).map((l) => {
-          const bucket = readBucket(l, attributes);
-          if (l.has("qty")) {
-            if (l.has("min") || l.has("max")) l.fail("`qty` is exact: it takes no `min` or `max`");
-            const n = l.whole("qty", 1);
-            return withAdded(l, { bucket, min: n, max: n });
-          }
-          if (!l.has("min") && !l.has("max")) l.fail("a checklist line needs `qty`, `min` or `max`");
-          const min = l.has("min") ? l.whole("min", 0) : 0;
-          const max = l.has("max") ? l.whole("max", 0) : null;
-          if (max !== null && max < min) l.fail("`max` is below `min`");
-          return withAdded(l, { bucket, min, max });
-        });
-        noDuplicates(cards.map((c) => c.bucket));
+      case "checklist":
+      case "exact checklist": {
+        // A checklist's lines are minimums, an exact one's exact counts: the
+        // key says which, so a line moved between them is caught.
+        const exact = kind === "exact checklist";
+        const r: Reader = new Reader(table, where, [...ASSET_KEYS, "on", "cards"]);
+        const read = lines(r, "cards", [exact ? "qty" : "min"]).map((l) => ({
+          l,
+          bucket: readBucket(l, attributes),
+          n: l.whole(exact ? "qty" : "min", 1),
+        }));
+        noDuplicates(read.map((x) => x.bucket));
         const on = r.has("on") ? refer(r, "on", "collection") : undefined;
-        assets.push({
-          ...common(r),
-          type: "checklist",
-          ...(on && { on }),
-          unlisted,
-          cards,
-        });
+        assets.push(
+          exact
+            ? {
+                ...common(r),
+                type: "exact checklist",
+                ...(on && { on }),
+                cards: read.map(({ l, bucket, n }) => withAdded(l, { bucket, qty: n })),
+              }
+            : {
+                ...common(r),
+                type: "checklist",
+                ...(on && { on }),
+                cards: read.map(({ l, bucket, n }) => withAdded(l, { bucket, min: n })),
+              },
+        );
         break;
       }
+      case "collection":
+        throw new LibraryFormatError(`${where}: "collection" names what holds cards; an asset is a place`);
       case "list pool":
       case "query pool": {
         const r = new Reader(table, where, [...ASSET_KEYS, "cards", "query"]);
@@ -741,12 +735,12 @@ export function loadV5(text: string): V5Library {
         const r: Reader = new Reader(table, where, [...ASSET_KEYS, isList ? "format" : "list", "shows", "zones"]);
         const c = common(r);
         const format = isList ? r.optText("format") : undefined;
-        const list = !isList && r.has("list") ? refer(r, "list", "decklist") : undefined;
-        if (!isList && r.has("shows") && !list) r.fail("a deck shows its decklist's arrangement: it needs `list`");
+        if (!isList && !r.has("list")) r.fail("a deck needs `list`: the decklist it builds");
+        const list = isList ? undefined : refer(r, "list", "decklist");
         const shows = r.has("shows") ? refer(r, "shows", "arrangement") : undefined;
         if (!isList && shows && list) decksShowing.push({ where, path, list, shows });
         const zones: Partial<Record<Zone, Ref>> = {};
-        const inline: AssetOf<"checklist" | "place">[] = [];
+        const inline: AssetOf<"exact checklist" | "place">[] = [];
         if (r.has("zones")) {
           const given = table.zones;
           if (!isTable(given)) r.fail("`zones` must be a table");
@@ -759,7 +753,7 @@ export function loadV5(text: string): V5Library {
               pending.push({
                 ref: zones[zone]!,
                 from: path,
-                as: isList ? "checklist" : "place",
+                as: !isList ? "place" : zone === "side" ? "checklist" : "exact checklist",
                 where: `${where}, zone \`${zone}\``,
               });
               continue;
@@ -769,18 +763,11 @@ export function loadV5(text: string): V5Library {
             // pinned relative reference to it.
             const read = lines(z, zone, ["qty"]).map((l) => ({ l, bucket: readBucket(l, attributes), n: l.whole("qty", 1) }));
             noDuplicates(read.map((x) => x.bucket), `\`${zone}\` lines`);
-            const child: AssetOf<"checklist" | "place"> = isList
-              ? {
-                  path: [...path, zone],
-                  type: "checklist",
-                  unlisted: "excluded",
-                  cards: read.map(({ l, bucket, n }) => withAdded(l, { bucket, min: n, max: n as number | null })),
-                }
-              : {
-                  path: [...path, zone],
-                  type: "place",
-                  cards: read.map(({ l, bucket, n }) => withAdded(l, { bucket, qty: n })),
-                };
+            const child: AssetOf<"exact checklist" | "place"> = {
+              path: [...path, zone],
+              type: isList ? "exact checklist" : "place",
+              cards: read.map(({ l, bucket, n }) => withAdded(l, { bucket, qty: n })),
+            };
             if (c.created !== undefined) child.created = c.created;
             if (c.updated !== undefined) child.updated = c.updated;
             inline.push(child);
@@ -790,7 +777,7 @@ export function loadV5(text: string): V5Library {
         assets.push(
           isList
             ? { ...c, type: "decklist", ...(format !== undefined && { format }), ...(shows && { shows }), zones }
-            : { ...c, type: "deck", ...(list && { list }), ...(shows && { shows }), zones },
+            : { ...c, type: "deck", list: list!, ...(shows && { shows }), zones },
         );
         assets.push(...inline);
         break;
@@ -851,9 +838,12 @@ export function loadV5(text: string): V5Library {
       );
     }
     const fits =
-      p.as === "collection" ? isA(type, "checklist") || type === "decklist" || type === "deck" : isA(type, p.as);
+      p.as === "collection"
+        ? isA(type, "collection") || isA(type, "checklist") || type === "decklist" || type === "deck"
+        : isA(type, p.as);
     if (!fits) {
-      throw new LibraryFormatError(`${p.where}: ${formatRef(p.ref)} is a ${type}, not a ${p.as}`);
+      const a = (t: string) => (/^[aeiou]/.test(t) ? `an ${t}` : `a ${t}`);
+      throw new LibraryFormatError(`${p.where}: ${formatRef(p.ref)} is ${a(type)}, not ${a(p.as)}`);
     }
   }
 

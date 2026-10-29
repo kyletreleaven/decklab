@@ -59,10 +59,8 @@ export interface Tile {
   card: Card;
   /** True when no bucket names a printing, so `card` is a stand-in. */
   standIn: boolean;
-  /** Copies, all buckets together; for a checklist, its minimum. */
+  /** Copies, all buckets together: held, or asked for, as the asset's type reads them. */
   count: number;
-  /** A checklist's maximum: null for no limit, undefined outside checklists. */
-  max?: number | null;
   /**
    * Against a decklist, in a deck it builds: held and on the list, on the
    * list and not held, or held beyond what the list asks. Undefined elsewhere.
@@ -77,7 +75,6 @@ interface LineRow {
   finish: string;
   attrs: string;
   qty: number;
-  max_qty?: number | null;
 }
 
 /**
@@ -118,7 +115,7 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[]): Promise<Til
     const d = drawn.get(oracle);
     const card = d && cards.get(d.id);
     if (!d || !card) continue; // not in the store: the load would have refused it
-    const tile: Tile = {
+    out.push({
       oracleId: oracle,
       card,
       standIn: d.standIn,
@@ -132,28 +129,19 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[]): Promise<Til
         attrs: JSON.parse(l.attrs) as Record<string, unknown>,
         qty: l.qty,
       })),
-    };
-    if (ls[0].max_qty !== undefined) {
-      tile.max = ls.some((l) => l.max_qty === null) ? null : ls.reduce((n, l) => n + (l.max_qty ?? 0), 0);
-    }
-    out.push(tile);
+    });
   }
   return out.sort((a, b) => a.card.name.localeCompare(b.card.name));
 }
 
-/** What a place holds, one tile per card. */
-export async function placeContents(lab: Sql, store: Sql, placeId: string, layers = [scryfallLayer(store)]): Promise<Tile[]> {
+/**
+ * A place's, checklist's or exact checklist's lines, one tile per card. The
+ * count is the same number for each; the type says what it means: held, at
+ * least, exactly.
+ */
+export async function lineContents(lab: Sql, store: Sql, id: string, layers = [scryfallLayer(store)]): Promise<Tile[]> {
   const lines = await lab.select<LineRow>(
-    "SELECT oracle_id, printing_id, finish, attrs, qty FROM place_lines WHERE asset_id = $1",
-    [placeId],
-  );
-  return tiles(store, lines, layers);
-}
-
-/** What a checklist asks for, one tile per card; `count` is its minimum. */
-export async function checklistContents(lab: Sql, store: Sql, id: string, layers = [scryfallLayer(store)]): Promise<Tile[]> {
-  const lines = await lab.select<LineRow>(
-    "SELECT oracle_id, printing_id, finish, attrs, min_qty AS qty, max_qty FROM checklist_lines WHERE asset_id = $1",
+    "SELECT oracle_id, printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1",
     [id],
   );
   return tiles(store, lines, layers);
@@ -162,7 +150,7 @@ export async function checklistContents(lab: Sql, store: Sql, id: string, layers
 export interface ZoneContents {
   zone: string;
   /** The asset the zone names; absent when the reference is broken. */
-  target?: { id: string; path: string[] };
+  target?: { id: string; path: string[]; type: AssetType };
   tiles: Tile[];
 }
 
@@ -202,12 +190,8 @@ export async function deckContents(lab: Sql, store: Sql, deckId: string, layers 
     }
     out.push({
       zone,
-      ...(target && { target: { id: target.id, path: target.path } }),
-      tiles: !target
-        ? []
-        : deck.type === "deck"
-          ? await placeContents(lab, store, target.id, layers)
-          : await checklistContents(lab, store, target.id, layers),
+      ...(target && { target: { id: target.id, path: target.path, type: target.type } }),
+      tiles: target ? await lineContents(lab, store, target.id, layers) : [],
     });
   }
   return out;
@@ -215,8 +199,11 @@ export async function deckContents(lab: Sql, store: Sql, deckId: string, layers 
 
 /* ---------- editing the tree ---------- */
 
-/** What the tree's menu can create; the others need more than a name. */
-export const CREATABLE = ["folder", "place", "checklist", "list pool", "decklist", "deck"] as const;
+/**
+ * What the tree's menu can create; the others need more than a name. A deck
+ * needs its decklist: it is made from one (`newDeckFrom`).
+ */
+export const CREATABLE = ["folder", "place", "checklist", "list pool", "decklist"] as const;
 export type Creatable = (typeof CREATABLE)[number];
 
 /** An edit the tree refuses, with a message to show as it stands. */
@@ -227,7 +214,7 @@ export class AssetError extends Error {
   }
 }
 
-const DEFAULT_NAME: Record<Creatable, string> = {
+const DEFAULT_NAME: Record<Creatable | "deck", string> = {
   folder: "New folder",
   place: "New place",
   checklist: "New checklist",
@@ -236,14 +223,29 @@ const DEFAULT_NAME: Record<Creatable, string> = {
   deck: "New deck",
 };
 
+/** A child of `parentId` called `zone`, of `type`, as its owner's zone. */
+async function addZone(lab: Sql, ownerId: string, zone: string, type: "place" | "exact checklist", at: string): Promise<void> {
+  const id = crypto.randomUUID();
+  await lab.execute(
+    "INSERT INTO assets (id, parent_id, name, type, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $5)",
+    [id, ownerId, zone, type, at],
+  );
+  await lab.execute(
+    "INSERT INTO asset_refs (asset_id, role, target_id, path, rooted, facets) VALUES ($1, $2, $3, NULL, 0, '')",
+    [ownerId, zone, id],
+  );
+}
+
 /**
  * A new, empty asset under `parentId`, named `name` — by default "New
  * <type>" — numbered past any sibling already called that. Returns its id.
+ * A decklist comes with an empty, exact `main`. A deck is only made here
+ * for `newDeckFrom`, which gives it its decklist next.
  */
 export async function createAsset(
   lab: Sql,
   parentId: string,
-  type: Creatable,
+  type: Creatable | "deck",
   { name: base = DEFAULT_NAME[type], at = new Date().toISOString() }: { name?: string; at?: string } = {},
 ): Promise<string> {
   const siblings = await lab.select<{ name: string }>(
@@ -255,11 +257,57 @@ export async function createAsset(
   for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
   const id = crypto.randomUUID();
   await lab.execute(
-    `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at, unlisted)
-     VALUES ($1, $2, $3, $4, $5, $5, $6)`,
-    [id, parentId, name, type, at, type === "checklist" ? "any" : null],
+    `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $5)`,
+    [id, parentId, name, type, at],
   );
+  if (type === "decklist") await addZone(lab, id, "main", "exact checklist", at);
   return id;
+}
+
+/**
+ * What converting can make of an asset: a checklist of a place (its lines
+ * read as minimums); a place of either checklist (as held); and a checklist
+ * exact or not. Lines stay as they are: one table holds them all, so it is a
+ * change of type, in one statement (docs/inventory.md → *Kinds of
+ * checklist*).
+ */
+export const CONVERSIONS: Partial<Record<AssetType, AssetType[]>> = {
+  place: ["checklist"],
+  checklist: ["place", "exact checklist"],
+  "exact checklist": ["place", "checklist"],
+};
+
+/**
+ * What a zone may be: a deck's are places; a decklist's commander and main
+ * are exact checklists, its sideboard either checklist.
+ */
+function zoneFits(owner: AssetType, zone: string, type: AssetType): boolean {
+  if (owner === "deck") return type === "place";
+  if (zone === "side") return type === "checklist" || type === "exact checklist";
+  return type === "exact checklist";
+}
+
+/**
+ * Change an asset's type to one `CONVERSIONS` allows. Refused when something
+ * pins it as a zone the new type cannot be — a deck's place, a decklist's
+ * exact main — so no reference is left naming the wrong kind.
+ */
+export async function convertAsset(lab: Sql, id: string, to: AssetType, at = new Date().toISOString()): Promise<void> {
+  const [me] = await lab.select<{ type: AssetType }>("SELECT type FROM assets WHERE id = $1", [id]);
+  if (!me) throw new AssetError("That asset no longer exists.");
+  if (!CONVERSIONS[me.type]?.includes(to)) throw new AssetError(`A ${me.type} cannot become a ${to}.`);
+  const zones = await lab.select<{ role: string; owner: AssetType; name: string }>(
+    `SELECT r.role, a.type AS owner, a.name FROM asset_refs r JOIN assets a ON a.id = r.asset_id
+      WHERE r.target_id = $1 AND r.role IN ('commander', 'main', 'side')`,
+    [id],
+  );
+  const clash = zones.find((z) => !zoneFits(z.owner, z.role, to));
+  if (clash) {
+    const what = clash.owner === "deck" ? "a place" : clash.role === "side" ? "a checklist" : "an exact checklist";
+    throw new AssetError(`Cannot convert: it is the ${clash.role} zone of ${clash.owner} “${clash.name}”, which must be ${what}.`);
+  }
+  await lab.execute("UPDATE assets SET type = $2, updated_at = $3 WHERE id = $1", [id, to, at]);
 }
 
 /**
@@ -360,7 +408,7 @@ export interface DeckList {
   byName: boolean;
 }
 
-/** Which decklist a deck builds, if any. */
+/** Which decklist a deck builds; null when its pinned one no longer exists. */
 export async function deckList(lab: Sql, deckId: string): Promise<DeckList | null> {
   const [r] = await lab.select<{ target_id: string | null; path: string | null; rooted: number }>(
     "SELECT target_id, path, rooted FROM asset_refs WHERE asset_id = $1 AND role = 'list'",
@@ -381,55 +429,52 @@ export async function deckList(lab: Sql, deckId: string): Promise<DeckList | nul
 }
 
 /**
- * Point a deck at the decklist it builds (`null`: none), pinned, so it
- * follows the decklist anywhere. Its `shows` goes, being one of the old
- * decklist's arrangements. A deck with no zones yet gets an empty place for
- * each zone the decklist has, as its children; zones it has are kept.
+ * Point a deck at the decklist it builds, pinned, so it follows the decklist
+ * anywhere. Every deck builds one, so this replaces, never clears. Its
+ * `shows` goes, being one of the old decklist's arrangements. A deck with no
+ * zones yet gets an empty place for each zone the decklist has, as its
+ * children; zones it has are kept.
  *
- * Written so that stopping between statements leaves a valid lab: the plugin
+ * Written so that stopping between statements leaves a lab that still
+ * loads — at worst a deck with no `list`, which a dump reports: the plugin
  * holds no transaction across calls.
  */
-export async function setDeckList(lab: Sql, deckId: string, decklistId: string | null, at = new Date().toISOString()): Promise<void> {
+export async function setDeckList(lab: Sql, deckId: string, decklistId: string, at = new Date().toISOString()): Promise<void> {
   const types = await lab.select<{ id: string; type: string }>(
     "SELECT id, type FROM assets WHERE id IN ($1, $2)",
-    [deckId, decklistId ?? deckId],
+    [deckId, decklistId],
   );
   const typeOf = (id: string) => types.find((t) => t.id === id)?.type;
   if (typeOf(deckId) !== "deck") throw new AssetError("Only a deck builds a decklist.");
-  if (decklistId !== null && typeOf(decklistId) !== "decklist") throw new AssetError("A deck can only build a decklist.");
+  if (typeOf(decklistId) !== "decklist") throw new AssetError("A deck can only build a decklist.");
 
   await lab.execute("DELETE FROM asset_refs WHERE asset_id = $1 AND role IN ('list', 'shows')", [deckId]);
-  if (decklistId !== null) {
-    await lab.execute(
-      "INSERT INTO asset_refs (asset_id, role, target_id, path, rooted, facets) VALUES ($1, 'list', $2, NULL, 1, '')",
-      [deckId, decklistId],
-    );
-    const zones = await lab.select<{ role: string }>(
+  await lab.execute(
+    "INSERT INTO asset_refs (asset_id, role, target_id, path, rooted, facets) VALUES ($1, 'list', $2, NULL, 1, '')",
+    [deckId, decklistId],
+  );
+  const zones = await lab.select<{ role: string }>(
+    "SELECT role FROM asset_refs WHERE asset_id = $1 AND role IN ('commander', 'main', 'side')",
+    [deckId],
+  );
+  if (!zones.length) {
+    const theirs = await lab.select<{ role: string }>(
       "SELECT role FROM asset_refs WHERE asset_id = $1 AND role IN ('commander', 'main', 'side')",
-      [deckId],
+      [decklistId],
     );
-    if (!zones.length) {
-      const theirs = await lab.select<{ role: string }>(
-        "SELECT role FROM asset_refs WHERE asset_id = $1 AND role IN ('commander', 'main', 'side')",
-        [decklistId],
+    for (const zone of ZONE_ROLES.filter((z) => theirs.some((t) => t.role === z))) {
+      const [child] = await lab.select<{ id: string; type: string }>(
+        "SELECT id, type FROM assets WHERE parent_id = $1 AND name = $2",
+        [deckId, zone],
       );
-      for (const zone of ZONE_ROLES.filter((z) => theirs.some((t) => t.role === z))) {
-        const [child] = await lab.select<{ id: string; type: string }>(
-          "SELECT id, type FROM assets WHERE parent_id = $1 AND name = $2",
-          [deckId, zone],
-        );
-        if (child && child.type !== "place") continue; // something else by that name: leave the zone unset
-        const id = child?.id ?? crypto.randomUUID();
-        if (!child) {
-          await lab.execute(
-            "INSERT INTO assets (id, parent_id, name, type, created_at, updated_at) VALUES ($1, $2, $3, 'place', $4, $4)",
-            [id, deckId, zone, at],
-          );
-        }
+      if (child && child.type !== "place") continue; // something else by that name: leave the zone unset
+      if (child) {
         await lab.execute(
           "INSERT INTO asset_refs (asset_id, role, target_id, path, rooted, facets) VALUES ($1, $2, $3, NULL, 0, '')",
-          [deckId, zone, id],
+          [deckId, zone, child.id],
         );
+      } else {
+        await addZone(lab, deckId, zone, "place", at);
       }
     }
   }
@@ -449,15 +494,19 @@ export interface BuiltZone extends ZoneContents {
   /** Copies the decklist's zone asks for, and how many of them the deck holds. */
   asked: number;
   held: number;
+  /**
+   * The decklist's zone is exact: extras are over what it allows. Otherwise
+   * it asks for at least its counts, and extras are only more.
+   */
+  exact: boolean;
 }
 
 /**
  * A deck drawn as the decklist it builds: zone by zone, at card grain (the
  * decklist's oracle projection, what the deck plays). Each card's copies
  * split into runs by state — held, missing, extra — so a tile is never
- * partly there: 3 of 7 Islands is a held 3× and a missing 4×. A range is
- * held up to its maximum and missing below its minimum. Null when the
- * deck builds no decklist, or one that no longer exists.
+ * partly there: 3 of 7 Islands is a held 3× and a missing 4×. Null when the
+ * decklist no longer exists.
  */
 export async function builtContents(
   lab: Sql,
@@ -495,16 +544,13 @@ export async function builtContents(
     for (const want of a?.tiles ?? []) {
       const have = heldBy.get(want.oracleId);
       heldBy.delete(want.oracleId);
-      // A checklist line is a range: held up to its maximum, missing below
-      // its minimum. `count` is the minimum; an exact line has max = min.
       const has = have?.count ?? 0;
-      const cap = want.max === null ? Infinity : (want.max ?? want.count);
-      const there = Math.min(has, cap);
+      const there = Math.min(has, want.count);
       askedN += want.count;
-      heldN += Math.min(there, want.count);
-      if (there > 0) tiles.push({ ...have!, count: there, max: undefined, state: "held" });
-      if (want.count > has) tiles.push({ ...want, count: want.count - has, max: undefined, state: "missing" });
-      if (has > cap) tiles.push({ ...have!, count: has - cap, max: undefined, state: "extra" });
+      heldN += there;
+      if (there > 0) tiles.push({ ...have!, count: there, state: "held" });
+      if (want.count > has) tiles.push({ ...want, count: want.count - has, state: "missing" });
+      if (has > want.count) tiles.push({ ...have!, count: has - want.count, state: "extra" });
     }
     for (const have of heldBy.values()) tiles.push({ ...have, state: "extra" });
     out.push({
@@ -513,6 +559,7 @@ export async function builtContents(
       tiles: tiles.sort((x, y) => x.card.name.localeCompare(y.card.name)),
       asked: askedN,
       held: heldN,
+      exact: a?.target?.type !== "checklist",
     });
   }
   return out;

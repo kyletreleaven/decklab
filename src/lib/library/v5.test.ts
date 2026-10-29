@@ -35,8 +35,7 @@ function sample(): V5Library {
         path: ["Wishlist"],
         type: "checklist",
         on: { byName: false, rooted: true, names: ["Bulk box"], facets: [] },
-        unlisted: "any",
-        cards: [{ bucket: { card: "Mana Crypt", attrs: {} }, min: 1, max: null }],
+        cards: [{ bucket: { card: "Mana Crypt", attrs: {} }, min: 1 }],
       },
       { path: ["pools", "ramp"], type: "list pool", cards: [{ bucket: { card: "Cultivate", attrs: {} } }] },
       { path: ["pools", "cheap blue"], type: "query pool", query: "c:u usd<1" },
@@ -55,15 +54,13 @@ function sample(): V5Library {
       },
       {
         path: ["Decks", "Atraxa v1.2", "commander"],
-        type: "checklist",
-        unlisted: "excluded",
+        type: "exact checklist",
         created: T1,
         updated: T2,
         cards: [
           {
             bucket: { card: "Atraxa, Praetors' Voice", oracle: ATRAXA, printing: { set: "2xm", number: "190", lang: "en" }, attrs: {} },
-            min: 1,
-            max: 1,
+            qty: 1,
             added: T1,
           },
         ],
@@ -71,8 +68,7 @@ function sample(): V5Library {
       {
         path: ["Decks", "Atraxa v1.2", "maybe"],
         type: "checklist",
-        unlisted: "any",
-        cards: [{ bucket: { card: "Doubling Season", attrs: {} }, min: 1, max: null }],
+        cards: [{ bucket: { card: "Doubling Season", attrs: {} }, min: 1 }],
       },
       {
         path: ["Decks", "Atraxa v1.2", "piles"],
@@ -85,10 +81,9 @@ function sample(): V5Library {
       },
       {
         path: ["Cores", "core"],
-        type: "checklist",
-        unlisted: "excluded",
+        type: "exact checklist",
         notes: "shared by three decks",
-        cards: [{ bucket: { card: "Sol Ring", oracle: SOL, attrs: {} }, min: 1, max: 1 }],
+        cards: [{ bucket: { card: "Sol Ring", oracle: SOL, attrs: {} }, qty: 1 }],
       },
       { path: ["Empty"], type: "folder", notes: "for later" },
     ],
@@ -185,19 +180,27 @@ cards = []
       [`[[asset]]\npath = '/a'\ntype = "place"\ncards = [ { card = "X", qty = 1, set = "c21" } ]`, /both `set` and `number`/],
       [`[[asset]]\npath = '/a'\ntype = "place"\ncards = [ { card = "X", qty = 1, attrs = { signed = true } } ]`, /not declared/],
       [`[[asset]]\npath = '/a'\ntype = "place"\ncards = [ { card = "X", qty = 1 }, { card = "X", qty = 2 } ]`, /same bucket/],
-      [`[[asset]]\npath = '/a'\ntype = "checklist"\nunlisted = "any"\ncards = [ { card = "X", qty = 1, min = 1 } ]`, /exact/],
-      [`[[asset]]\npath = '/a'\ntype = "checklist"\nunlisted = "any"\ncards = [ { card = "X", min = 3, max = 1 } ]`, /below/],
+      // A checklist's lines are minimums, an exact one's exact; no ranges, no background.
+      [`[[asset]]\npath = '/a'\ntype = "checklist"\ncards = [ { card = "X", qty = 1 } ]`, /unknown key `qty`/],
+      [`[[asset]]\npath = '/a'\ntype = "checklist"\ncards = [ { card = "X", min = 1, max = 3 } ]`, /unknown key `max`/],
+      [`[[asset]]\npath = '/a'\ntype = "checklist"\ncards = [ { card = "X", min = 0 } ]`, /`min` must be a whole number of at least 1/],
+      [`[[asset]]\npath = '/a'\ntype = "checklist"\nunlisted = "any"\ncards = []`, /unknown key `unlisted`/],
+      [`[[asset]]\npath = '/a'\ntype = "exact checklist"\ncards = [ { card = "X", min = 1 } ]`, /unknown key `min`/],
+      [`[[asset]]\npath = '/a'\ntype = "collection"`, /an asset is a place/],
+      // A decklist's commander and main are exact; its sideboard may be either.
+      [`[[asset]]\npath = '/c'\ntype = "checklist"\ncards = []\n\n[[asset]]\npath = '/d'\ntype = "decklist"\n\n[asset.zones]\nmain = '/c'`, /is a checklist, not an exact checklist/],
       [`[[asset]]\npath = '/a'\ntype = "place"\n\n[[asset]]\npath = '/a'\ntype = "place"`, /two assets/],
       [`[[asset]]\npath = '/a/b'\ntype = "place"\n\n[[asset]]\npath = '/a'\ntype = "place"`, /before its parent/],
       [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[asset.zones]\nmain = '/nowhere'`, /nothing at \/nowhere/],
       [`[[asset]]\npath = '/p'\ntype = "place"\n\n[[asset]]\npath = '/d'\ntype = "decklist"\n\n[asset.zones]\nmaybe = '/p'`, /unknown key `maybe`/],
       [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[[asset]]\npath = '/x'\ntype = "arrangement"\nof = '/d.oracle.arranged.by_size'\npiles = []`, /no facet/],
       [`[[asset]]\npath = '/f'\ntype = "folder"\n\n[[asset]]\npath = '/x'\ntype = "arrangement"\nof = '/f'\npiles = []`, /a folder, not a decklist/],
-      // A deck: zones are places, `list` a decklist, `shows` one of its arrangements.
-      [`[[asset]]\npath = '/c'\ntype = "checklist"\nunlisted = "any"\n\n[[asset]]\npath = '/k'\ntype = "deck"\n\n[asset.zones]\nmain = '/c'`, /a checklist, not a place/],
+      // A deck: always a `list`, a decklist; zones are places; `shows` one of its arrangements.
+      [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[[asset]]\npath = '/c'\ntype = "checklist"\ncards = []\n\n[[asset]]\npath = '/k'\ntype = "deck"\nlist = '/d'\n\n[asset.zones]\nmain = '/c'`, /a checklist, not a place/],
       [`[[asset]]\npath = '/k'\ntype = "deck"\nformat = "commander"`, /unknown key `format`/],
       [`[[asset]]\npath = '/d'\ntype = "decklist"\nlist = '/d'`, /unknown key `list`/],
       [`[[asset]]\npath = '/p'\ntype = "place"\n\n[[asset]]\npath = '/k'\ntype = "deck"\nlist = '/p'`, /a place, not a decklist/],
+      [`[[asset]]\npath = '/k'\ntype = "deck"`, /needs `list`/],
       [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[[asset]]\npath = '/k'\ntype = "deck"\nshows = '/d.arranged.by_mana'`, /needs `list`/],
       [`[[asset]]\npath = '/d'\ntype = "decklist"\n\n[[asset]]\npath = '/e'\ntype = "decklist"\n\n[[asset]]\npath = '/k'\ntype = "deck"\nlist = '/d'\nshows = '/e.arranged.by_mana'`, /not an arrangement of its decklist/],
     ];
@@ -267,6 +270,27 @@ cards = []
     expect(dumpV5(lib)).toContain("main = [\n  { card = \"Lightning Bolt\", qty = 1, set = \"m10\", number = \"146\" },\n]");
     // A facet of its decklist does as well as a stored arrangement of it.
     expect(() => loadV5(text.replace("shows = '/Decklists/Izzet/piles'", "shows = '/Decklists/Izzet.oracle.arranged.by_type'"))).not.toThrow();
+  });
+
+  it("takes a decklist's sideboard as a plain checklist, written as its own asset", () => {
+    const text = `format = "decklab-library"
+version = 5
+
+[[asset]]
+path = '/d'
+type = "decklist"
+
+[asset.zones]
+side = 'side'
+
+[[asset]]
+path = '/d/side'
+type = "checklist"
+cards = [
+  { card = "Pyroblast", min = 1 },
+]
+`;
+    expect(dumpV5(loadV5(text))).toBe(text);
   });
 
   it("points a schema 4 file at the converter", () => {
