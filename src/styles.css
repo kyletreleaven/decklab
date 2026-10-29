@@ -1210,6 +1210,21 @@ a.external:hover {
   opacity: 1;
 }
 
+/* What the target holds of this tile's bucket, beside the buttons that change it. */
+.tile-controls .target-count {
+  align-self: center;
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.8);
+  font-size: 11px;
+  text-align: center;
+}
+
+.tile-controls > span {
+  display: flex;
+}
+
 /* Nothing to remove — kept visible rather than hidden so the pair does not
    reflow as counts change. */
 .tile-controls button:disabled {

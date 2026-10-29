@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CREATABLE, type AssetNode, type Creatable } from "../lib/assets";
+import { CREATABLE, TARGETABLE, type AssetNode, type Creatable } from "../lib/assets";
 import type { AssetType } from "../lib/ontology";
 
 /**
@@ -38,9 +38,6 @@ export const OPENABLE: ReadonlySet<AssetType> = new Set([
   "list pool",
   "query pool",
 ]);
-
-/** What can be the target: where `+` adds, from whatever view you are in. */
-const TARGETABLE: ReadonlySet<AssetType> = new Set(["list pool"]);
 
 /**
  * The menu's conversions: a place to a checklist, a checklist (either kind)

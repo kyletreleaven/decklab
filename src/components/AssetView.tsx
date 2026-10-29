@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   builtContents,
   deckContents,
   deckList,
+  bucketKey,
   lineContents,
   memberContents,
   type AssetNode,
+  type Bucket,
   type BuiltZone,
   type ZoneContents,
   type DeckList,
@@ -43,6 +45,8 @@ interface Section {
   atLeast?: boolean;
   /** A pool's members: membership, no counts. */
   members?: boolean;
+  /** The asset its tiles are lines of — the view's own, or a zone's — as a source for the target. */
+  source?: { id: string; type: AssetType };
   tiles: Tile[];
 }
 
@@ -102,6 +106,124 @@ function describe(b: HeldBucket, member = false): string {
     .join(" · ");
 }
 
+/** The lab's target, as a view's buttons act on it (App holds it). */
+export interface LabTarget {
+  id: string;
+  name: string;
+  type: AssetType;
+  /** What it holds of a bucket: a member counts 1. */
+  countOf: (bucket: Bucket) => number;
+  /** One more or one fewer, as its type takes it. */
+  step: (bucket: Bucket, delta: 1 | -1) => void;
+  /** One copy between places: `to` the target from `fromId`, or back. */
+  move: (fromId: string, bucket: Bucket, dir: "to" | "back") => void;
+}
+
+/** The one bucket a tile stands for, whole; none when it covers several. */
+function bucketOf(t: Tile): Bucket | null {
+  if (t.buckets.length !== 1) return null;
+  const b = t.buckets[0];
+  return {
+    oracleId: t.oracleId,
+    ...(b.printingId && { printingId: b.printingId }),
+    ...(b.finish && { finish: b.finish }),
+    attrs: b.attrs,
+  };
+}
+
+/**
+ * A tile's buttons, which the target's type decides: a list pool takes the
+ * bucket in or out (`+`, `×`); a checklist or place counts it (`−`, `+`);
+ * and a place, from another place, takes a copy from it (`→`, `←`). A tile
+ * covering several buckets cannot say which: greyed, until one is chosen.
+ */
+function TileControls({
+  tile,
+  source,
+  target,
+}: {
+  tile: Tile;
+  source: { id: string; type: AssetType };
+  target: LabTarget;
+}) {
+  const bucket = bucketOf(tile);
+  const has = bucket ? target.countOf(bucket) : 0;
+  const several = bucket
+    ? undefined
+    : `In ${tile.buckets.length} buckets — choose one to act on`;
+  const moving =
+    source.type === "place" &&
+    target.type === "place" &&
+    source.id !== target.id;
+  const buttons: { label: string; title: string; on: boolean; go: () => void }[] =
+    moving
+      ? [
+          {
+            label: "←",
+            title: `Move one back from ${target.name}`,
+            on: has > 0,
+            go: () => target.move(source.id, bucket!, "back"),
+          },
+          {
+            label: "→",
+            title: `Move one to ${target.name}`,
+            // The tile is one of the source's lines: there is at least one to move.
+            on: true,
+            go: () => target.move(source.id, bucket!, "to"),
+          },
+        ]
+      : target.type === "list pool"
+        ? [
+            has
+              ? {
+                  label: "×",
+                  title: `Remove from ${target.name}`,
+                  on: true,
+                  go: () => target.step(bucket!, -1),
+                }
+              : {
+                  label: "+",
+                  title: `Add to ${target.name}`,
+                  on: true,
+                  go: () => target.step(bucket!, 1),
+                },
+          ]
+        : [
+            {
+              label: "−",
+              title: `One fewer in ${target.name}`,
+              on: has > 0,
+              go: () => target.step(bucket!, -1),
+            },
+            {
+              label: "+",
+              title: `One more in ${target.name}`,
+              on: true,
+              go: () => target.step(bucket!, 1),
+            },
+          ];
+  return (
+    <span className="tile-controls" onClick={(e) => e.stopPropagation()}>
+      {target.type !== "list pool" && bucket && (
+        <span
+          className="target-count"
+          title={`${has} in ${target.name}`}
+        >
+          {has}
+        </span>
+      )}
+      {buttons.map((b) => (
+        // Title on the wrapper: a disabled button shows no tooltip.
+        <span key={b.label} title={several ?? b.title}>
+          <button disabled={!bucket || !b.on} onClick={b.go}>
+            {b.label}
+          </button>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /**
  * A place, checklist, decklist or deck of the new model, in the lab: one
  * tile per card (every copy of every printing counted together). A
@@ -119,7 +241,7 @@ export function AssetView({
   decklists = [],
   onSetList,
   onConvert,
-  onRemoveMember,
+  target,
   refreshKey = 0,
 }: {
   node: AssetNode;
@@ -132,9 +254,12 @@ export function AssetView({
   onSetList?: (deck: AssetNode, decklistId: string) => Promise<void>;
   /** Changes the asset's type: here, a checklist exact or not. */
   onConvert?: (node: AssetNode, to: AssetType) => Promise<void>;
-  /** Takes a card out of a list pool, every bucket of it. Absent, no ×. */
-  onRemoveMember?: (pool: AssetNode, oracleId: string) => Promise<void>;
-  /** Bumped by edits made elsewhere — `+` in All Magic — to read again. */
+  /**
+   * The lab's target, which a tile's buttons act on — this view is the
+   * source, and hands over the bucket a tile stands for. Absent, no buttons.
+   */
+  target?: LabTarget;
+  /** Bumped by an edit to the target — here or in All Magic — to read again. */
   refreshKey?: number;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
@@ -146,12 +271,20 @@ export function AssetView({
   const [lost, setLost] = useState(false);
   const [shown, setShown] = useState<Record<string, number>>({});
 
+  // A refresh is not a reopen (bug 006): reset only when the asset changes;
+  // an edit reads it again and swaps the new in over the old, keeping the
+  // scroll and *Show more* where they were.
+  const opened = useRef<string | null>(null);
   useEffect(() => {
     let live = true;
-    setSections(null);
-    setError(null);
-    setLost(false);
-    setShown({});
+    const asset = `${node.id}:${node.type}`;
+    if (opened.current !== asset) {
+      opened.current = asset;
+      setSections(null);
+      setError(null);
+      setLost(false);
+      setShown({});
+    }
     (async (): Promise<Section[]> => {
       const lab = { select, execute };
       const store = await cardStore();
@@ -163,21 +296,27 @@ export function AssetView({
       )
         return [
           {
-            tiles: await lineContents(lab, store, node.id),
+            // A checklist a tile per line: its lines overlap, a card's total says nothing.
+            tiles: await lineContents(lab, store, node.id, { perLine: node.type !== "place" }),
             atLeast: node.type === "checklist",
+            source: { id: node.id, type: node.type },
           },
         ];
       if (node.type === "list pool")
         return [
-          { tiles: await memberContents(lab, store, node.id), members: true },
+          {
+            tiles: await memberContents(lab, store, node.id),
+            members: true,
+            source: { id: node.id, type: node.type },
+          },
         ];
       // A deck is drawn as the decklist it builds, missing copies dimmed.
       const built =
         node.type === "deck" ? await builtContents(lab, store, node.id) : null;
-      if (node.type === "deck" && !built) setLost(true);
+      if (node.type === "deck") setLost(!built);
       const zones: (ZoneContents &
         Partial<Pick<BuiltZone, "asked" | "held" | "exact">>)[] =
-        built ?? (await deckContents(lab, store, node.id));
+        built ?? (await deckContents(lab, store, node.id, undefined, true));
       const own = node.path.join("/");
       return zones.map((z) => {
         const at = z.target?.path.join("/");
@@ -189,13 +328,18 @@ export function AssetView({
             built: { asked: z.asked, held: z.held ?? 0, exact: !!z.exact },
           }),
           atLeast: z.target?.type === "checklist",
+          ...(z.target && { source: { id: z.target.id, type: z.target.type } }),
           ...(at !== undefined &&
             at !== `${own}/${z.zone}` && { elsewhere: `/${at}` }),
           tiles: z.tiles,
         };
       });
     })()
-      .then((s) => live && setSections(s))
+      .then((s) => {
+        if (!live) return;
+        setSections(s);
+        setError(null);
+      })
       .catch(
         (e) => live && setError(e instanceof Error ? e.message : String(e)),
       );
@@ -402,7 +546,7 @@ export function AssetView({
                   <div className="card-grid">
                     {g.tiles.map((t) => (
                       <div
-                        key={`${t.oracleId}:${t.state ?? ""}`}
+                        key={`${t.oracleId}:${t.buckets.length === 1 ? bucketKey(bucketOf(t)!) : ""}:${t.state ?? ""}`}
                         className={[
                           "card-tile",
                           selectedId === t.card.id && "selected",
@@ -435,20 +579,12 @@ export function AssetView({
                             {bounds(t, s.atLeast)}
                           </span>
                         )}
-                        {s.members && onRemoveMember && (
-                          <span
-                            className="tile-controls"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              title={`Remove from ${node.name}${t.buckets.length > 1 ? `: all ${t.buckets.length} of its members` : ""}`}
-                              onClick={() =>
-                                void onRemoveMember(node, t.oracleId)
-                              }
-                            >
-                              ×
-                            </button>
-                          </span>
+                        {target && s.source && t.state !== "missing" && (
+                          <TileControls
+                            tile={t}
+                            source={s.source}
+                            target={target}
+                          />
                         )}
                         {t.standIn && (
                           <span className="stand-in-badge">stand-in</span>

@@ -17,13 +17,16 @@ import {
   moveAsset,
   lineContents,
   memberContents,
+  moveCopy,
   newDeckFrom,
   poolMembers,
-  removeCard,
   removeMember,
   renameAsset,
   setDeckList,
   setPoolQuery,
+  stepLine,
+  stepTarget,
+  targetCounts,
 } from "./assets";
 import { readLab } from "./library/labdb";
 import { writeLab } from "./library/labdb";
@@ -304,6 +307,48 @@ describe("the lab's assets, for display", () => {
     await expect(setPoolQuery(sqlOver(db), await find("Binders/Red"), "x")).rejects.toThrow(/Only a query pool/);
   });
 
+  it("draws a checklist a tile per line: its lines overlap, so a card's total means nothing", async () => {
+    const id = await createAsset(sqlOver(db), "root", "checklist");
+    await stepLine(sqlOver(db), id, { oracleId: "bolt" }, 1);
+    await stepLine(sqlOver(db), id, { oracleId: "bolt", printingId: "bolt-m10" }, 1);
+    await stepLine(sqlOver(db), id, { oracleId: "bolt" }, 1);
+    const per = await lineContents(sqlOver(db), sqlOver(cards), id, { perLine: true });
+    expect(per.map((t) => [t.card.id, t.count, t.standIn])).toEqual([
+      ["bolt-2x2", 2, true],
+      ["bolt-m10", 1, false],
+    ]);
+    expect((await lineContents(sqlOver(db), sqlOver(cards), id)).map((t) => t.count)).toEqual([3]);
+  });
+
+  it("steps a target's line, as its type takes it", async () => {
+    const red = await find("Binders/Red");
+    const m10 = { oracleId: "bolt", printingId: "bolt-m10", attrs: {} };
+    const counts = () => targetCounts(sqlOver(db), { id: red, type: "place" });
+    expect((await counts()).get(bucketKey(m10))).toBe(2);
+    await stepTarget(sqlOver(db), { id: red, type: "place" }, m10, -1);
+    await stepTarget(sqlOver(db), { id: red, type: "place" }, m10, -1);
+    expect((await counts()).has(bucketKey(m10))).toBe(false);
+    await expect(stepLine(sqlOver(db), red, m10, -1)).rejects.toThrow(/none of that/);
+    const pool = await createAsset(sqlOver(db), "root", "list pool");
+    await stepTarget(sqlOver(db), { id: pool, type: "list pool" }, m10, 1);
+    expect((await targetCounts(sqlOver(db), { id: pool, type: "list pool" })).get(bucketKey(m10))).toBe(1);
+    await expect(stepLine(sqlOver(db), pool, m10, 1)).rejects.toThrow(/Only a place or checklist/);
+  });
+
+  it("moves a copy between places, the whole bucket with it", async () => {
+    const red = await find("Binders/Red");
+    const box = await createAsset(sqlOver(db), "root", "place");
+    const foil = { oracleId: "sol", finish: "foil", attrs: { signed: true } };
+    await stepLine(sqlOver(db), red, foil, 1);
+    await moveCopy(sqlOver(db), red, box, foil);
+    expect((await targetCounts(sqlOver(db), { id: red, type: "place" })).has(bucketKey(foil))).toBe(false);
+    expect((await targetCounts(sqlOver(db), { id: box, type: "place" })).get(bucketKey(foil))).toBe(1);
+    await expect(moveCopy(sqlOver(db), red, box, foil)).rejects.toThrow(/none of that/);
+    await expect(moveCopy(sqlOver(db), red, await find("Sideboards/Burn"), { oracleId: "bolt" })).rejects.toThrow(
+      /from one place to another/,
+    );
+  });
+
   it("makes a bucket a member of a list pool, and takes it out again", async () => {
     const pool = await createAsset(sqlOver(db), "root", "list pool");
     const anySol = { oracleId: "sol" };
@@ -331,7 +376,7 @@ describe("the lab's assets, for display", () => {
     // Out goes that bucket only: C21 stays.
     await removeMember(sqlOver(db), pool, anySol);
     expect((await poolMembers(sqlOver(db), pool)).has(bucketKey(c21))).toBe(true);
-    await removeCard(sqlOver(db), pool, "sol");
+    await removeMember(sqlOver(db), pool, c21);
     expect([...(await poolMembers(sqlOver(db), pool))]).toEqual([bucketKey(m10)]);
     await expect(addMember(sqlOver(db), await find("Binders/Red"), anySol)).rejects.toThrow(/Only a list pool/);
   });

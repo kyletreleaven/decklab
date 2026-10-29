@@ -3,7 +3,7 @@ import { badName, parseRef, pathKey } from "./paths";
 import type { Sql } from "./sql";
 import { scryfallLayer, standIns, type Layer } from "./standIn";
 import type { Card } from "./types";
-import type { AssetType } from "./ontology";
+import { isA, type AssetType } from "./ontology";
 
 /**
  * Reading the new model's tables (`src-tauri/migrations/lab/1000_assets.sql`)
@@ -93,20 +93,30 @@ interface LineRow {
  * Lines as tiles, sorted by name. A tile draws the printing it holds most
  * copies of; one whose buckets name no printing draws the stand-in.
  */
-async function tiles(store: Sql, lines: LineRow[], layers: Layer[]): Promise<Tile[]> {
-  const byOracle = new Map<string, LineRow[]>();
-  for (const l of lines) byOracle.set(l.oracle_id, [...(byOracle.get(l.oracle_id) ?? []), l]);
+async function tiles(store: Sql, lines: LineRow[], layers: Layer[], perLine = false): Promise<Tile[]> {
+  // Keyed by card, or — a tile per line — by bucket; either way each key's
+  // lines are one card's.
+  const byKey = new Map<string, LineRow[]>();
+  for (const l of lines) {
+    const k = perLine ? JSON.stringify([l.oracle_id, l.printing_id, l.finish, l.attrs]) : l.oracle_id;
+    byKey.set(k, [...(byKey.get(k) ?? []), l]);
+  }
 
+  // Drawn printings by key; a stand-in is the card's, whichever key asks.
   const drawn = new Map<string, { id: string; standIn: boolean }>();
-  const unprinted: string[] = [];
-  for (const [oracle, ls] of byOracle) {
+  const unprinted = new Set<string>();
+  for (const [key, ls] of byKey) {
     const perPrinting = new Map<string, number>();
     for (const l of ls) if (l.printing_id !== "") perPrinting.set(l.printing_id, (perPrinting.get(l.printing_id) ?? 0) + l.qty);
     const most = [...perPrinting].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
-    if (most) drawn.set(oracle, { id: most[0], standIn: false });
-    else unprinted.push(oracle);
+    if (most) drawn.set(key, { id: most[0], standIn: false });
+    else unprinted.add(ls[0].oracle_id);
   }
-  for (const [oracle, id] of await standIns(layers, unprinted)) drawn.set(oracle, { id, standIn: true });
+  const stood = await standIns(layers, [...unprinted]);
+  for (const [key, ls] of byKey) {
+    const id = drawn.has(key) ? undefined : stood.get(ls[0].oracle_id);
+    if (id) drawn.set(key, { id, standIn: true });
+  }
 
   // The drawn printings, and every bucket's, to say which it is.
   const ids = [
@@ -123,12 +133,12 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[]): Promise<Til
   }
 
   const out: Tile[] = [];
-  for (const [oracle, ls] of byOracle) {
-    const d = drawn.get(oracle);
+  for (const [key, ls] of byKey) {
+    const d = drawn.get(key);
     const card = d && cards.get(d.id);
     if (!d || !card) continue; // not in the store: the load would have refused it
     out.push({
-      oracleId: oracle,
+      oracleId: ls[0].oracle_id,
       card,
       standIn: d.standIn,
       count: ls.reduce((n, l) => n + l.qty, 0),
@@ -147,16 +157,23 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[]): Promise<Til
 }
 
 /**
- * A place's, checklist's or exact checklist's lines, one tile per card. The
- * count is the same number for each; the type says what it means: held, at
- * least, exactly.
+ * A place's, checklist's or exact checklist's lines: one tile per card, or
+ * `perLine`, one per line. The count is the same number for each; the type
+ * says what it means: held, at least, exactly. A checklist is drawn per line:
+ * its lines can overlap — at least four Bolts, at least one of them M10 —
+ * so a card's total is a number nobody asked for.
  */
-export async function lineContents(lab: Sql, store: Sql, id: string, layers = [scryfallLayer(store)]): Promise<Tile[]> {
+export async function lineContents(
+  lab: Sql,
+  store: Sql,
+  id: string,
+  { perLine = false, layers = [scryfallLayer(store)] }: { perLine?: boolean; layers?: Layer[] } = {},
+): Promise<Tile[]> {
   const lines = await lab.select<LineRow>(
     "SELECT oracle_id, printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1",
     [id],
   );
-  return tiles(store, lines, layers);
+  return tiles(store, lines, layers, perLine);
 }
 
 export interface ZoneContents {
@@ -171,7 +188,14 @@ export interface ZoneContents {
  * asset — a decklist's to a checklist, a deck's to a place — pinned by id,
  * or by name through the tree.
  */
-export async function deckContents(lab: Sql, store: Sql, deckId: string, layers = [scryfallLayer(store)]): Promise<ZoneContents[]> {
+export async function deckContents(
+  lab: Sql,
+  store: Sql,
+  deckId: string,
+  layers = [scryfallLayer(store)],
+  /** Checklist zones a tile per line, as their own view draws them. */
+  perLine = false,
+): Promise<ZoneContents[]> {
   const tree = await assetTree(lab);
   const byPath = new Map<string, AssetNode>();
   const byId = new Map<string, AssetNode>();
@@ -203,7 +227,9 @@ export async function deckContents(lab: Sql, store: Sql, deckId: string, layers 
     out.push({
       zone,
       ...(target && { target: { id: target.id, path: target.path, type: target.type } }),
-      tiles: target ? await lineContents(lab, store, target.id, layers) : [],
+      tiles: target
+        ? await lineContents(lab, store, target.id, { layers, perLine: perLine && isA(target.type, "checklist") })
+        : [],
     });
   }
   return out;
@@ -673,13 +699,6 @@ export async function removeMember(lab: Sql, poolId: string, bucket: Bucket, at 
   await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [poolId, at]);
 }
 
-/** Every member of one card, whatever its bucket: what a pool view's × takes out. */
-export async function removeCard(lab: Sql, poolId: string, oracleId: string, at = new Date().toISOString()): Promise<void> {
-  await requireListPool(lab, poolId);
-  await lab.execute("DELETE FROM pool_members WHERE asset_id = $1 AND oracle_id = $2", [poolId, oracleId]);
-  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [poolId, at]);
-}
-
 /**
  * A list pool's members, one tile per card. Membership has no count: a
  * tile's `count` is how many of the card's buckets are members, and its
@@ -691,4 +710,78 @@ export async function memberContents(lab: Sql, store: Sql, poolId: string, layer
     [poolId],
   );
   return tiles(store, lines, layers);
+}
+
+/* ---------- targets ---------- */
+
+/**
+ * What can be the lab's target: what `+` acts on, from whatever view is the
+ * source. A list pool takes members; the others count, each as its type
+ * reads a line — held, at least, exactly.
+ */
+export const TARGETABLE: ReadonlySet<AssetType> = new Set<AssetType>(["list pool", "checklist", "exact checklist", "place"]);
+
+/** What a target holds of each bucket, by `bucketKey`: a member counts 1. */
+export async function targetCounts(lab: Sql, target: { id: string; type: AssetType }): Promise<Map<string, number>> {
+  const rows = await lab.select<{ oracle_id: string; printing_id: string; finish: string; attrs: string; qty: number }>(
+    target.type === "list pool"
+      ? "SELECT oracle_id, printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1"
+      : "SELECT oracle_id, printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1",
+    [target.id],
+  );
+  return new Map(rows.map((r) => [JSON.stringify([r.oracle_id, r.printing_id, r.finish, r.attrs]), r.qty]));
+}
+
+/**
+ * One more, or one fewer, of a bucket's line: created at 1, gone at 0. Fewer
+ * of a line there is none of is refused.
+ */
+export async function stepLine(lab: Sql, id: string, bucket: Bucket, delta: 1 | -1, at = new Date().toISOString()): Promise<void> {
+  const [me] = await lab.select<{ type: AssetType }>("SELECT type FROM assets WHERE id = $1", [id]);
+  if (!me || me.type === "list pool" || !TARGETABLE.has(me.type)) throw new AssetError("Only a place or checklist counts copies.");
+  const key = [id, ...columns(bucket)];
+  const where = "asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5";
+  if (delta > 0) {
+    await lab.execute(
+      `INSERT INTO lines (asset_id, oracle_id, printing_id, finish, attrs, qty, added_at)
+       VALUES ($1, $2, $3, $4, $5, 1, $6)
+       ON CONFLICT (asset_id, oracle_id, printing_id, finish, attrs) DO UPDATE SET qty = qty + 1`,
+      [...key, at],
+    );
+  } else {
+    const [line] = await lab.select<{ qty: number }>(`SELECT qty FROM lines WHERE ${where}`, key);
+    if (!line) throw new AssetError("There is none of that to take away.");
+    await lab.execute(line.qty > 1 ? `UPDATE lines SET qty = qty - 1 WHERE ${where}` : `DELETE FROM lines WHERE ${where}`, key);
+  }
+  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [id, at]);
+}
+
+/** One more or one fewer in a target, as its type takes it: a member in or out, or a line counted. */
+export async function stepTarget(
+  lab: Sql,
+  target: { id: string; type: AssetType },
+  bucket: Bucket,
+  delta: 1 | -1,
+  at = new Date().toISOString(),
+): Promise<void> {
+  if (target.type === "list pool") return delta > 0 ? addMember(lab, target.id, bucket, at) : removeMember(lab, target.id, bucket, at);
+  return stepLine(lab, target.id, bucket, delta, at);
+}
+
+/**
+ * One copy of a bucket from one place to another: a card is in one place at
+ * a time. Two writes the plugin cannot make one transaction, so the copy
+ * leaves first — a failure between leaves it in neither, and says so, rather
+ * than in both silently. Move transactions are parked (TODO).
+ */
+export async function moveCopy(lab: Sql, fromId: string, toId: string, bucket: Bucket, at = new Date().toISOString()): Promise<void> {
+  const kinds = await lab.select<{ id: string; type: AssetType }>("SELECT id, type FROM assets WHERE id IN ($1, $2)", [fromId, toId]);
+  if (fromId === toId || kinds.length !== 2 || kinds.some((k) => k.type !== "place"))
+    throw new AssetError("A copy moves from one place to another.");
+  await stepLine(lab, fromId, bucket, -1, at);
+  try {
+    await stepLine(lab, toId, bucket, 1, at);
+  } catch (e) {
+    throw new AssetError(`The copy left but did not arrive: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }

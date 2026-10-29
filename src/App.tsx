@@ -14,10 +14,9 @@ import { ManaCost } from "./components/ManaCost";
 import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import { AssetTree } from "./components/AssetTree";
-import { AssetView } from "./components/AssetView";
+import { AssetView, type LabTarget } from "./components/AssetView";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
-  addMember,
   assetTree,
   bucketKey,
   convertAsset,
@@ -26,9 +25,10 @@ import {
   deleteAsset,
   moveAsset,
   newDeckFrom,
-  poolMembers,
-  removeCard,
-  removeMember,
+  moveCopy,
+  stepTarget,
+  targetCounts,
+  TARGETABLE,
   renameAsset,
   setDeckList,
   setPoolQuery,
@@ -36,7 +36,6 @@ import {
   type AssetNode,
   type Creatable,
   type Bucket,
-  type Members,
 } from "./lib/assets";
 import type { AssetType } from "./lib/ontology";
 import { execute, processKind, select } from "./lib/db";
@@ -326,8 +325,8 @@ export default function App() {
   /**
    * The lab's target: the asset `+` adds to from whatever view you are in —
    * the view is the source, and hands over the bucket a tile stands for;
-   * the target only acts on it. A list pool, for now; set from the tree's
-   * menu.
+   * the target only acts on it, as its type takes it (`TARGETABLE`). Set
+   * from the tree's menu.
    */
   const [labTargetId, setLabTargetId] = useState<string | null>(null);
   const labTarget = useMemo(() => {
@@ -341,37 +340,53 @@ export default function App() {
     };
     return labTargetId ? find(assets) : null;
   }, [labTargetId, assets]);
-  // Bumped by a membership edit, so the target's members and an open view of it read again.
-  const [membersVersion, setMembersVersion] = useState(0);
-  const [members, setMembers] = useState<Members | null>(null);
+  // Bumped by an edit to the target, so its counts and any open view read again.
+  const [targetVersion, setTargetVersion] = useState(0);
+  const [targetHolds, setTargetHolds] = useState<Map<string, number> | null>(null);
   useEffect(() => {
-    if (!labTarget || labTarget.type !== "list pool") {
-      setMembers(null);
+    if (!labTarget || !TARGETABLE.has(labTarget.type)) {
+      setTargetHolds(null);
       return;
     }
     let alive = true;
-    poolMembers(labSql, labTarget.id).then((m) => alive && setMembers(m));
+    targetCounts(labSql, labTarget).then((m) => alive && setTargetHolds(m));
     return () => {
       alive = false;
     };
-  }, [labTarget?.id, labTarget?.type, membersVersion, labSql]);
-  const editMembers = async (edit: () => Promise<void>) => {
+  }, [labTarget?.id, labTarget?.type, targetVersion, labSql]);
+  const editTarget = async (edit: () => Promise<void>) => {
     await editTree(edit);
-    setMembersVersion((v) => v + 1);
+    setTargetVersion((v) => v + 1);
   };
-  const labDestination =
-    labTarget && members
+  /** The target as a view's buttons act on it: what each source hands over, stepped or moved. */
+  const labTargeting: LabTarget | null =
+    labTarget && targetHolds
       ? {
+          id: labTarget.id,
           name: labTarget.name,
-          quantities: {},
-          quantityKind: "binary" as const,
-          heldAt: (bucket: Bucket) => (members.has(bucketKey(bucket)) ? 1 : 0),
-          add: (_: Card, bucket: Bucket) =>
-            void editMembers(() => addMember(labSql, labTarget.id, bucket)),
-          remove: (_: Card, bucket: Bucket) =>
-            void editMembers(() => removeMember(labSql, labTarget.id, bucket)),
+          type: labTarget.type,
+          countOf: (bucket) => targetHolds.get(bucketKey(bucket)) ?? 0,
+          step: (bucket, delta) =>
+            void editTarget(() => stepTarget(labSql, labTarget, bucket, delta)),
+          move: (fromId, bucket, dir) =>
+            void editTarget(() =>
+              dir === "to"
+                ? moveCopy(labSql, fromId, labTarget.id, bucket)
+                : moveCopy(labSql, labTarget.id, fromId, bucket),
+            ),
         }
       : null;
+  // All Magic and query pools as the source: a list pool takes members, anything else counts.
+  const labDestination = labTargeting
+    ? {
+        name: labTargeting.name,
+        quantities: {},
+        quantityKind: labTargeting.type === "list pool" ? ("binary" as const) : ("natural" as const),
+        heldAt: labTargeting.countOf,
+        add: (_: Card, bucket: Bucket) => labTargeting.step(bucket, 1),
+        remove: (_: Card, bucket: Bucket) => labTargeting.step(bucket, -1),
+      }
+    : null;
 
   const currentDeck =
     view.kind === "deck" ? (decks.find((d) => d.id === view.id) ?? null) : null;
@@ -1088,10 +1103,8 @@ export default function App() {
             decklists={decklists}
             onSetList={setList}
             onConvert={convert}
-            onRemoveMember={(node, oracleId) =>
-              editMembers(() => removeCard(labSql, node.id, oracleId))
-            }
-            refreshKey={membersVersion}
+            target={labTargeting ?? undefined}
+            refreshKey={targetVersion}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
