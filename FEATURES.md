@@ -136,6 +136,43 @@ Early: one route so far. Design and reasoning in
   route requires it
 - `GET /decks` — every deck, most recently updated first, as JSON
 
+## The lab: the new model, in progress
+
+`npm run lab` runs the app on the new model's tables (`lab.db`), seeded from
+a library file ([`docs/lab.md`](docs/lab.md)); the model is
+[`docs/inventory.md`](docs/inventory.md). What it does so far:
+
+- **The asset tree** is the sidebar: All Magic first, then folders, places,
+  checklists, pools and decklists, shown by name. Right-click for a new
+  child, rename, delete (refused while something outside pins it), convert,
+  and *Set as target*; drag onto an asset to re-parent
+- **A place** shows its cards a tile per card, counting every copy together.
+  **A checklist** shows a tile per line, *At least* or *Exactly*, switchable.
+  **A decklist** shows its zones, main grouped by type. **A deck** builds a
+  decklist (*New deck from this decklist*, *Builds* to switch) and is drawn
+  as it: what it holds, what it is missing (dimmed), what is extra
+- **Convert** a place to a checklist and back, refused where a zone must stay
+  its kind
+- **List pools** hold cards or printings as members. **Query pools** keep a
+  search: *Save as pool* from All Magic, then *Save*, *Save as…* and
+  *Revert* in the pool; opening one runs it, with the Cards | Printings
+  toggle
+- **The target** — a list pool, checklist or place — is what a tile's
+  buttons act on, from whatever view you are in. A list pool takes the
+  card or printing in or out (`+`, `×`); a checklist or place counts it
+  (`−`, `+`); from one place to another, a copy moves (`→`, `←`). A tile
+  standing for several buckets has its buttons greyed
+- **Buckets in the detail:** selecting a tile in an asset lists its card's
+  buckets there, each with the target's buttons and *Change…* — move some
+  or all of a bucket to another printing, finish or attributes (condition,
+  signed, altered, note), or clear them; a bucket that already exists is
+  merged into
+- **Searching an asset:** places, checklists and pools have the search bar
+  and filters, answered locally with no requests. A line with no printing
+  recorded never matches a printing-level term like `s:` or `r:`, either
+  way. A place can show **All Magic behind it** (*Show not in <place>*):
+  its own tiles where it has them, the rest of All Magic dimmed
+
 ## Under the hood
 
 - **Request scheduler** with two lanes over one rate-limited pipe. Interactive

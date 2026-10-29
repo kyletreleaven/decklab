@@ -359,86 +359,38 @@ flat sidebar of decks and collections cannot hold them; one tree of assets
 does ([`docs/inventory.md`](docs/inventory.md) → *The asset tree*). The
 lab's sidebar is that tree; Decks and Collections are not shown there.
 
-**Built (lab):**
-- ✅ **The tree:** All Magic built in at the top, always first, never moved,
-      no menu. **Siblings have no order** of their own: they show by name,
-      and a custom order would be a view's, if ever. Any asset can hold
-      children, so folders only organise.
-- ✅ **Right-click menu:** new child (folder, place, checklist, pool,
-      decklist — which comes with an empty exact `main`; `+` on the header
-      for the top), rename in place, delete with a confirm. Delete is
-      refused while an asset outside pins something inside; a by-name
-      reference just keeps its path.
-- ✅ **Drag to re-parent:** onto any asset to make it a child, onto the
-      Assets header for the top; no between-row drops.
-- ✅ **Views:** a place, a checklist (*At least | Exactly*), a decklist by
-      zone with main grouped by type.
-- ✅ **A deck's decklist:** every deck builds one, so a deck is made only
-      by *New deck from this decklist*, a child "deck" with an empty place
-      per decklist zone; *Builds* switches it to another. The view draws it
-      as the decklist, missing copies dimmed, extras last.
-- ✅ **Convert:** a place to a checklist, a checklist to a place. Refused
-      when it would leave a zone of the wrong kind
-      ([`docs/inventory.md`](docs/inventory.md) → *Kinds of checklist*).
+What is built is in [`FEATURES.md`](FEATURES.md) → *The lab*.
 
-**Next: pools.** A derived pool is a query pool: union, intersection and
-difference are what the query language already says (`:ramp or :draw`),
-once `:` can name assets (Card-set algebra, below).
-- 🚧 **List pools, first.** **Built:** a view, membership tiles at oracle
-      grain with no counts; `+`/`×` acting on the target (*Targets*,
-      below). No new requests. **Not yet:** *Save results as pool* (it pages a whole
-      search: count requests first); dimming All Magic against the target.
-- ✅ **Query pools, plain searches.** Opening one is the pool panel running
-      its query, paged through the channel as an All Magic search is, with
-      the grain toggle and `+` to the target. *Save as pool* from All Magic
-      (at the top of the tree); in a pool, *Save* (once the search differs)
-      and *Save as…* (beside it). A pool keeps its query, not its results or
-      sort, so saving sends no requests. Filter controls are baked into the
-      text on save.
-- 🚧 **Targets.** List pools, checklists, exact checklists and places,
-      set from the tree's menu. Every view is a source: its tiles hand over
-      the bucket they stand for, whole (printing, finish, attributes), and
-      the target's type decides what the buttons do — a list pool takes the
-      bucket in or out (`+`/`×`); a checklist or place counts its line
-      (`−`/`+`, gone at 0); place to place moves a copy (`→`/`←`). A
-      checklist is drawn a tile per line (its lines overlap: a card's total
-      is a number nobody asked for); a place or pool a tile per card, its
-      buttons greyed when the card is in several buckets. Viewing the target
-      itself is editing it. Selecting a tile lists its card's buckets in
-      the detail, each with the same buttons. **Not yet:** a decklist as
-      target (needs a zone picker — target its zone); move transactions
-      (two writes, not atomic: a failure between loses the copies, and
-      says so).
-- 🚧 **Changing a bucket.** One operation, `moveLines`: n of bucket B to
-      B′, B′ merging with any already there. Covers setting, changing and
-      clearing a printing, finish or attribute, all of a line or a split,
-      and copies moving between places. In the detail's Buckets section,
-      *Change…* on a row. Attributes are a fixed set to start — condition,
-      signed, altered, note — declared on first use; language is the
-      printing's. Printings come from the detail's own print run: no new
-      requests. **Not yet:** *Forget printings* for a whole card (the same
-      move per bucket); attributes beyond the fixed set.
-- 🚧 **Searching an asset, and All Magic behind it.** A place, checklist or
-      pool has the pool panel's search and filters, answered locally — a
-      printing-level term unknown on a line with no printing, matching
-      neither way (`unknownPrinting` in the compiler). For a collection
-      (a place), *Show not in <asset>* draws All Magic behind it — not for
-      a checklist or pool, for now (a pool shows itself: All Magic with the
-      pool targeted already marks its members): the pool panel, the asset's own
-      tiles in All Magic's place wherever it has presence, the rest dimmed;
-      the search carries over. Off, no requests; on, All Magic's.
-      **Not yet:** a background other than All Magic — a query pool
+**Next: `:` references**, the anchored case first (*Card-set algebra*,
+Campaign 3). `:ramp` or `:/Binders/Red` in a query names an asset's cards,
+so a derived pool is just a query pool (`:ramp or :draw`, `:ramp
+-:/Decks/Burn`). Planned so Scryfall is never paged for what the lab can
+answer; the local search of an asset is half of the anchored case.
+
+**Open, from what is built:**
+- ⬜ **Save results as pool**: a list pool of a search's results, as
+      members. It pages the whole search, so count requests first; perhaps
+      unneeded beside query pools.
+- ⬜ **A decklist as target**: needs a zone picker. For now, target its
+      zone.
+- ⬜ **Move transactions.** A move is two writes the plugin cannot make one
+      transaction: a failure between loses the copies, and says so. Moves
+      already fill a deck from other places (a deck's zones are places);
+      stored moves and plans are *Later in the campaign*, above.
+- ⬜ **Forget printings** for a whole card: the same move, once per bucket.
+- ⬜ **Attributes beyond the fixed set** (condition, signed, altered, note).
+- ⬜ **A background other than All Magic** behind a place: a query pool
       (All Magic narrowed, paged as now), or a list pool or place
-      (answered locally, no requests); open: where the choice lives (per
+      (answered locally, no requests). Open: where the choice lives (per
       collection, or a view setting like the grain), and whether a
-      background can have one of its own. Decklists and decks (their walls are zones); the list
-      layout only dims, it does not put the asset's tiles in front; `is:`
-      terms need a level each when they land.
+      background can have one of its own.
+- ⬜ **All Magic behind decklists and decks** (their walls are zones), and
+      in the list layout the asset's rows in front, not only dimming.
+- ⬜ **`is:` terms** each need a level, card or printing, when the
+      compiler supports them.
 
 **Not yet:**
 - ⬜ **Duplicate**, and which menu items each type offers.
-- ⬜ **Filling a deck from other places**: moves (*Later in the campaign*,
-      above).
 - ⬜ **Import a deck as a deck or a decklist.** A decklist import makes a
       decklist. A deck import makes a decklist from the lines plus a deck
       building it, whose places hold those lines: the decklist is the
