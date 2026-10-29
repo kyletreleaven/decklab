@@ -7,6 +7,7 @@ import {
   AssetError,
   assetTree,
   bucketKey,
+  bucketsOf,
   builtContents,
   convertAsset,
   createAsset,
@@ -18,6 +19,7 @@ import {
   lineContents,
   memberContents,
   moveCopy,
+  moveLines,
   newDeckFrom,
   poolMembers,
   removeMember,
@@ -347,6 +349,45 @@ describe("the lab's assets, for display", () => {
     await expect(moveCopy(sqlOver(db), red, await find("Sideboards/Burn"), { oracleId: "bolt" })).rejects.toThrow(
       /from one place to another/,
     );
+  });
+
+  it("changes a bucket by moving n of it to another: split, merge, clear, and checked", async () => {
+    const red = await find("Binders/Red");
+    const at = (b: Parameters<typeof bucketKey>[0]) => ({ assetId: red, bucket: b });
+    const any = { oracleId: "bolt" };
+    const m10 = { oracleId: "bolt", printingId: "bolt-m10" };
+    const lp = { oracleId: "bolt", printingId: "bolt-m10", finish: "foil", attrs: { condition: "LP" } };
+    const holds = async () =>
+      Object.fromEntries((await bucketsOf(sqlOver(db), { id: red, type: "place" }, "bolt")).map((l) => [bucketKey(l.bucket), l.qty]));
+    // Red: 2 M10, 3 2X2, 1 unrecorded. Learn one unrecorded copy is M10: merges.
+    await moveLines(sqlOver(db), sqlOver(cards), at(any), at(m10), 1);
+    expect((await holds())[bucketKey(m10)]).toBe(3);
+    expect((await holds())[bucketKey(any)]).toBeUndefined();
+    // Split: one of the three is a foil LP.
+    await moveLines(sqlOver(db), sqlOver(cards), at(m10), at(lp), 1);
+    expect([(await holds())[bucketKey(m10)], (await holds())[bucketKey(lp)]]).toEqual([2, 1]);
+    expect(db.prepare("SELECT type FROM attributes WHERE name = 'condition'").get()).toEqual({ type: "condition" });
+    // Forget the printing of everything: all of each to the unrecorded bucket.
+    for (const [k, n] of Object.entries(await holds())) {
+      const [o, p, f, a] = JSON.parse(k) as string[];
+      const b = { oracleId: o, ...(p && { printingId: p }), ...(f && { finish: f }), attrs: JSON.parse(a) };
+      await moveLines(sqlOver(db), sqlOver(cards), at(b), at({ ...b, printingId: undefined }), n);
+    }
+    expect(await holds()).toEqual({ [bucketKey(any)]: 5, [bucketKey({ oracleId: "bolt", finish: "foil", attrs: { condition: "LP" } })]: 1 });
+
+    const refused = (to: Parameters<typeof bucketKey>[0], n = 1) => moveLines(sqlOver(db), sqlOver(cards), at(any), at(to), n);
+    await expect(refused(any)).rejects.toThrow(/same bucket/);
+    await expect(refused(m10, 9)).rejects.toThrow(/only 5/);
+    await expect(refused({ oracleId: "bolt", printingId: "sol-c21" })).rejects.toThrow(/another card|its card/);
+    await expect(refused({ oracleId: "sol" })).rejects.toThrow(/not its card/);
+    await expect(refused({ oracleId: "bolt", attrs: { colour: "red" } })).rejects.toThrow(/not an attribute/);
+    await expect(refused({ oracleId: "bolt", attrs: { condition: "great" } })).rejects.toThrow(/cannot be/);
+
+    // A pool's member changes whole; a checklist's line changes as a place's does.
+    const pool = await createAsset(sqlOver(db), "root", "list pool");
+    await addMember(sqlOver(db), pool, m10);
+    await moveLines(sqlOver(db), sqlOver(cards), { assetId: pool, bucket: m10 }, { assetId: pool, bucket: any }, 1);
+    expect([...(await poolMembers(sqlOver(db), pool))]).toEqual([bucketKey(any)]);
   });
 
   it("makes a bucket a member of a list pool, and takes it out again", async () => {

@@ -768,20 +768,146 @@ export async function stepTarget(
   return stepLine(lab, target.id, bucket, delta, at);
 }
 
-/**
- * One copy of a bucket from one place to another: a card is in one place at
- * a time. Two writes the plugin cannot make one transaction, so the copy
- * leaves first — a failure between leaves it in neither, and says so, rather
- * than in both silently. Move transactions are parked (TODO).
- */
+/** One copy of a bucket from one place to another: `moveLines`, one copy, the bucket unchanged. */
 export async function moveCopy(lab: Sql, fromId: string, toId: string, bucket: Bucket, at = new Date().toISOString()): Promise<void> {
-  const kinds = await lab.select<{ id: string; type: AssetType }>("SELECT id, type FROM assets WHERE id IN ($1, $2)", [fromId, toId]);
-  if (fromId === toId || kinds.length !== 2 || kinds.some((k) => k.type !== "place"))
-    throw new AssetError("A copy moves from one place to another.");
-  await stepLine(lab, fromId, bucket, -1, at);
-  try {
-    await stepLine(lab, toId, bucket, 1, at);
-  } catch (e) {
-    throw new AssetError(`The copy left but did not arrive: ${e instanceof Error ? e.message : String(e)}`);
+  if (fromId === toId) throw new AssetError("A copy moves from one place to another.");
+  await moveLines(lab, null, { assetId: fromId, bucket }, { assetId: toId, bucket }, 1, at);
+}
+
+/* ---------- changing a bucket ---------- */
+
+/**
+ * The attributes a bucket can be given, to start: a fixed set, so keys do
+ * not drift ("signed", "Signed"). Language is not one — it is part of the
+ * printing. Each is declared in the lab's `attributes` on first use.
+ */
+export const FIXED_ATTRIBUTES = { condition: "condition", signed: "boolean", altered: "boolean", note: "text" } as const;
+export const CONDITIONS = ["M", "NM", "LP", "MP", "HP", "DMG"] as const;
+
+/** One card's buckets in an asset, and what each holds: a member counts 1. */
+export async function bucketsOf(
+  lab: Sql,
+  asset: { id: string; type: AssetType },
+  oracleId: string,
+): Promise<{ bucket: Bucket; qty: number }[]> {
+  const rows = await lab.select<{ printing_id: string; finish: string; attrs: string; qty: number }>(
+    asset.type === "list pool"
+      ? "SELECT printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1 AND oracle_id = $2"
+      : "SELECT printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1 AND oracle_id = $2",
+    [asset.id, oracleId],
+  );
+  return rows
+    .map((r) => ({
+      bucket: {
+        oracleId,
+        ...(r.printing_id !== "" && { printingId: r.printing_id }),
+        ...(r.finish !== "" && { finish: r.finish }),
+        attrs: JSON.parse(r.attrs) as Record<string, unknown>,
+      },
+      qty: r.qty,
+    }))
+    .sort((a, b) => (bucketKey(a.bucket) < bucketKey(b.bucket) ? -1 : 1));
+}
+
+/** Refuse an attribute outside the fixed set, or of the wrong kind; declare it if new. */
+async function declareAttributes(lab: Sql, attrs: Record<string, unknown>): Promise<void> {
+  for (const [name, v] of Object.entries(attrs)) {
+    const type = (FIXED_ATTRIBUTES as Record<string, string>)[name];
+    if (!type) throw new AssetError(`“${name}” is not an attribute a bucket can have yet.`);
+    const ok =
+      type === "condition"
+        ? (CONDITIONS as readonly unknown[]).includes(v)
+        : type === "boolean"
+          ? typeof v === "boolean"
+          : typeof v === "string" && v !== "";
+    if (!ok) throw new AssetError(`“${name}” cannot be ${JSON.stringify(v)}.`);
+    const [have] = await lab.select<{ type: string }>("SELECT type FROM attributes WHERE name = $1", [name]);
+    if (have && have.type !== type) throw new AssetError(`“${name}” is declared as ${have.type} in this library, not ${type}.`);
+    if (!have) await lab.execute("INSERT INTO attributes (name, type) VALUES ($1, $2)", [name, type]);
   }
+}
+
+/** Refuse a printing that is not of the card, or a finish it does not come in. */
+async function checkPrinting(store: Sql, b: Bucket): Promise<void> {
+  if (!b.printingId) return;
+  const [row] = await store.select<CardRow>("SELECT * FROM cards WHERE id = $1", [b.printingId]);
+  if (!row) throw new AssetError("That printing is not in the card store.");
+  const card = rowToCard(row);
+  if (card.oracleId !== b.oracleId) throw new AssetError(`${card.name} is another card.`);
+  const finishes = (card.data.finishes as string[] | undefined) ?? [];
+  if (b.finish && finishes.length && !finishes.includes(b.finish))
+    throw new AssetError(`${card.setCode.toUpperCase()} ${card.collectorNumber} does not come ${b.finish}.`);
+}
+
+/**
+ * Move `n` from bucket B to bucket B′: B loses n, gone at 0; n of B′ join
+ * any already there. One operation for every change of a bucket — setting,
+ * changing or clearing a printing, finish or attribute, all of a line or a
+ * split of it — and for a copy moving between places. A list pool has no
+ * counts: its member is B or B′, whole.
+ *
+ * Within an asset, any type with lines; between two, places only — a
+ * checklist's line is a requirement, not a thing that can be elsewhere. B′
+ * must be the same card. `store`, when given, checks B′'s printing and
+ * finish against it; null is for a bucket that keeps its printing.
+ *
+ * Two writes the plugin cannot make one transaction, so B gives first — a
+ * failure between loses the n, and says so, rather than doubling them
+ * silently. Move transactions are parked (TODO).
+ */
+export async function moveLines(
+  lab: Sql,
+  store: Sql | null,
+  from: { assetId: string; bucket: Bucket },
+  to: { assetId: string; bucket: Bucket },
+  n: number,
+  at = new Date().toISOString(),
+): Promise<void> {
+  const kinds = await lab.select<{ id: string; type: AssetType }>("SELECT id, type FROM assets WHERE id IN ($1, $2)", [
+    from.assetId,
+    to.assetId,
+  ]);
+  const type = (id: string) => kinds.find((k) => k.id === id)?.type;
+  const same = from.assetId === to.assetId;
+  const t = type(from.assetId);
+  if (!t || !type(to.assetId)) throw new AssetError("No such asset.");
+  if (!same && (t !== "place" || type(to.assetId) !== "place")) throw new AssetError("A copy moves from one place to another.");
+  if (!TARGETABLE.has(t)) throw new AssetError("Only a place, checklist or pool has buckets.");
+  if (from.bucket.oracleId !== to.bucket.oracleId) throw new AssetError("A bucket can change, not its card.");
+  if (same && bucketKey(from.bucket) === bucketKey(to.bucket)) throw new AssetError("Nothing to change: it is the same bucket.");
+  if (!Number.isInteger(n) || n < 1) throw new AssetError("Move at least one.");
+  await declareAttributes(lab, to.bucket.attrs ?? {});
+  if (store) await checkPrinting(store, to.bucket);
+
+  if (t === "list pool") {
+    const [has] = await lab.select<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM pool_members
+        WHERE asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5`,
+      [from.assetId, ...columns(from.bucket)],
+    );
+    if (!has.n) throw new AssetError("There is none of that to change.");
+    await removeMember(lab, from.assetId, from.bucket, at);
+    await addMember(lab, from.assetId, to.bucket, at);
+    return;
+  }
+
+  const where = "asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5";
+  const key = [from.assetId, ...columns(from.bucket)];
+  const [line] = await lab.select<{ qty: number }>(`SELECT qty FROM lines WHERE ${where}`, key);
+  if (!line || line.qty < n) throw new AssetError(line ? `There are only ${line.qty} of that.` : "There is none of that to take away.");
+  await lab.execute(
+    line.qty > n ? `UPDATE lines SET qty = qty - ${n} WHERE ${where}` : `DELETE FROM lines WHERE ${where}`,
+    key,
+  );
+  try {
+    await lab.execute(
+      `INSERT INTO lines (asset_id, oracle_id, printing_id, finish, attrs, qty, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (asset_id, oracle_id, printing_id, finish, attrs) DO UPDATE SET qty = qty + excluded.qty`,
+      [to.assetId, ...columns(to.bucket), n, at],
+    );
+  } catch (e) {
+    throw new AssetError(`${n} left but did not arrive: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id IN ($1, $3)", [from.assetId, at, to.assetId]);
 }

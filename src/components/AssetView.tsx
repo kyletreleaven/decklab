@@ -146,11 +146,39 @@ function TileControls({
   source: { id: string; type: AssetType };
   target: LabTarget;
 }) {
-  const bucket = bucketOf(tile);
+  return (
+    <BucketButtons
+      bucket={bucketOf(tile)}
+      several={tile.buckets.length}
+      source={source}
+      target={target}
+      className="tile-controls"
+    />
+  );
+}
+
+/**
+ * The buttons for one bucket of a source, as the target's type decides —
+ * on a tile, or on a bucket's row in the detail. No bucket: greyed, saying
+ * the tile covers `several`.
+ */
+export function BucketButtons({
+  bucket,
+  several = 1,
+  source,
+  target,
+  className,
+}: {
+  bucket: Bucket | null;
+  several?: number;
+  source: { id: string; type: AssetType };
+  target: LabTarget;
+  className: string;
+}) {
   const has = bucket ? target.countOf(bucket) : 0;
-  const several = bucket
+  const why = bucket
     ? undefined
-    : `In ${tile.buckets.length} buckets — choose one to act on`;
+    : `In ${several} buckets — select the card and choose one in the detail`;
   const moving =
     source.type === "place" &&
     target.type === "place" &&
@@ -203,7 +231,7 @@ function TileControls({
             },
           ];
   return (
-    <span className="tile-controls" onClick={(e) => e.stopPropagation()}>
+    <span className={className} onClick={(e) => e.stopPropagation()}>
       {target.type !== "list pool" && bucket && (
         <span
           className="target-count"
@@ -214,7 +242,7 @@ function TileControls({
       )}
       {buttons.map((b) => (
         // Title on the wrapper: a disabled button shows no tooltip.
-        <span key={b.label} title={several ?? b.title}>
+        <span key={b.label} title={why ?? b.title}>
           <button disabled={!bucket || !b.on} onClick={b.go}>
             {b.label}
           </button>
@@ -242,6 +270,7 @@ export function AssetView({
   onSetList,
   onConvert,
   target,
+  onSelectLines,
   refreshKey = 0,
 }: {
   node: AssetNode;
@@ -259,6 +288,8 @@ export function AssetView({
    * source, and hands over the bucket a tile stands for. Absent, no buttons.
    */
   target?: LabTarget;
+  /** A tile chosen: which asset's lines it is, for the detail's buckets. */
+  onSelectLines?: (source: { id: string; type: AssetType }, oracleId: string) => void;
   /** Bumped by an edit to the target — here or in All Magic — to read again. */
   refreshKey?: number;
 }) {
@@ -555,7 +586,10 @@ export function AssetView({
                         ]
                           .filter(Boolean)
                           .join(" ")}
-                        onClick={() => onSelect(t.card)}
+                        onClick={() => {
+                          onSelect(t.card);
+                          if (s.source) onSelectLines?.(s.source, t.oracleId);
+                        }}
                         onMouseEnter={() => onHoverCard?.(t.card)}
                         onMouseLeave={() => onHoverCard?.(null)}
                         title={[

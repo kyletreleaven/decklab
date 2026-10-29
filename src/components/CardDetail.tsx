@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { collectionCountsByPrinting } from "../lib/collections";
@@ -46,6 +46,7 @@ export function CardDetail({
   collectionQuantities,
   onChoosePrinting,
   refreshKey,
+  lab,
 }: {
   card: Card | null;
   /**
@@ -90,6 +91,11 @@ export function CardDetail({
    */
   onChoosePrinting?: (printing: Card) => void;
   refreshKey: number;
+  /**
+   * In the lab, what leads the operations instead of the slots: the
+   * selected card's buckets in the asset it was chosen from.
+   */
+  lab?: ReactNode;
 }) {
   const [printings, setPrintings] = useState<Card[]>([]);
   const [printingId, setPrintingId] = useState<string | null>(null);
@@ -304,7 +310,9 @@ export function CardDetail({
           {/* The two active slots and how many of *this printing* each holds.
               The target is marked, so it is visible which one ± drives without
               needing separate text saying so. */}
-          {slots.length > 0 ? (
+          {lab ? (
+            lab
+          ) : slots.length > 0 ? (
             <div className="slots">
               {slots.map((slot) => {
                 const isTarget =

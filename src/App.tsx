@@ -15,6 +15,7 @@ import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import { AssetTree } from "./components/AssetTree";
 import { AssetView, type LabTarget } from "./components/AssetView";
+import { BucketsSection } from "./components/BucketsSection";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   assetTree,
@@ -26,6 +27,7 @@ import {
   moveAsset,
   newDeckFrom,
   moveCopy,
+  moveLines,
   stepTarget,
   targetCounts,
   TARGETABLE,
@@ -38,7 +40,7 @@ import {
   type Bucket,
 } from "./lib/assets";
 import type { AssetType } from "./lib/ontology";
-import { execute, processKind, select } from "./lib/db";
+import { cardStore, execute, processKind, select } from "./lib/db";
 import * as collectionsApi from "./lib/collections";
 import { UNIVERSE_ID, UNIVERSE_NAME } from "./lib/collections";
 import type { CardFilter } from "./lib/filters";
@@ -329,17 +331,13 @@ export default function App() {
    * from the tree's menu.
    */
   const [labTargetId, setLabTargetId] = useState<string | null>(null);
-  const labTarget = useMemo(() => {
-    const find = (nodes: AssetNode[]): AssetNode | null => {
-      for (const n of nodes) {
-        if (n.id === labTargetId) return n;
-        const below = find(n.children);
-        if (below) return below;
-      }
-      return null;
-    };
-    return labTargetId ? find(assets) : null;
-  }, [labTargetId, assets]);
+  const assetById = useMemo(() => {
+    const m = new Map<string, AssetNode>();
+    const walk = (nodes: AssetNode[]) => nodes.forEach((n) => (m.set(n.id, n), walk(n.children)));
+    walk(assets);
+    return m;
+  }, [assets]);
+  const labTarget = labTargetId ? (assetById.get(labTargetId) ?? null) : null;
   // Bumped by an edit to the target, so its counts and any open view read again.
   const [targetVersion, setTargetVersion] = useState(0);
   const [targetHolds, setTargetHolds] = useState<Map<string, number> | null>(null);
@@ -376,6 +374,26 @@ export default function App() {
             ),
         }
       : null;
+  /**
+   * The asset a selected tile's lines are in, and its card: what the
+   * detail's Buckets section lists. Only while that card is the one
+   * selected, in an asset view.
+   */
+  const [selectedLines, setSelectedLines] = useState<{ sourceId: string; oracleId: string } | null>(null);
+  const linesSource =
+    view.kind === "asset" && selectedLines && selectedCard?.oracleId === selectedLines.oracleId
+      ? (assetById.get(selectedLines.sourceId) ?? null)
+      : null;
+  /** n of one bucket to another, in the selected tile's asset. Throws, for the editor to say why. */
+  const moveBucket = async (from: Bucket, to: Bucket, n: number) => {
+    if (!linesSource) return;
+    try {
+      await moveLines(labSql, await cardStore(), { assetId: linesSource.id, bucket: from }, { assetId: linesSource.id, bucket: to }, n);
+    } finally {
+      await reloadAssets();
+      setTargetVersion((v) => v + 1);
+    }
+  };
   // All Magic and query pools as the source: a list pool takes members, anything else counts.
   const labDestination = labTargeting
     ? {
@@ -1105,6 +1123,7 @@ export default function App() {
             onConvert={convert}
             target={labTargeting ?? undefined}
             refreshKey={targetVersion}
+            onSelectLines={(source, oracleId) => setSelectedLines({ sourceId: source.id, oracleId })}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
@@ -1249,6 +1268,17 @@ export default function App() {
           setActivePrintings((prev) => ({ ...prev, [printing.oracleId]: printing }))
         }
         refreshKey={refreshKey}
+        lab={
+          linesSource && selectedLines && (
+            <BucketsSection
+              source={linesSource}
+              oracleId={selectedLines.oracleId}
+              target={labTargeting}
+              version={targetVersion}
+              onMove={moveBucket}
+            />
+          )
+        }
       />
 
       {importTarget && (
