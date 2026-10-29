@@ -1,7 +1,7 @@
 # 006 — An asset view jumps back to the top when a tile's button is pressed
 
-**Status:** fix applied, awaiting in-app repro
-**Reproduced:** reported by the user, 2026-10-29; not reproduced here — cause derived from reading code
+**Status:** fixed, not yet committed
+**Reproduced:** reported by the user, 2026-10-29; the fix confirmed in the app by the user the same day. The cause is still derived from reading code
 
 ## Symptom
 In the lab, with an asset open and a target set, pressing a tile's button

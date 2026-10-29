@@ -16,7 +16,7 @@ digging, then read *Traps* for the patterns that have produced bugs before.
 | [003](003-agent-api-times-out-when-backgrounded.md) | first fix applied, awaiting repro | Agent API times out once the app has been in the background a while |
 | [004](004-spacecraft-commander-flagged-illegal.md) | open · cause found | A legendary Spacecraft commander is flagged "cannot be a commander" |
 | [005](005-lab-load-rate-limited.md) | open · fix in progress | Loading the library into the lab drew a 429 from Scryfall |
-| [006](006-asset-view-scroll-resets-on-edit.md) | fix applied, awaiting in-app repro | An asset view jumps back to the top when a tile's button is pressed |
+| [006](006-asset-view-scroll-resets-on-edit.md) | fixed, not yet committed | An asset view jumps back to the top when a tile's button is pressed |
 
 ## Writing a report
 
