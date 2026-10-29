@@ -421,11 +421,17 @@ once `:` can name assets (Card-set algebra, below).
 - 🚧 **Searching an asset, and All Magic behind it.** A place, checklist or
       pool has the pool panel's search and filters, answered locally — a
       printing-level term unknown on a line with no printing, matching
-      neither way (`unknownPrinting` in the compiler). *Show not in
-      <asset>* draws All Magic behind it: the pool panel, the asset's own
+      neither way (`unknownPrinting` in the compiler). For a collection
+      (a place), *Show not in <asset>* draws All Magic behind it — not for
+      a checklist or pool, for now (a pool shows itself: All Magic with the
+      pool targeted already marks its members): the pool panel, the asset's own
       tiles in All Magic's place wherever it has presence, the rest dimmed;
       the search carries over. Off, no requests; on, All Magic's.
-      **Not yet:** decklists and decks (their walls are zones); the list
+      **Not yet:** a background other than All Magic — a query pool
+      (All Magic narrowed, paged as now), or a list pool or place
+      (answered locally, no requests); open: where the choice lives (per
+      collection, or a view setting like the grain), and whether a
+      background can have one of its own. Decklists and decks (their walls are zones); the list
       layout only dims, it does not put the asset's tiles in front; `is:`
       terms need a level each when they land.
 
