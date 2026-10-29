@@ -68,8 +68,10 @@ updated = 2026-10-20T09:15:40.000Z
   folder. An explicit `type = "folder"` is needed only for an empty folder,
   or one with notes.
 - **`type` names one node of a static ontology**, in users' words: `place`
-  (a location), `checklist` (a goal), `pool`, `list pool` and `query pool`
-  (ω sets), `decklist`, `deck`, `arrangement`, `folder`. Later, without a version change: `union`,
+  (a location), `checklist` and `exact checklist` (goals), `pool`, `list
+  pool` and `query pool` (ω sets), `decklist`, `deck`, `arrangement`,
+  `folder`. `collection` is a node too, but only one to name — what a place
+  is — and an asset of that type is refused. Later, without a version change: `union`,
   `move`. The ontology is an is-a graph fixed in code and described in
   [`inventory.md`](inventory.md); a node may have more than one parent,
   though that should be rare. The file never encodes the hierarchy: it names
@@ -144,27 +146,31 @@ cards = [
 deck box). It picks the icon and means nothing else: a description like
 `notes`, not a type, so there is no second tier of classification.
 
-**A checklist** holds intervals. `qty = n` is exactly *n*; `min` and `max`
-give the others, and either may be left out. A bucket here is a pattern:
-left out means *any*, not *unknown*.
+**A checklist** asks for at least `min` of each bucket, and says nothing of
+anything it does not list. **An exact checklist** asks for exactly `qty` of
+each, and for nothing it does not list. The key names the reading, so a line
+copied between the two is caught: a checklist refuses `qty`, an exact one
+`min`, and each count is at least 1. A bucket here is a pattern: left out
+means *any*, not *unknown*. Both may be checked `on` a collection.
 
 ```toml
 [[asset]]
 path = "/Wishlist"
 type = "checklist"
 on = "/Paper"            # checked against this collection
-unlisted = "any"         # or "excluded"
 cards = [
   { card = "Mana Crypt", oracle = "…", min = 1 },
 ]
 ```
 
-**`unlisted` is the background the items sit on**, not a property of the
-checklist: `"any"` is All Magic (`[0, ∞]` for every card), `"excluded"`
-the empty pool (`[0, 0]`). Listed items override the background card by
-card. Later, without a version change, it can take a reference to any pool:
-*blue rares and nothing else* is a checklist with no items over the pool
-`c:u r:rare`, which is the filing rule in `inventory.md` → *Goals*.
+**No ranges, no `unlisted`.** A line is a bucket and one count, and the
+type says what the count means (`inventory.md` → *Kinds of checklist*).
+Upper bounds, and whether unlisted cards are allowed, belong to *caps*, a
+kind of their own for later: there the choice is real — *at most one Sol
+Ring* leaves everything else free, *these and nothing else, at most this
+many each* does not. A cap's background could then be any pool: *blue rares
+and nothing else* is a cap with no items over `c:u r:rare`, the filing rule
+in `inventory.md` → *Goals*.
 
 **A pool** is membership only, so its lines have no count. It is a **list
 pool**, with `cards`, or a **query pool**, with `query`: two types in the
@@ -188,8 +194,8 @@ things (`inventory.md` → *Every decklist has an oracle projection*):
 
 | | Its zones name | What it says |
 | --- | --- | --- |
-| **decklist** | checklists | what a deck should hold; `format`, and the arrangements |
-| **deck** | places | what a deck does hold: a deck box, its sideboard in another |
+| **decklist** | checklists: `commander` and `main` exact, `side` either | what a deck should hold; `format`, and the arrangements |
+| **deck** | places | what a deck does hold: a deck box, its sideboard in another. Always builds a decklist: `list` is required |
 
 Zones are these two types' concept, and only theirs: each maps a zone name
 (`commander`, `main`, `side`) to the asset that fills it. **Every zone is an
@@ -200,10 +206,11 @@ the file writes the common case: a list of lines in place of a reference.
 main = [ { card = "Sol Ring", oracle = "6ad8011d-…", qty = 1 } ]
 ```
 
-On a **decklist** this means a child checklist at `<decklist>/main`, with
-`qty` exact and unlisted cards excluded (which is what a decklist is, so
-neither is written); on a **deck**, a child place at `<deck>/main` holding
-those copies. Either way the zone `main` is a pinned relative reference to
+On a **decklist** this means a child exact checklist at `<decklist>/main`
+(which is what a decklist's zone is, so the type is not written); on a
+**deck**, a child place at `<deck>/main` holding those copies. A
+decklist's sideboard that asks for *at least* its counts is a plain
+checklist, written as its own asset. Either way the zone `main` is a pinned relative reference to
 it.
 
 **A decklist** has zones and a `format`, which format checks read across the
@@ -227,7 +234,6 @@ main = [
 [[asset]]
 path = "/Decks/Atraxa Superfriends/maybe"
 type = "checklist"
-unlisted = "any"
 cards = [ { card = "Doubling Season", oracle = "…", min = 1 } ]
 
 [[asset]]
@@ -243,10 +249,9 @@ piles = [
 So the tree under the decklist holds `commander`, `main`, `maybe` and
 `piles`.
 
-**A deck** has zones that are places, and optionally **`list`**, the
-decklist it builds: its zones are checked zone by zone against the
-decklist's. No `format`: that is the list's. A deck without a `list` is a
-sectioned box and nothing more.
+**A deck** has zones that are places, and **`list`**, the decklist it
+builds, which it must have: its zones are checked zone by zone against the
+decklist's. No `format`: that is the list's.
 
 ```toml
 [[asset]]
@@ -283,11 +288,13 @@ by type while building, by role while tuning, a sideboard plan.
   decklist with no arrangement of its own shows a facet by default is open.
 - **A deck has no arrangements of its own: it shows one of its decklist's.**
   Its `shows` names a facet of its `list` or an arrangement `of` it, and is
-  refused otherwise, or without a `list`. Left out, the deck shows what its
-  decklist shows.
+  refused otherwise. Left out, the deck shows what its decklist shows.
+- **A deck always has a `list`.** A deck is defined against the decklist it
+  builds; one without is refused. Importing a deck from a list is a TODO:
+  it would make both, the decklist backing the deck.
 
-**The maybeboard is not a zone.** It is an ordinary checklist (unlisted
-cards allowed, `min` counts) that happens to sit under the decklist, which
+**The maybeboard is not a zone.** It is an ordinary checklist (`min`
+counts) that happens to sit under the decklist, which
 does not refer to it (`inventory.md` → *Decks*). Being its child is only
 tidiness: a folder sums nothing. Anything else beside a decklist, a
 sideboard plan for a later build, say, is the same.
@@ -299,8 +306,8 @@ all of these hold:
   the zone;
 - the owner refers to it pinned and relative (`main`);
 - it has an inline zone's defaults and nothing of its own: no notes, no
-  children. For a decklist, a checklist with exact counts and unlisted
-  excluded; for a deck, a place with no `storage`.
+  children. For a decklist, an exact checklist with no `on`; for a deck, a
+  place with no `storage`.
 
 Otherwise the zone's asset is written as its own `[[asset]]` and the zone as
 a reference. Renaming the child (`main` → `core`) is followed by the pinned
@@ -382,8 +389,8 @@ than burying it.
 | `condition = "NM"` | `absent` |
 | any other condition | `attrs = { condition = … }`, with the attribute declared |
 | an item's `notes` | `attrs = { note = … }`. A distinct note makes a distinct bucket, as it made a distinct row in v4 |
-| a deck | a `decklist` at `/<name>`, printings kept; `commander`, `main` and `side` as inline zones. No `deck`: v4 never said whether a deck was built, or where |
-| the `maybe` zone | not a zone: a child checklist, `/<decklist>/maybe`, unlisted cards allowed, each line `min = qty` |
+| a deck | a `decklist` at `/<name>`, printings kept; `commander`, `main` and `side` as inline zones, exact. No `deck`: v4 never said whether a deck was built, or where |
+| the `maybe` zone | not a zone: a child checklist, `/<decklist>/maybe`, each line `min = qty` |
 | piles | one arrangement per decklist, `/<decklist>/piles`, `of` the decklist, piles in their order, each listing its cards; a card's `pile` moves off its line |
 | tags (`card_tags`) | one literal pool per tag, at `/pools/<tag>` |
 
