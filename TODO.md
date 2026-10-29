@@ -384,10 +384,13 @@ lab's sidebar is that tree; Decks and Collections are not shown there.
 **Next: pools.** A derived pool is a query pool: union, intersection and
 difference are what the query language already says (`:ramp or :draw`),
 once `:` can name assets (Card-set algebra, below).
-- ⬜ **List pools, first.** A view: membership tiles at oracle grain, no
-      counts. Adding from All Magic: `+`/`−` with the pool as destination
-      (CLAUDE.md → *Destination*), and *Save results as pool*. No new
-      requests. Makes the v4 tags under `/pools` usable.
+- 🚧 **List pools, first.** **Built:** a view, membership tiles at oracle
+      grain with no counts and a × per card; *Set as target* in the tree's
+      menu; `+`/`×` in All Magic acting on the target with the bucket the
+      tile stands for — the source says which (the card at Cards grain,
+      the printing at Printings), the target only acts on it. No new
+      requests. **Not yet:** *Save results as pool* (it pages a whole
+      search: count requests first); dimming All Magic against the target.
 - ⬜ **Query pools, plain searches.** The pool panel running the query,
       paged through the channel as an All Magic search is; *Save search as
       pool* from All Magic.
