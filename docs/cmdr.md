@@ -92,8 +92,8 @@ language, one from a UI — is good evidence it is the right encoding.
   That is evidence for `max` as *the* union, with `sum` a separately named
   operation for when physical copies add up — not for dropping `sum`: `cmdr`
   never models chop-shop inventory, which is where `sum` is wanted.
-- **Card sets and collections are different kinds** (`TODO.md` → *Data model →
-  The asset tree's UI* makes them separate types in the tree). `cmdr` keeps
+- **Card sets and collections are different kinds** (pools and places are
+  separate types in the asset tree: `TODO.md` → *The asset tree, in the lab*). `cmdr` keeps
   exactly two — multisets and ω sets — and makes them impossible to confuse:
   the delimiter carries the kind (`#{ }` against `{ }`), nothing is inferred,
   and its one open item is making `:name` *refuse* a multiset where a set is

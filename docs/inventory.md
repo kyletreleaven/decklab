@@ -806,7 +806,7 @@ complete at once?" is the feasibility question.
 The model has many kinds of entity, and a flat sidebar of decks and
 collections cannot hold them. What ties them together is **one tree of
 assets**, after Unity's Project window. Its open work is in `TODO.md` →
-*Data model → The asset tree's UI*.
+*The asset tree, in the lab*.
 
 **What is an asset.** Anything the DeckLab language defines — collections,
 filters, decklists — and everything in this doc: locations (cells, and groups

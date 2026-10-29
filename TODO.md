@@ -20,7 +20,7 @@ What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 | Campaign | State | Sections |
 | --- | --- | --- |
 | **1. One panel for every card source** | ~done | Universe as a collection · Card panel layout · Active slots and hover · Panel state retention |
-| **2. Data model: buckets, locations, assets** ⭐⭐⭐ | **next** | Data model, including the asset tree's UI · [`docs/inventory.md`](docs/inventory.md) |
+| **2. Data model: buckets, locations, assets** ⭐⭐⭐ | **next** | Data model · The asset tree, in the lab · [`docs/inventory.md`](docs/inventory.md) |
 | **3. Card-set algebra** ⭐⭐ | concepts settled; mechanics to do | Card-set algebra · Set operations |
 | **4. Formats beyond Commander** ⭐ | not started | Format support |
 | **5. Multi-panel workspace** ⭐ | not started | Multi-panel workspace |
@@ -347,45 +347,78 @@ rebuild of real user data — back up first.
 - ⬜ Zones as collections deletes the deck-vs-collection dispatch behind the
       carousel `±` and the four pairs of duplicate functions.
 
-**The asset tree's UI.** The model has many kinds of entity (binders, decks,
-goals, moves, plans), and a flat sidebar of decks and collections cannot hold
-them. One tree of assets does; see [`docs/inventory.md`](docs/inventory.md) →
-*The asset tree*.
-
-The sidebar today is a flat list ordered `updated_at DESC`, which rearranges
-itself as you work. Fine at five decks, useless at fifty, and there is nowhere
-to say *this one is retired* or *these three are the Commander pod*. Every item
-below is one mechanism for decks and collections alike, so they want doing
-together rather than once for each.
-
-Recency and manual order conflict when they share a list: the deck you just
-touched jumping to the top is useful, but once you can arrange the list by hand,
-your layout would rearrange itself underneath you. So they get separate lists.
-The tree keeps the order you give it, and recency moves to a Recent list.
-
-- ⬜ **Drag to reorder and re-parent.** A `position` column, the same shape
-      `deck_piles` already has. `PilesView` already demonstrates the drag
-      handlers, including the Firefox quirk of needing `setData` or the drag
-      never starts.
-- ⬜ **Folders.** A folder only organises: it sums nothing. Whether any asset
-      can act as one, as a deck holding its decklist and builds would, is
-      open in inventory.md → *Open → Folders*.
-- ⬜ **Tags** for favourite, brewing / built / retired, competitive. Each is
-      yes or no for every asset, which makes it a tag rather than a
-      property. Tags as well as folders, or instead, is the same open
-      question. Journey G in [`JOURNEYS.md`](JOURNEYS.md).
-- ⬜ **Collapse and hide.** Fifty decks needs folders that fold, and a way to
-      keep a retired deck without it taking a row.
-- ⬜ **Card sets are their own type**, not a kind of collection: a saved
-      search or a list is a set, a binder is a multiset. `cmdr` keeps exactly
-      these two and never infers one from the other
-      ([`docs/cmdr.md`](docs/cmdr.md)). In the tree that means per-type
-      *Create* actions and `t:` search.
-- ⬜ **Recent assets**, eventually: the recency ordering the sidebar has today,
-      as its own list beside the tree.
-
 **Later in the campaign:** moves and plans, the active move, goals beyond
 the empty one.
+
+### The asset tree, in the lab ⭐⭐⭐ — next
+
+Campaign 2's UI, built in the lab first, on the new model's tables
+(`lab/1000_assets.sql`) and before the production rebuild. The model has
+many kinds of entity (binders, decks, goals, pools, moves, plans), and a
+flat sidebar of decks and collections cannot hold them; one tree of assets
+does ([`docs/inventory.md`](docs/inventory.md) → *The asset tree*). The
+lab's sidebar is that tree; Decks and Collections are not shown there.
+
+**Built (lab):**
+- ✅ **The tree:** All Magic built in at the top, always first, never moved,
+      no menu. **Siblings have no order** of their own: they show by name,
+      and a custom order would be a view's, if ever. Any asset can hold
+      children, so folders only organise.
+- ✅ **Right-click menu:** new child (folder, place, checklist, pool,
+      decklist — which comes with an empty exact `main`; `+` on the header
+      for the top), rename in place, delete with a confirm. Delete is
+      refused while an asset outside pins something inside; a by-name
+      reference just keeps its path.
+- ✅ **Drag to re-parent:** onto any asset to make it a child, onto the
+      Assets header for the top; no between-row drops.
+- ✅ **Views:** a place, a checklist (*At least | Exactly*), a decklist by
+      zone with main grouped by type.
+- ✅ **A deck's decklist:** every deck builds one, so a deck is made only
+      by *New deck from this decklist*, a child "deck" with an empty place
+      per decklist zone; *Builds* switches it to another. The view draws it
+      as the decklist, missing copies dimmed, extras last.
+- ✅ **Convert:** a place to a checklist, a checklist to a place. Refused
+      when it would leave a zone of the wrong kind
+      ([`docs/inventory.md`](docs/inventory.md) → *Kinds of checklist*).
+
+**Next: pools.** A derived pool is a query pool: union, intersection and
+difference are what the query language already says (`:ramp or :draw`),
+once `:` can name assets (Card-set algebra, below).
+- ⬜ **List pools, first.** A view: membership tiles at oracle grain, no
+      counts. Adding from All Magic: `+`/`−` with the pool as destination
+      (CLAUDE.md → *Destination*), and *Save results as pool*. No new
+      requests. Makes the v4 tags under `/pools` usable.
+- ⬜ **Query pools, plain searches.** The pool panel running the query,
+      paged through the channel as an All Magic search is; *Save search as
+      pool* from All Magic.
+
+**Not yet:**
+- ⬜ **Duplicate**, and which menu items each type offers.
+- ⬜ **Filling a deck from other places**: moves (*Later in the campaign*,
+      above).
+- ⬜ **Editing contents** in a view: `+`/`−` on a place's or checklist's
+      tiles.
+- ⬜ **Import a deck as a deck or a decklist.** A decklist import makes a
+      decklist. A deck import makes a decklist from the lines plus a deck
+      building it, whose places hold those lines: the decklist is the
+      deck's backing, since a deck is defined against one. Open: where the
+      decklist goes, its name, whether everything imported counts as held.
+- ⬜ **Caps: checklists with upper bounds.** A kind of its own, *at most
+      n* per line, and the one kind with the unlisted bit (free, or
+      excluded). Brings back the background-pool idea: *blue rares and
+      nothing else*. See [`docs/inventory.md`](docs/inventory.md) → *Kinds
+      of checklist*.
+- ⬜ **Compound checklists: min, max, intersect.** Exact becomes
+      `intersect(checklist, excluded cap)`. Checking one where patterns
+      overlap needs the matching in *Checking a deck against its decklist*.
+- ⬜ **Tags** for favourite, brewing / built / retired, competitive: yes or
+      no for every asset, so a tag rather than a property. Journey G in
+      [`JOURNEYS.md`](JOURNEYS.md).
+- ⬜ **Collapse and hide.** Fifty decks need a way to keep a retired one
+      without it taking a row.
+- ⬜ **Recent assets**, eventually: the recency ordering today's sidebar
+      has (`updated_at DESC`), as its own list beside the tree, so the tree
+      never rearranges itself as you work.
 
 ### Lab and the library file
 
@@ -426,41 +459,8 @@ Design in [`docs/lab.md`](docs/lab.md).
       ([`docs/library-format-5.md`](docs/library-format-5.md)): the lab
       schema (`lab/1000_assets.sql`), its load and dump (`labdb.ts`), and
       the lab keeping its data between runs, a seed replacing it. Built and
-      round-tripped on the real library; not yet run in the app.
-- 🚧 **Today's UI on the new model's tables.** The lab's sidebar is the
-      asset tree, with All Magic built in at the top, always first and never
-      moved; Decks and Collections are not shown in the lab. Opening a place
-      or deck shows a placeholder until the place and deck views exist.
-- 🚧 **A right-click menu on the asset tree**, where editing the tree
-      starts. **Built (lab):** new child (folder, place, checklist, pool,
-      decklist — which comes with an empty exact `main`; `+` on the header
-      for the top), rename in place, delete with a
-      confirm. **Convert**: a place to a checklist, a checklist to a place;
-      *At least | Exactly* in a checklist's view. Refused when it would
-      leave a zone of the wrong kind ([`docs/inventory.md`](docs/inventory.md)
-      → *Kinds of checklist*). Delete is refused while an asset outside pins something
-      inside; a by-name reference just keeps its path. All Magic has no
-      menu. **Move by dragging**: onto any asset to make it a child, onto
-      the Assets header for the top; no between-row drops, since siblings
-      have no order. **A deck's decklist**: every deck builds one, so a deck
-      is made only by *New deck from this decklist*, a child "deck" with an
-      empty place per decklist zone; *Builds* in its view switches it to
-      another. The view draws it as the decklist, missing copies dimmed,
-      extras last. **Not yet:** duplicate, filling a deck from other places
-      (moves), and which items each type offers.
-- ⬜ **Import a deck as a deck or a decklist.** A decklist import makes a
-      decklist. A deck import makes a decklist from the lines plus a deck
-      building it, whose places hold those lines: the decklist is the
-      deck's backing, since a deck is defined against one. Open: where the
-      decklist goes, its name, whether everything imported counts as held.
-- ⬜ **Caps: checklists with upper bounds.** A kind of its own, *at most
-      n* per line, and the one kind with the unlisted bit (free, or
-      excluded). Brings back the background-pool idea: *blue rares and
-      nothing else*. See [`docs/inventory.md`](docs/inventory.md) → *Kinds
-      of checklist*.
-- ⬜ **Compound checklists: min, max, intersect.** Exact becomes
-      `intersect(checklist, excluded cap)`. Checking one where patterns
-      overlap needs the matching in *Checking a deck against its decklist*.
+      round-tripped on the real library, and run in the app. What the lab
+      shows and edits is *The asset tree, in the lab*, above.
 - ⬜ **Compress the library file with identifiers of its own.** Every line
       repeats the card's name and 36-character oracle id; the real library's
       version 5 file is 4,000 lines, most of them that. A file-local key per
@@ -516,6 +516,26 @@ Decide before any code:
 - ⬜ **Persistence.** How the graph is stored; whether nodes are nameable and
       reusable across workspaces; whether derived nodes cache, and how that
       invalidates.
+
+**First mechanics, in the lab: `:` names any asset, and queries are
+planned.** What makes a query pool a derived one (*The asset tree, in the
+lab* → *Next: pools*).
+- ⬜ **`:` names any asset by path**, resolved as references are: a pool by
+      its members, a place or decklist by the cards in it (its membership).
+      A query that reaches itself through references is refused.
+- ⬜ **Plan by shape.** Scryfall knows nothing of `:ramp`, so:
+      - *anchored by a local set*, an AND with a reference (`:ramp c:u`,
+        `:cube -:/Paper`): the candidates are local and in the store, the
+        rest filters them with the local compiler — **no requests**. How
+        much of the language the local compiler covers bounds this case;
+        check first.
+      - *no references*: a plain Scryfall search, paged through the channel.
+      - *Scryfall minus local* (`c:u -:cube`): page Scryfall, subtract
+        locally, as All Magic's dimming does.
+      - *other mixed shapes* (`:ramp or c:u`): refused with a message, for
+        now.
+      Count requests on real data before any of it ships. This is
+      `cmdr`'s split of local and Scryfall terms (*Campaigns*, above).
 
 ### Multi-panel workspace ⭐
 
@@ -729,8 +749,8 @@ the CSV path*.
 ### 3. Deck database
 One local library. ⬜
 - ⬜ Format grouping (Commander / Modern / Pioneer / Legacy). Favourites and
-      brewing/built/retired states are asset tags, under *Data model → The
-      asset tree's UI*, since they apply to collections too.
+      brewing/built/retired states are asset tags, under *The asset tree,
+      in the lab*, since they apply to collections too.
 - ⬜ Per-deck notes, tags, history, statistics, playtest notes
       (`decks.notes` column exists; no UI)
 
