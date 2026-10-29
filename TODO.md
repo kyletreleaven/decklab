@@ -433,16 +433,34 @@ Design in [`docs/lab.md`](docs/lab.md).
       or deck shows a placeholder until the place and deck views exist.
 - 🚧 **A right-click menu on the asset tree**, where editing the tree
       starts. **Built (lab):** new child (folder, place, checklist, pool,
-      decklist, deck; `+` on the header for the top), rename in place, delete with a
-      confirm. Delete is refused while an asset outside pins something
+      decklist — which comes with an empty exact `main`; `+` on the header
+      for the top), rename in place, delete with a
+      confirm. **Convert**: a place to a checklist, a checklist to a place;
+      *At least | Exactly* in a checklist's view. Refused when it would
+      leave a zone of the wrong kind ([`docs/inventory.md`](docs/inventory.md)
+      → *Kinds of checklist*). Delete is refused while an asset outside pins something
       inside; a by-name reference just keeps its path. All Magic has no
       menu. **Move by dragging**: onto any asset to make it a child, onto
       the Assets header for the top; no between-row drops, since siblings
-      have no order. **A deck's decklist**: *Builds* in a deck's view
-      (pinned; a deck with no zones gets an empty place per decklist zone),
-      and *New deck from this decklist* on a decklist, a shortcut making a
-      child "deck" that builds it. **Not yet:** duplicate, filling a deck
-      from other places (moves), and which items each type offers.
+      have no order. **A deck's decklist**: every deck builds one, so a deck
+      is made only by *New deck from this decklist*, a child "deck" with an
+      empty place per decklist zone; *Builds* in its view switches it to
+      another. The view draws it as the decklist, missing copies dimmed,
+      extras last. **Not yet:** duplicate, filling a deck from other places
+      (moves), and which items each type offers.
+- ⬜ **Import a deck as a deck or a decklist.** A decklist import makes a
+      decklist. A deck import makes a decklist from the lines plus a deck
+      building it, whose places hold those lines: the decklist is the
+      deck's backing, since a deck is defined against one. Open: where the
+      decklist goes, its name, whether everything imported counts as held.
+- ⬜ **Caps: checklists with upper bounds.** A kind of its own, *at most
+      n* per line, and the one kind with the unlisted bit (free, or
+      excluded). Brings back the background-pool idea: *blue rares and
+      nothing else*. See [`docs/inventory.md`](docs/inventory.md) → *Kinds
+      of checklist*.
+- ⬜ **Compound checklists: min, max, intersect.** Exact becomes
+      `intersect(checklist, excluded cap)`. Checking one where patterns
+      overlap needs the matching in *Checking a deck against its decklist*.
 - ⬜ **Compress the library file with identifiers of its own.** Every line
       repeats the card's name and 36-character oracle id; the real library's
       version 5 file is 4,000 lines, most of them that. A file-local key per
