@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  addMember,
   AssetError,
   assetTree,
+  bucketKey,
   builtContents,
   convertAsset,
   createAsset,
@@ -13,7 +15,11 @@ import {
   deleteAsset,
   moveAsset,
   lineContents,
+  memberContents,
   newDeckFrom,
+  poolMembers,
+  removeCard,
+  removeMember,
   renameAsset,
   setDeckList,
 } from "./assets";
@@ -279,5 +285,37 @@ describe("the lab's assets, for display", () => {
     // Its decklist gone (only by going around the tree's refusal): nothing to draw it as.
     db.prepare("DELETE FROM assets WHERE id = ?").run(await find("Decks/Burn"));
     expect(await builtContents(sqlOver(db), sqlOver(cards), box)).toBeNull();
+  });
+
+  it("makes a bucket a member of a list pool, and takes it out again", async () => {
+    const pool = await createAsset(sqlOver(db), "root", "list pool");
+    const anySol = { oracleId: "sol" };
+    const c21 = { oracleId: "sol", printingId: "sol-c21" };
+    const m10 = { oracleId: "bolt", printingId: "bolt-m10" };
+    await addMember(sqlOver(db), pool, anySol);
+    await addMember(sqlOver(db), pool, c21);
+    await addMember(sqlOver(db), pool, c21); // already a member: nothing changes
+    await addMember(sqlOver(db), pool, m10);
+    const m = await poolMembers(sqlOver(db), pool);
+    expect(m.size).toBe(3);
+    expect([anySol, c21, { oracleId: "sol", printingId: "sol-cmr" }].map((b) => m.has(bucketKey(b)))).toEqual([
+      true,
+      true,
+      false,
+    ]);
+
+    // One tile per card; a card with no printing given draws its stand-in.
+    const tiles = await memberContents(sqlOver(db), sqlOver(cards), pool);
+    expect(tiles.map((t) => [t.card.id, t.count])).toEqual([
+      ["bolt-m10", 1],
+      ["sol-c21", 2],
+    ]);
+
+    // Out goes that bucket only: C21 stays.
+    await removeMember(sqlOver(db), pool, anySol);
+    expect((await poolMembers(sqlOver(db), pool)).has(bucketKey(c21))).toBe(true);
+    await removeCard(sqlOver(db), pool, "sol");
+    expect([...(await poolMembers(sqlOver(db), pool))]).toEqual([bucketKey(m10)]);
+    await expect(addMember(sqlOver(db), await find("Binders/Red"), anySol)).rejects.toThrow(/Only a list pool/);
   });
 });

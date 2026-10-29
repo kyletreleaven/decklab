@@ -17,17 +17,24 @@ import { AssetTree } from "./components/AssetTree";
 import { AssetView } from "./components/AssetView";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
+  addMember,
   assetTree,
+  bucketKey,
   convertAsset,
   createAsset,
   deleteAsset,
   moveAsset,
   newDeckFrom,
+  poolMembers,
+  removeCard,
+  removeMember,
   renameAsset,
   setDeckList,
   subtreeSize,
   type AssetNode,
   type Creatable,
+  type Bucket,
+  type Members,
 } from "./lib/assets";
 import type { AssetType } from "./lib/ontology";
 import { execute, processKind, select } from "./lib/db";
@@ -308,6 +315,56 @@ export default function App() {
   useEffect(() => {
     if (view.kind === "asset" && !currentAsset) setView(UNIVERSE_VIEW);
   }, [view, currentAsset]);
+
+  /**
+   * The lab's target: the asset `+` adds to from whatever view you are in —
+   * the view is the source, and hands over the bucket a tile stands for;
+   * the target only acts on it. A list pool, for now; set from the tree's
+   * menu.
+   */
+  const [labTargetId, setLabTargetId] = useState<string | null>(null);
+  const labTarget = useMemo(() => {
+    const find = (nodes: AssetNode[]): AssetNode | null => {
+      for (const n of nodes) {
+        if (n.id === labTargetId) return n;
+        const below = find(n.children);
+        if (below) return below;
+      }
+      return null;
+    };
+    return labTargetId ? find(assets) : null;
+  }, [labTargetId, assets]);
+  // Bumped by a membership edit, so the target's members and an open view of it read again.
+  const [membersVersion, setMembersVersion] = useState(0);
+  const [members, setMembers] = useState<Members | null>(null);
+  useEffect(() => {
+    if (!labTarget || labTarget.type !== "list pool") {
+      setMembers(null);
+      return;
+    }
+    let alive = true;
+    poolMembers(labSql, labTarget.id).then((m) => alive && setMembers(m));
+    return () => {
+      alive = false;
+    };
+  }, [labTarget?.id, labTarget?.type, membersVersion, labSql]);
+  const editMembers = async (edit: () => Promise<void>) => {
+    await editTree(edit);
+    setMembersVersion((v) => v + 1);
+  };
+  const labDestination =
+    labTarget && members
+      ? {
+          name: labTarget.name,
+          quantities: {},
+          quantityKind: "binary" as const,
+          heldAt: (bucket: Bucket) => (members.has(bucketKey(bucket)) ? 1 : 0),
+          add: (_: Card, bucket: Bucket) =>
+            void editMembers(() => addMember(labSql, labTarget.id, bucket)),
+          remove: (_: Card, bucket: Bucket) =>
+            void editMembers(() => removeMember(labSql, labTarget.id, bucket)),
+        }
+      : null;
 
   const currentDeck =
     view.kind === "deck" ? (decks.find((d) => d.id === view.id) ?? null) : null;
@@ -724,6 +781,8 @@ export default function App() {
               onMove={moveTo}
               onBuildDeck={buildDeck}
               onConvert={convert}
+              targetId={labTarget?.id ?? null}
+              onTarget={(node) => setLabTargetId(node?.id ?? null)}
             >
               {/* Built in, not in the tree: always first, never moved, no menu. */}
               <button
@@ -955,8 +1014,12 @@ export default function App() {
             // No subject: nothing to rename, delete or import into. And the
             // destination is the target, exactly as in search — the universe is
             // where cards come *from*.
+            // In the lab, the lab's target: the old one is a deck or
+            // collection the lab does not show.
             destination={
-              target
+              lab
+                ? labDestination
+                : target
                 ? {
                     name: target.name,
                     quantities: targetContents,
@@ -991,6 +1054,10 @@ export default function App() {
             decklists={decklists}
             onSetList={setList}
             onConvert={convert}
+            onRemoveMember={(node, oracleId) =>
+              editMembers(() => removeCard(labSql, node.id, oracleId))
+            }
+            refreshKey={membersVersion}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}

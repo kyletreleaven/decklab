@@ -564,3 +564,87 @@ export async function builtContents(
   }
   return out;
 }
+
+/* ---------- a list pool's members ---------- */
+
+/**
+ * What a tile stands for, as the view it is in says: a card, any printing; a
+ * printing; and, from a place, a finish and attributes too. Left out is
+ * `absent`. The source decides it; a destination only acts on it.
+ */
+export interface Bucket {
+  oracleId: string;
+  printingId?: string;
+  finish?: string;
+  attrs?: Record<string, unknown>;
+}
+
+/** A bucket as its four columns, `absent` as the schema stores it. */
+function columns(b: Bucket): [string, string, string, string] {
+  const attrs = Object.fromEntries(Object.entries(b.attrs ?? {}).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)));
+  return [b.oracleId, b.printingId ?? "", b.finish ?? "", JSON.stringify(attrs)];
+}
+
+/** A bucket's identity: equal keys, one bucket. */
+export const bucketKey = (b: Bucket): string => JSON.stringify(columns(b));
+
+/** A list pool's members, by `bucketKey`. */
+export type Members = Set<string>;
+
+export async function poolMembers(lab: Sql, poolId: string): Promise<Members> {
+  const rows = await lab.select<{ oracle_id: string; printing_id: string; finish: string; attrs: string }>(
+    "SELECT oracle_id, printing_id, finish, attrs FROM pool_members WHERE asset_id = $1",
+    [poolId],
+  );
+  return new Set(rows.map((r) => JSON.stringify([r.oracle_id, r.printing_id, r.finish, r.attrs])));
+}
+
+async function requireListPool(lab: Sql, poolId: string): Promise<void> {
+  const [me] = await lab.select<{ type: string }>("SELECT type FROM assets WHERE id = $1", [poolId]);
+  if (me?.type !== "list pool") throw new AssetError("Only a list pool takes members.");
+}
+
+/**
+ * Make a bucket a member; already one, nothing changes. Its card is in the
+ * store already — the tile came from a page of it.
+ */
+export async function addMember(lab: Sql, poolId: string, bucket: Bucket, at = new Date().toISOString()): Promise<void> {
+  await requireListPool(lab, poolId);
+  await lab.execute(
+    `INSERT OR IGNORE INTO pool_members (asset_id, oracle_id, printing_id, finish, attrs, added_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [poolId, ...columns(bucket), at],
+  );
+  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [poolId, at]);
+}
+
+/** Take a bucket out of a pool: that bucket only, not the card's others. */
+export async function removeMember(lab: Sql, poolId: string, bucket: Bucket, at = new Date().toISOString()): Promise<void> {
+  await requireListPool(lab, poolId);
+  await lab.execute(
+    `DELETE FROM pool_members
+      WHERE asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5`,
+    [poolId, ...columns(bucket)],
+  );
+  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [poolId, at]);
+}
+
+/** Every member of one card, whatever its bucket: what a pool view's × takes out. */
+export async function removeCard(lab: Sql, poolId: string, oracleId: string, at = new Date().toISOString()): Promise<void> {
+  await requireListPool(lab, poolId);
+  await lab.execute("DELETE FROM pool_members WHERE asset_id = $1 AND oracle_id = $2", [poolId, oracleId]);
+  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [poolId, at]);
+}
+
+/**
+ * A list pool's members, one tile per card. Membership has no count: a
+ * tile's `count` is how many of the card's buckets are members, and its
+ * buckets say which.
+ */
+export async function memberContents(lab: Sql, store: Sql, poolId: string, layers = [scryfallLayer(store)]): Promise<Tile[]> {
+  const lines = await lab.select<LineRow>(
+    "SELECT oracle_id, printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1",
+    [poolId],
+  );
+  return tiles(store, lines, layers);
+}

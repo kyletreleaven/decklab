@@ -26,6 +26,7 @@ import {
 } from "../lib/sort";
 import * as scryfall from "../lib/scryfall";
 import type { Card, CollectionItem, QuantityKind } from "../lib/types";
+import type { Bucket } from "../lib/assets";
 
 /** One toggleable contextual constraint, e.g. format legality or colour identity. */
 export interface Scope {
@@ -131,8 +132,19 @@ export function PoolPanel({
     quantities: Record<string, number>;
     /** Binary destinations take members, not copies — see `docs/card-set-types.md`. */
     quantityKind?: QuantityKind;
-    add: (card: Card) => void;
-    remove: (card: Card) => void;
+    /**
+     * For a destination holding buckets rather than printings — a lab pool:
+     * what it holds of a tile's bucket. Present, it answers in place of
+     * `quantities`.
+     */
+    heldAt?: (bucket: Bucket) => number;
+    /**
+     * `bucket` is what the tile stands for, which the source decides — here,
+     * by the grain it is drawn at. A bucket destination acts on it; one
+     * keyed by printing goes by `card`.
+     */
+    add: (card: Card, bucket: Bucket) => void;
+    remove: (card: Card, bucket: Bucket) => void;
   } | null;
   /**
    * What this pane draws. Exactly one set — never a union.
@@ -593,11 +605,22 @@ export function PoolPanel({
    * The decision lives in `stepper.ts`, on two inputs: the destination's kind
    * and whether the card is already in it. Everything here is binding handlers.
    */
+  /**
+   * The bucket a tile stands for: at Cards grain the card, any printing; at
+   * Printings grain that printing. The source's to say, not the destination's.
+   */
+  const bucketOf = (card: Card): Bucket =>
+    grain === "printings" ? { oracleId: card.oracleId, printingId: card.id } : { oracleId: card.oracleId };
+
+  /** What the destination holds of a tile: by bucket where it says, else by printing. */
+  const heldIn = (card: Card) =>
+    destination?.heldAt?.(bucketOf(card)) ?? destination?.quantities[card.id] ?? 0;
+
   function stepperFor(row: Row): Stepper | null {
     // From the destination, which App refreshes on every write — never from the
     // row, whose entry is frozen at fetch time and would keep claiming to be
     // held after a removal.
-    const held = destination?.quantities[row.card.id] ?? 0;
+    const held = heldIn(row.card);
     const kind = destination ? (destination.quantityKind ?? "natural") : null;
 
     const which = stepperCase({ destinationKind: kind, inDestination: held });
@@ -615,13 +638,13 @@ export function PoolPanel({
         ? null
         : entry
           ? () => manage!.onSetItemQuantity(entry, entry.quantity - 1)
-          : () => destination?.remove(row.card),
-      inc: !controls.inc ? null : () => destination?.add(row.card),
+          : () => destination?.remove(row.card, bucketOf(row.card)),
+      inc: !controls.inc ? null : () => destination?.add(row.card, bucketOf(row.card)),
       drop: !controls.drop
         ? null
         : entry
           ? () => manage!.onRemoveItem(entry)
-          : () => destination?.remove(row.card),
+          : () => destination?.remove(row.card, bucketOf(row.card)),
     };
   }
 
@@ -957,7 +980,7 @@ export function PoolPanel({
             // finishes and would show a foil and a nonfoil the same total. But
             // suppressed once the destination no longer holds it, so a removed
             // card drops its badge without the list being refetched.
-            const count = destination?.quantities[card.id] ?? 0;
+            const count = heldIn(card);
             const step = stepperFor(row);
             return (
               <div
@@ -1041,7 +1064,7 @@ export function PoolPanel({
             // finishes and would show a foil and a nonfoil the same total. But
             // suppressed once the destination no longer holds it, so a removed
             // card drops its badge without the list being refetched.
-            const count = destination?.quantities[card.id] ?? 0;
+            const count = heldIn(card);
             const step = stepperFor(row);
             return (
               <div

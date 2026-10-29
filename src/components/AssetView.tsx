@@ -4,6 +4,7 @@ import {
   deckContents,
   deckList,
   lineContents,
+  memberContents,
   type AssetNode,
   type BuiltZone,
   type ZoneContents,
@@ -40,6 +41,8 @@ interface Section {
   built?: { asked: number; held: number; exact: boolean };
   /** The counts are minimums: a checklist's, not exact. */
   atLeast?: boolean;
+  /** A pool's members: membership, no counts. */
+  members?: boolean;
   tiles: Tile[];
 }
 
@@ -83,13 +86,18 @@ function groups(
   return out;
 }
 
-/** What a tile knows about its copies, one line per bucket. */
-function describe(b: HeldBucket): string {
+/**
+ * What a tile knows about its copies, one line per bucket. A pool's member
+ * has no count, and no printing means any.
+ */
+function describe(b: HeldBucket, member = false): string {
   const printing = b.printing
     ? `${b.printing.set.toUpperCase()} ${b.printing.number}`
-    : "printing not recorded";
+    : member
+      ? "any printing"
+      : "printing not recorded";
   const attrs = Object.entries(b.attrs).map(([k, v]) => `${k} ${String(v)}`);
-  return [`${b.qty}× ${printing}`, b.finish, ...attrs]
+  return [member ? printing : `${b.qty}× ${printing}`, b.finish, ...attrs]
     .filter(Boolean)
     .join(" · ");
 }
@@ -111,6 +119,8 @@ export function AssetView({
   decklists = [],
   onSetList,
   onConvert,
+  onRemoveMember,
+  refreshKey = 0,
 }: {
   node: AssetNode;
   selectedId: string | null;
@@ -122,6 +132,10 @@ export function AssetView({
   onSetList?: (deck: AssetNode, decklistId: string) => Promise<void>;
   /** Changes the asset's type: here, a checklist exact or not. */
   onConvert?: (node: AssetNode, to: AssetType) => Promise<void>;
+  /** Takes a card out of a list pool, every bucket of it. Absent, no ×. */
+  onRemoveMember?: (pool: AssetNode, oracleId: string) => Promise<void>;
+  /** Bumped by edits made elsewhere — `+` in All Magic — to read again. */
+  refreshKey?: number;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
   const [list, setList] = useState<DeckList | null>(null);
@@ -152,6 +166,10 @@ export function AssetView({
             tiles: await lineContents(lab, store, node.id),
             atLeast: node.type === "checklist",
           },
+        ];
+      if (node.type === "list pool")
+        return [
+          { tiles: await memberContents(lab, store, node.id), members: true },
         ];
       // A deck is drawn as the decklist it builds, missing copies dimmed.
       const built =
@@ -186,7 +204,7 @@ export function AssetView({
     };
     // The path as text: a reloaded tree hands over new arrays for the same path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node.id, node.type, node.path.join("/"), version]);
+  }, [node.id, node.type, node.path.join("/"), version, refreshKey]);
 
   const all = sections?.flatMap((s) => s.tiles) ?? [];
   const copies = all.reduce((n, t) => n + t.count, 0);
@@ -293,13 +311,23 @@ export function AssetView({
           )}
           {/* As the pool says them: every copy, then distinct cards — a
               decklist's 100 counts its seven Islands seven times. */}
-          <div
-            className="stat"
-            title={isChecklist ? "Copies asked for" : "Copies held"}
-          >
-            <span className="label">Cards</span>
-            <span className="value">{copies}</span>
-          </div>
+          {node.type === "list pool" ? (
+            <div
+              className="stat"
+              title="Members: a card with no printing, or a printing"
+            >
+              <span className="label">Members</span>
+              <span className="value">{copies}</span>
+            </div>
+          ) : (
+            <div
+              className="stat"
+              title={isChecklist ? "Copies asked for" : "Copies held"}
+            >
+              <span className="label">Cards</span>
+              <span className="value">{copies}</span>
+            </div>
+          )}
           <div className="stat" title="Distinct cards">
             <span className="label">Unique</span>
             <span className="value">{all.length}</span>
@@ -394,7 +422,7 @@ export function AssetView({
                             `${t.count} in this deck, not on the list`,
                           ...(t.state === "missing"
                             ? []
-                            : t.buckets.map(describe)),
+                            : t.buckets.map((b) => describe(b, s.members))),
                           t.standIn &&
                             "Shown as Scryfall's pick: no printing recorded",
                         ]
@@ -402,9 +430,26 @@ export function AssetView({
                           .join("\n")}
                       >
                         <CardImage card={t.card} size="small" />
-                        <span className="qty-badge">
-                          {bounds(t, s.atLeast)}
-                        </span>
+                        {!s.members && (
+                          <span className="qty-badge">
+                            {bounds(t, s.atLeast)}
+                          </span>
+                        )}
+                        {s.members && onRemoveMember && (
+                          <span
+                            className="tile-controls"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              title={`Remove from ${node.name}${t.buckets.length > 1 ? `: all ${t.buckets.length} of its members` : ""}`}
+                              onClick={() =>
+                                void onRemoveMember(node, t.oracleId)
+                              }
+                            >
+                              ×
+                            </button>
+                          </span>
+                        )}
                         {t.standIn && (
                           <span className="stand-in-badge">stand-in</span>
                         )}

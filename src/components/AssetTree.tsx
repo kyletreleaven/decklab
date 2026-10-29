@@ -29,17 +29,28 @@ const LABEL: Record<Creatable, string> = {
 };
 
 /** What opening an asset shows: places and decks have views; the rest not yet. */
-export const OPENABLE: ReadonlySet<AssetType> = new Set(["place", "decklist", "deck", "checklist", "exact checklist"]);
+export const OPENABLE: ReadonlySet<AssetType> = new Set([
+  "place",
+  "decklist",
+  "deck",
+  "checklist",
+  "exact checklist",
+  "list pool",
+]);
+
+/** What can be the target: where `+` adds, from whatever view you are in. */
+const TARGETABLE: ReadonlySet<AssetType> = new Set(["list pool"]);
 
 /**
  * The menu's conversions: a place to a checklist, a checklist (either kind)
  * to a place. Exact or not is the checklist view's toggle.
  */
-const CONVERT_TO: Partial<Record<AssetType, { to: AssetType; label: string }>> = {
-  place: { to: "checklist", label: "Convert to checklist" },
-  checklist: { to: "place", label: "Convert to place" },
-  "exact checklist": { to: "place", label: "Convert to place" },
-};
+const CONVERT_TO: Partial<Record<AssetType, { to: AssetType; label: string }>> =
+  {
+    place: { to: "checklist", label: "Convert to checklist" },
+    checklist: { to: "place", label: "Convert to place" },
+    "exact checklist": { to: "place", label: "Convert to place" },
+  };
 
 /** Where the menu is, and what it is for: an asset, or the top of the tree. */
 interface Menu {
@@ -75,13 +86,18 @@ export function AssetTree({
   onMove,
   onBuildDeck,
   onConvert,
+  targetId,
+  onTarget,
   children,
 }: {
   nodes: AssetNode[];
   activeId: string | null;
   onOpen: (node: AssetNode) => void;
   /** Creates under `parent` (null: the top); resolves to the new id. */
-  onCreate: (parent: AssetNode | null, type: Creatable) => Promise<string | null>;
+  onCreate: (
+    parent: AssetNode | null,
+    type: Creatable,
+  ) => Promise<string | null>;
   onRename: (node: AssetNode, name: string) => Promise<void>;
   onDelete: (node: AssetNode) => Promise<void>;
   /** Moves `node` under `parent` (null: the top). */
@@ -90,6 +106,10 @@ export function AssetTree({
   onBuildDeck: (decklist: AssetNode) => Promise<string | null>;
   /** Changes `node`'s type: lines kept, read anew. */
   onConvert: (node: AssetNode, to: AssetType) => Promise<void>;
+  /** The asset `+` adds to, wherever you are: a list pool, for now. */
+  targetId: string | null;
+  /** Makes `node` the target (null: none). */
+  onTarget: (node: AssetNode | null) => void;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState<Set<string>>(
@@ -192,11 +212,19 @@ export function AssetTree({
         e.dataTransfer.dropEffect = "move";
         if (over !== key) setOver(key);
         // A closed row opens once the drag rests on it.
-        if (t !== "top" && t.children.length && !open.has(t.id) && spring.current?.id !== t.id) {
+        if (
+          t !== "top" &&
+          t.children.length &&
+          !open.has(t.id) &&
+          spring.current?.id !== t.id
+        ) {
           stopSpring();
           spring.current = {
             id: t.id,
-            timer: window.setTimeout(() => setOpen((s) => new Set(s).add(t.id)), SPRING_MS),
+            timer: window.setTimeout(
+              () => setOpen((s) => new Set(s).add(t.id)),
+              SPRING_MS,
+            ),
           };
         }
       },
@@ -295,14 +323,25 @@ export function AssetTree({
           ) : (
             <span className="name">{n.name}</span>
           )}
+          {targetId === n.id && (
+            <span
+              className="slot-dot target"
+              title={`The target: + adds to `}
+            />
+          )}
         </div>
       );
-      return expandable && isOpen ? [row, ...rows(n.children, depth + 1)] : [row];
+      return expandable && isOpen
+        ? [row, ...rows(n.children, depth + 1)]
+        : [row];
     });
 
   return (
     <>
-      <div className={`nav-header ${over === "top" ? "drop-into" : ""}`} {...target("top")}>
+      <div
+        className={`nav-header ${over === "top" ? "drop-into" : ""}`}
+        {...target("top")}
+      >
         <span>Assets</span>
         <button
           className="ghost"
@@ -320,17 +359,44 @@ export function AssetTree({
       {nodes.length === 0 && <div className="nav-empty">No assets yet.</div>}
       <div role="tree">{rows(nodes, 0)}</div>
       {menu && (
-        <div ref={menuRef} className="context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
+        <div
+          ref={menuRef}
+          className="context-menu"
+          style={{ left: menu.x, top: menu.y }}
+          role="menu"
+        >
           {CREATABLE.map((type) => (
-            <button key={type} role="menuitem" onClick={() => void create(menu.node, type)}>
+            <button
+              key={type}
+              role="menuitem"
+              onClick={() => void create(menu.node, type)}
+            >
               New {LABEL[type]}
             </button>
           ))}
           {menu.node?.type === "decklist" && (
             <>
               <div className="context-menu-divider" />
-              <button role="menuitem" onClick={() => void buildDeck(menu.node!)}>
+              <button
+                role="menuitem"
+                onClick={() => void buildDeck(menu.node!)}
+              >
                 New deck from this decklist
+              </button>
+            </>
+          )}
+          {menu.node && TARGETABLE.has(menu.node.type) && (
+            <>
+              <div className="context-menu-divider" />
+              <button
+                role="menuitem"
+                onClick={() => {
+                  const node = menu.node!;
+                  setMenu(null);
+                  onTarget(targetId === node.id ? null : node);
+                }}
+              >
+                {targetId === menu.node.id ? "Stop targeting" : "Set as target"}
               </button>
             </>
           )}
