@@ -20,20 +20,32 @@ export interface AssetNode {
   type: AssetType;
   path: string[];
   children: AssetNode[];
+  /** The asset above it: "root" at the top. */
+  parentId: string;
+  /** A query pool's query. */
+  query?: string;
 }
 
 /** The asset tree, below the root, siblings in order. */
 export async function assetTree(lab: Sql): Promise<AssetNode[]> {
-  const rows = await lab.select<{ id: string; parent_id: string | null; name: string; type: AssetType }>(
+  const rows = await lab.select<{ id: string; parent_id: string | null; name: string; type: AssetType; query: string | null }>(
     // No order of their own: by name, as a reader expects.
-    "SELECT id, parent_id, name, type FROM assets WHERE id <> 'root' ORDER BY name COLLATE NOCASE, name",
+    "SELECT id, parent_id, name, type, query FROM assets WHERE id <> 'root' ORDER BY name COLLATE NOCASE, name",
   );
   const byParent = new Map<string, typeof rows>();
   for (const r of rows) byParent.set(r.parent_id!, [...(byParent.get(r.parent_id!) ?? []), r]);
   const build = (parent: string, path: string[]): AssetNode[] =>
     (byParent.get(parent) ?? []).map((r) => {
       const p = [...path, r.name];
-      return { id: r.id, name: r.name, type: r.type, path: p, children: build(r.id, p) };
+      return {
+        id: r.id,
+        parentId: parent,
+        name: r.name,
+        type: r.type,
+        path: p,
+        children: build(r.id, p),
+        ...(r.query !== null && { query: r.query }),
+      };
     });
   return build("root", []);
 }
@@ -248,13 +260,7 @@ export async function createAsset(
   type: Creatable | "deck",
   { name: base = DEFAULT_NAME[type], at = new Date().toISOString() }: { name?: string; at?: string } = {},
 ): Promise<string> {
-  const siblings = await lab.select<{ name: string }>(
-    "SELECT name FROM assets WHERE parent_id = $1",
-    [parentId],
-  );
-  const taken = new Set(siblings.map((s) => s.name));
-  let name = base;
-  for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+  const name = await freeName(lab, parentId, base);
   const id = crypto.randomUUID();
   await lab.execute(
     `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at)
@@ -263,6 +269,44 @@ export async function createAsset(
   );
   if (type === "decklist") await addZone(lab, id, "main", "exact checklist", at);
   return id;
+}
+
+/** `base`, numbered past any child of `parentId` already called that. */
+async function freeName(lab: Sql, parentId: string, base: string): Promise<string> {
+  const siblings = await lab.select<{ name: string }>("SELECT name FROM assets WHERE parent_id = $1", [parentId]);
+  const taken = new Set(siblings.map((s) => s.name));
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+  return name;
+}
+
+/**
+ * A query pool: a search kept, as its query — Scryfall syntax, what the
+ * pool panel runs — not its results, so saving one sends no requests. Named
+ * after the query unless told otherwise. Returns its id.
+ */
+export async function createQueryPool(
+  lab: Sql,
+  parentId: string,
+  query: string,
+  { name, at = new Date().toISOString() }: { name?: string; at?: string } = {},
+): Promise<string> {
+  const text = query.trim();
+  const base = (name ?? (text.length > 40 ? `${text.slice(0, 39).trimEnd()}…` : text)) || "Saved search";
+  const id = crypto.randomUUID();
+  await lab.execute(
+    `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at, query)
+     VALUES ($1, $2, $3, 'query pool', $4, $4, $5)`,
+    [id, parentId, await freeName(lab, parentId, base), at, text],
+  );
+  return id;
+}
+
+/** Replace a query pool's query: its Save. */
+export async function setPoolQuery(lab: Sql, id: string, query: string, at = new Date().toISOString()): Promise<void> {
+  const [me] = await lab.select<{ type: string }>("SELECT type FROM assets WHERE id = $1", [id]);
+  if (me?.type !== "query pool") throw new AssetError("Only a query pool has a query.");
+  await lab.execute("UPDATE assets SET query = $2, updated_at = $3 WHERE id = $1", [id, query.trim(), at]);
 }
 
 /**

@@ -110,6 +110,8 @@ export function PoolPanel({
   refreshKey = 0,
   manage = null,
   onSaveSearch,
+  queryPool,
+  initialFilter = {},
   activePrintings = {},
   compact = false,
   grainToggle = false,
@@ -226,6 +228,19 @@ export function PoolPanel({
    */
   onSaveSearch?: (filter: CardFilter, sort: SortKey, flipped: boolean) => void;
   /**
+   * Keeping the search as a query pool, in the lab: its query, not its
+   * results, so saving fetches nothing. `saved` is the open pool's query —
+   * Save writes back to it, enabled once the search differs — and absent
+   * where there is no pool open (All Magic), leaving only Save as.
+   */
+  queryPool?: {
+    saved?: string;
+    onSave?: (query: string) => void;
+    onSaveAs: (query: string) => void;
+  };
+  /** The search a panel starts with, before any is retained: a query pool's own. */
+  initialFilter?: CardFilter;
+  /**
    * The printing each card currently stands for, by oracle id — chosen in the
    * card panel. Consulted only at oracle grain: a printing-grain row already
    * *is* a specific printing, so substituting would be a lie about what you
@@ -249,7 +264,7 @@ export function PoolPanel({
    */
   grainToggle?: boolean;
 }) {
-  const [filter, setFilter] = useRetained<CardFilter>(stateKey, "filter", {});
+  const [filter, setFilter] = useRetained<CardFilter>(stateKey, "filter", initialFilter);
   const [showFilters, setShowFilters] = useRetained(stateKey, "showFilters", false);
   const [scopesOff, setScopesOff] = useRetained<Set<string>>(stateKey, "scopesOff", () => new Set());
   /**
@@ -339,6 +354,8 @@ export function PoolPanel({
     [filter, activeScopes],
   );
   const effectiveKey = JSON.stringify(effective);
+  /** The search as one query: what a query pool keeps. */
+  const searchText = toScryfallQuery(effective).trim();
   /**
    * Oracle ids in the lit set — everything else recedes.
    *
@@ -812,6 +829,55 @@ export function PoolPanel({
             offer is worth reading, and the count that decides it is already in
             hand from the first page — so refusing here costs nothing, where
             refusing after the name dialog wastes the typing. */}
+        {queryPool && (
+          <>
+            {queryPool.saved !== undefined && queryPool.onSave && (
+              <span
+                className="hint-wrap"
+                title={
+                  searchText === queryPool.saved
+                    ? "Nothing changed since the pool was saved"
+                    : `Keep this search as the pool's query: ${searchText || "everything"}`
+                }
+              >
+                <button
+                  className="ghost"
+                  onClick={() => queryPool.onSave!(searchText)}
+                  disabled={searchText === queryPool.saved}
+                >
+                  Save
+                </button>
+              </span>
+            )}
+            {queryPool.saved !== undefined && (
+              <span
+                className="hint-wrap"
+                title={
+                  searchText === queryPool.saved
+                    ? "Nothing changed since the pool was saved"
+                    : `Back to the pool's saved query: ${queryPool.saved || "everything"}`
+                }
+              >
+                <button
+                  className="ghost"
+                  // The saved query as text: controls were baked into it on save.
+                  onClick={() => setFilter({ query: queryPool.saved })}
+                  disabled={searchText === queryPool.saved}
+                >
+                  Revert
+                </button>
+              </span>
+            )}
+            <button
+              className="ghost"
+              title="Keep this search as a new query pool: the query, not its results"
+              onClick={() => queryPool.onSaveAs(searchText)}
+            >
+              {queryPool.saved !== undefined ? "Save as…" : "Save as pool"}
+            </button>
+          </>
+        )}
+
         {onSaveSearch && (
           // Title on the wrapper, not the button: a disabled control dispatches
           // no mouse events, so its own tooltip never appears — which is

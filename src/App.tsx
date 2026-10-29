@@ -22,6 +22,7 @@ import {
   bucketKey,
   convertAsset,
   createAsset,
+  createQueryPool,
   deleteAsset,
   moveAsset,
   newDeckFrom,
@@ -30,6 +31,7 @@ import {
   removeMember,
   renameAsset,
   setDeckList,
+  setPoolQuery,
   subtreeSize,
   type AssetNode,
   type Creatable,
@@ -276,6 +278,11 @@ export default function App() {
   };
   const convert = async (node: AssetNode, to: AssetType) => {
     await editTree(() => convertAsset(labSql, node.id, to));
+  };
+  /** Keep a search as a new query pool under `parentId`, and open it. */
+  const saveQueryPool = async (parentId: string, query: string) => {
+    const id = await editTree(() => createQueryPool(labSql, parentId, query));
+    if (id) setView({ kind: "asset", id });
   };
   const decklists = useMemo(() => {
     const out: AssetNode[] = [];
@@ -1035,20 +1042,47 @@ export default function App() {
             scopes={deckScopes}
             grainToggle
             refreshKey={refreshKey}
-            onSaveSearch={(filter, sort, flipped) =>
-              setSaving({
-                name: filter.query?.trim() || "Saved search",
-                filter,
-                sort,
-                flipped,
-                progress: null,
-                error: null,
-              })
-            }
+            // In the lab a search is kept as a query pool — its query, not its
+            // results — at the top of the tree.
+            {...(lab
+              ? { queryPool: { onSaveAs: (query: string) => void saveQueryPool("root", query) } }
+              : {
+                  onSaveSearch: (filter: CardFilter, sort: SortKey, flipped: boolean) =>
+                    setSaving({
+                      name: filter.query?.trim() || "Saved search",
+                      filter,
+                      sort,
+                      flipped,
+                      progress: null,
+                      error: null,
+                    }),
+                })}
           />
         )}
 
-        {currentAsset && (
+        {/* A query pool is a search kept: the pool panel, running its query. */}
+        {currentAsset?.type === "query pool" && (
+          <PoolPanel
+            key={`asset:${currentAsset.id}`}
+            stateKey={`asset:${currentAsset.id}`}
+            initialFilter={{ query: currentAsset.query ?? "" }}
+            selectedId={selectedCard?.id ?? null}
+            onSelect={setSelectedCard}
+            onHoverCard={hoverCard}
+            destination={labDestination}
+            source={{ kind: "universe" }}
+            activePrintings={activePrintings}
+            grainToggle
+            refreshKey={refreshKey}
+            queryPool={{
+              saved: currentAsset.query ?? "",
+              onSave: (query) => void editTree(() => setPoolQuery(labSql, currentAsset.id, query)),
+              onSaveAs: (query) => void saveQueryPool(currentAsset.parentId, query),
+            }}
+          />
+        )}
+
+        {currentAsset && currentAsset.type !== "query pool" && (
           <AssetView
             node={currentAsset}
             decklists={decklists}

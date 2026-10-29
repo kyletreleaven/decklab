@@ -36,6 +36,7 @@ export const OPENABLE: ReadonlySet<AssetType> = new Set([
   "checklist",
   "exact checklist",
   "list pool",
+  "query pool",
 ]);
 
 /** What can be the target: where `+` adds, from whatever view you are in. */

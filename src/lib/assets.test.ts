@@ -10,6 +10,7 @@ import {
   builtContents,
   convertAsset,
   createAsset,
+  createQueryPool,
   deckContents,
   deckList,
   deleteAsset,
@@ -22,6 +23,7 @@ import {
   removeMember,
   renameAsset,
   setDeckList,
+  setPoolQuery,
 } from "./assets";
 import { readLab } from "./library/labdb";
 import { writeLab } from "./library/labdb";
@@ -285,6 +287,21 @@ describe("the lab's assets, for display", () => {
     // Its decklist gone (only by going around the tree's refusal): nothing to draw it as.
     db.prepare("DELETE FROM assets WHERE id = ?").run(await find("Decks/Burn"));
     expect(await builtContents(sqlOver(db), sqlOver(cards), box)).toBeNull();
+  });
+
+  it("keeps a search as a query pool, named after it, and saves a new query into it", async () => {
+    const id = await createQueryPool(sqlOver(db), "root", "  t:creature o:proliferate  ");
+    const again = await createQueryPool(sqlOver(db), "root", "t:creature o:proliferate");
+    const long = await createQueryPool(sqlOver(db), "root", "c:u ".repeat(20));
+    const blank = await createQueryPool(sqlOver(db), "root", "");
+    const byId = new Map((await assetTree(sqlOver(db))).map((n) => [n.id, n]));
+    expect(byId.get(id)).toMatchObject({ name: "t:creature o:proliferate", type: "query pool", query: "t:creature o:proliferate" });
+    expect(byId.get(again)?.name).toBe("t:creature o:proliferate 2");
+    expect(byId.get(long)?.name).toMatch(/^c:u c:u .*…$/);
+    expect(byId.get(blank)).toMatchObject({ name: "Saved search", query: "" });
+    await setPoolQuery(sqlOver(db), id, "t:creature o:proliferate c:g");
+    expect((await assetTree(sqlOver(db))).find((n) => n.id === id)?.query).toBe("t:creature o:proliferate c:g");
+    await expect(setPoolQuery(sqlOver(db), await find("Binders/Red"), "x")).rejects.toThrow(/Only a query pool/);
   });
 
   it("makes a bucket a member of a list pool, and takes it out again", async () => {
