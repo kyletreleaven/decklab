@@ -16,6 +16,7 @@ digging, then read *Traps* for the patterns that have produced bugs before.
 | [003](003-agent-api-times-out-when-backgrounded.md) | first fix applied, awaiting repro | Agent API times out once the app has been in the background a while |
 | [004](004-spacecraft-commander-flagged-illegal.md) | open · cause found | A legendary Spacecraft commander is flagged "cannot be a commander" |
 | [005](005-lab-load-rate-limited.md) | open · fix in progress | Loading the library into the lab drew a 429 from Scryfall |
+| [006](006-asset-view-scroll-resets-on-edit.md) | fix applied, awaiting in-app repro | An asset view jumps back to the top when a tile's button is pressed |
 
 ## Writing a report
 
@@ -74,3 +75,7 @@ Patterns that have produced more than one bug. Check these first.
   a realistic action sends, measured on real data, before it ships; more than
   a handful from one action is a design bug. Per-process state (the queue,
   the 429 pause) is not shared by a second app process. → 005
+- **A refresh is not a reopen.** An effect that reloads on `refreshKey` must
+  not clear what it draws first: blanking to *Loading…* empties the scroll
+  area and loses its position. Reset when the thing shown changes; when only
+  its data does, draw the old until the new arrives. → 006
