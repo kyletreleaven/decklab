@@ -81,23 +81,31 @@ supported here".
 
 Every field in v1 hits a column that already exists on `cards`.
 
-| Term | Column | Notes |
-| --- | --- | --- |
-| bareword, `name:` | `name` | `LIKE %v%` |
-| `t:` | `type_line` | `LIKE` |
-| `o:` | `oracle_text` | `LIKE`; honour quoted phrases |
-| `c:` | `colors` | see colour operators |
-| `id:` | `color_identity` | see colour operators |
-| `mv:` `cmc:` | `cmc` | numeric compare, REAL column |
-| `pow:` `tou:` `loy:` | `power` `toughness` `loyalty` | TEXT — see gotcha |
-| `r:` | `rarity` | ranked, so `r>=rare` includes mythic (alphabetically `mythic` < `rare`) |
-| `s:` `set:` `e:` | `set_code` | equality, lowercase |
-| `f:` | `legalities` | `json_extract(legalities, '$.' \|\| ?) IN ('legal','restricted')` — already done for pool scoping |
-| `kw:` | `keywords` | JSON array |
-| `layout:` | `layout` | equality |
-| `a:` `ft:` | raw payload | `json_extract(data, '$.artist')` etc. |
-| `game:` | `digital` | `game:paper` only — the column cannot tell Arena from MTGO, so the rest raise rather than guess |
-| `is:` | — | **unsupported in v1**; structured error naming the term |
+**Level** says whose property a field is. A *card* field is the same on
+every printing of the card; a *printing* field can differ between them.
+Against a bucket with no printing, a printing field is unknown — `NULL`,
+and its payload keys removed — so a term on it matches neither way
+([`inventory.md`](inventory.md) → *Querying a bucket that leaves a key
+out*).
+
+| Term | Column | Level | Notes |
+| --- | --- | --- | --- |
+| bareword, `name:` | `name` | card | `LIKE %v%` |
+| `t:` | `type_line` | card | `LIKE` |
+| `o:` | `oracle_text` | card | `LIKE`; honour quoted phrases |
+| `c:` | `colors` | card | see colour operators |
+| `id:` | `color_identity` | card | see colour operators |
+| `mv:` `cmc:` | `cmc` | card | numeric compare, REAL column |
+| `pow:` `tou:` `loy:` | `power` `toughness` `loyalty` | card | TEXT — see gotcha |
+| `r:` | `rarity` | printing | ranked, so `r>=rare` includes mythic (alphabetically `mythic` < `rare`). A card's rarity differs between sets |
+| `s:` `set:` `e:` | `set_code` | printing | equality, lowercase |
+| `f:` | `legalities` | card | `json_extract(legalities, '$.' \|\| ?) IN ('legal','restricted')` — already done for pool scoping |
+| `kw:` | `keywords` | card | JSON array |
+| `layout:` | `layout` | card | equality |
+| `a:` | raw payload | printing | `json_extract(data, '$.artist')` |
+| `ft:` | raw payload | printing | `json_extract(data, '$.flavor_text')` |
+| `game:` | `digital` | printing | `game:paper` only — the column cannot tell Arena from MTGO, so the rest raise rather than guess |
+| `is:` | — | — | **unsupported in v1**; structured error naming the term. Each `is:` will need its level when it lands |
 
 ### Colour operators
 

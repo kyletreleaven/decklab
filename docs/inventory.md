@@ -192,8 +192,9 @@ a known printing. This is the same question as the *active printing* in
 **Grain in a view is only a way of drawing a set.** Toggling it changes no
 bucket and stores nothing. A pattern — a pool or a checklist, where a key
 left out means *any* — can mix grains: some lines name a printing, some
-only the card. Holdings, where left out means *not recorded*, are set aside
-for now.
+only the card. Holdings, where left out means *not recorded*, mix grains
+the same way, and project the same way; only the label differs (*Two
+readings of `absent`*).
 
 **A view's grain is a ceiling, not a target.** Each bucket projects *down*
 to it, never up: keys finer than the grain are dropped, and a bucket
@@ -225,6 +226,51 @@ client-side, one per card; sorted by name a card's printings arrive together
 and its row can lead them, but under another sort they scatter, and where
 the row goes is open. Where else to offer the toggle, or not, is open too:
 query pools and the deck builder's pool are candidates.
+
+### Drawing an asset against All Magic
+
+An asset's view can draw All Magic behind it, as a collection's view does
+in the current app (*Show not in <asset>*). It is one set, drawn by the
+rules above, not two sources merged:
+
+1. **Union** All Magic's buckets, as the search narrows them, with the
+   asset's.
+2. **Project** to the view's grain.
+3. **Evict** All Magic wherever the asset has presence: its tile takes All
+   Magic's place, in All Magic's order. Everything else is All Magic,
+   dimmed.
+4. **Draw** by the asset's own display rules (*Sources and targets*).
+
+At the Printings grain, an asset's *any printing* line has presence on its
+card's *any printing* row, not on a printing: it takes that row's place,
+and the card's printings stay All Magic's, each still something to add.
+
+**Off, the asset alone, and nothing is requested.** All Magic is paged from
+Scryfall only when it is drawn. The search is then answered locally: every
+card an asset holds is in the card store, with Scryfall's data. Searching
+with All Magic drawn goes to Scryfall, and an asset's tile appears wherever
+its card does.
+
+### Querying a bucket that leaves a key out
+
+A bucket with no printing cannot be tested against a printing's
+properties. **A printing-level term is unverifiable against it, and an
+unverifiable term matches neither way**: `s:m10` does not match an
+unrecorded Bolt, and neither does `-s:m10`. A card-level term is answered
+as for any printing of the card — they all agree.
+
+Not the stand-in: the printing a tile is drawn with is Scryfall's choice
+(*Rendering an `absent` printing or finish*), display only, and testing it
+would answer a question about a printing nobody named.
+
+It is three-valued logic, and SQL's `NULL` is exactly it: a line with no
+printing is queried with its printing-level fields unknown, and `NULL`
+carries through `and`, `or` and `not` as it should — `s:m10 or t:creature`
+still matches a creature, `s:m10 t:creature` matches nothing. Which fields
+are printing-level is listed in
+[`query-language.md`](query-language.md) → *Field mapping*. The finish and
+user attributes, when queries reach them, follow the same rule: `absent`
+is unknown (*Attributes*).
 
 ## Attributes
 
@@ -925,6 +971,54 @@ So names can hold any character, and the text alone says what a path
 means: reading one never depends on the asset's type. Queries needed a rule
 for names with spaces anyway (`:"Atraxa v1.2"`), and it is the one Scryfall
 syntax already uses for values (`o:"draw a card"`).
+
+## Sources and targets
+
+How a view's cards reach another asset. Two roles, and one operation
+between them.
+
+**The source is the view you are in.** A tile hands over the bucket it
+stands for, whole: printing, finish, attributes, as the source has them.
+From All Magic or a query pool that is what the grain says — the card at
+Cards, the printing at Printings; from an asset, the line itself. The
+target never guesses what a tile meant.
+
+**The target is set in the tree** (*Set as target*), and is what a tile's
+buttons act on. Its type decides what they do:
+
+| Target | `+` | `−` |
+| --- | --- | --- |
+| list pool | the bucket becomes a member (`+`) | it stops being one (`×`) |
+| checklist, exact checklist | the line asks for one more, made at 1 | one fewer, gone at 0 |
+| place | one more copy in that bucket | one fewer, gone at 0 |
+| place, from another place | one copy **moves** to the target (`→`) | one moves back (`←`) |
+
+A copy is in one place at a time, so place to place is never *add*. A
+step is one; copying a whole line or asset is an action of its own. Viewing
+the target itself is editing it. A decklist is not a target: its zones are.
+
+**How an asset is drawn**, so a tile can always say which bucket it is:
+
+- **A checklist, a tile per line.** Its lines can overlap — at least four
+  Bolts, at least one of them M10 — so a card's total is a number nobody
+  asked for (*Checking a deck against its decklist*). No grain toggle.
+- **A place or a pool, a tile per card.** A place's lines are disjoint, so
+  its total means something. A tile standing for one bucket has its
+  buttons; one standing for several has them greyed, and the bucket is
+  chosen where the card's buckets are listed — the detail, beside the
+  wall.
+
+**Changing a bucket is one operation: move n of B to B′.** B loses n, and
+is gone at 0; n of B′ join any B′ already there. It covers setting,
+changing or clearing a printing, finish or attribute — clearing is how a
+guess is taken back — for all of a line or a split of it; and, between
+two places, a copy moving. B′ is the same card; a printing must be of it,
+and a finish one it comes in. A pool has no counts: its member is B or
+B′, whole.
+
+**Attributes start as a fixed set** — condition, signed, altered, note —
+declared on first use, so keys do not drift. Language is not one: it is
+part of the printing.
 
 ## What falls out
 
