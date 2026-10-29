@@ -404,11 +404,20 @@ once `:` can name assets (Card-set algebra, below).
       checklist is drawn a tile per line (its lines overlap: a card's total
       is a number nobody asked for); a place or pool a tile per card, its
       buttons greyed when the card is in several buckets. Viewing the target
-      itself is editing it. **Not yet:** where to choose one bucket of a
-      several-bucket tile (the detail lists no buckets today); a decklist
-      as target (needs a zone picker — target its zone); move
-      transactions (two writes, not atomic: a failure between leaves the
-      copy in neither place, and says so).
+      itself is editing it. Selecting a tile lists its card's buckets in
+      the detail, each with the same buttons. **Not yet:** a decklist as
+      target (needs a zone picker — target its zone); move transactions
+      (two writes, not atomic: a failure between loses the copies, and
+      says so).
+- 🚧 **Changing a bucket.** One operation, `moveLines`: n of bucket B to
+      B′, B′ merging with any already there. Covers setting, changing and
+      clearing a printing, finish or attribute, all of a line or a split,
+      and copies moving between places. In the detail's Buckets section,
+      *Change…* on a row. Attributes are a fixed set to start — condition,
+      signed, altered, note — declared on first use; language is the
+      printing's. Printings come from the detail's own print run: no new
+      requests. **Not yet:** *Forget printings* for a whole card (the same
+      move per bucket); attributes beyond the fixed set.
 
 **Not yet:**
 - ⬜ **Duplicate**, and which menu items each type offers.
