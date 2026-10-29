@@ -127,12 +127,21 @@ buttons.
 2. ⬜ Ask what to pull, and get it grouped by where the cards are: *Binder 2:
    Sol Ring (C21 foil), Cultivate…*, *Bulk box: 30 Forest*. Cards I have
    nowhere are a separate shopping list.
-3. ⬜ Walk the shelves with that list and tick off each binder as I finish it.
+3. ⬜ **Fill a slot from a collection.** From one missing slot in the deck, I
+   choose a collection to look in — Paper, say — and the card panel lists
+   that collection's copies of the card: *Binder 2: Sol Ring (C21 foil) ×1*.
+   `←` on one moves it into the deck. The choice is required: nothing is
+   guessed for me.
+
+   Step 2 one slot at a time, and not journey F: F asks where a card is
+   anywhere, with no collection chosen; this asks whether *this* collection
+   can fill the slot.
+4. ⬜ Walk the shelves with that list and tick off each binder as I finish it.
    Stopping halfway is fine: the deck shows what has arrived and what is still
    to come.
-4. ⬜ If another deck is counting on the same Sol Ring, I am told *before* I
+5. ⬜ If another deck is counting on the same Sol Ring, I am told *before* I
    pull it, not when the other deck comes up short.
-5. ⬜ Weeks later I swap Cultivate for Kodama's Reach in the list. The deck box
+6. ⬜ Weeks later I swap Cultivate for Kodama's Reach in the list. The deck box
    shows it is out of date: Kodama's Reach to put in, Cultivate to take out,
    and which binder it goes back to.
 
