@@ -391,9 +391,13 @@ once `:` can name assets (Card-set algebra, below).
       the printing at Printings), the target only acts on it. No new
       requests. **Not yet:** *Save results as pool* (it pages a whole
       search: count requests first); dimming All Magic against the target.
-- ⬜ **Query pools, plain searches.** The pool panel running the query,
-      paged through the channel as an All Magic search is; *Save search as
-      pool* from All Magic.
+- ✅ **Query pools, plain searches.** Opening one is the pool panel running
+      its query, paged through the channel as an All Magic search is, with
+      the grain toggle and `+` to the target. *Save as pool* from All Magic
+      (at the top of the tree); in a pool, *Save* (once the search differs)
+      and *Save as…* (beside it). A pool keeps its query, not its results or
+      sort, so saving sends no requests. Filter controls are baked into the
+      text on save.
 
 **Not yet:**
 - ⬜ **Duplicate**, and which menu items each type offers.
