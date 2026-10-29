@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   builtContents,
   deckContents,
@@ -13,7 +13,13 @@ import {
   type DeckList,
   type HeldBucket,
   type Tile,
+  type TileGrain,
 } from "../lib/assets";
+import { QueryError } from "../lib/collections";
+import { countActiveFilters, toScryfallQuery, type CardFilter } from "../lib/filters";
+import { useRetained } from "../lib/panelState";
+import { CardFilters } from "./CardFilters";
+import type { Behind } from "./PoolPanel";
 import { cardStore, execute, select } from "../lib/db";
 import type { AssetType } from "../lib/ontology";
 import type { Card } from "../lib/types";
@@ -271,6 +277,9 @@ export function AssetView({
   onConvert,
   target,
   onSelectLines,
+  behindShown = false,
+  onBehind,
+  renderBehind,
   refreshKey = 0,
 }: {
   node: AssetNode;
@@ -290,6 +299,11 @@ export function AssetView({
   target?: LabTarget;
   /** A tile chosen: which asset's lines it is, for the detail's buckets. */
   onSelectLines?: (source: { id: string; type: AssetType }, oracleId: string) => void;
+  /** All Magic drawn behind the asset, dimmed: a place, checklist or pool. */
+  behindShown?: boolean;
+  onBehind?: (on: boolean) => void;
+  /** The pool panel, drawing All Magic with the asset in front. */
+  renderBehind?: (behind: Behind) => ReactNode;
   /** Bumped by an edit to the target — here or in All Magic — to read again. */
   refreshKey?: number;
 }) {
@@ -301,6 +315,16 @@ export function AssetView({
   // A deck whose decklist no longer exists: drawn from its places instead.
   const [lost, setLost] = useState(false);
   const [shown, setShown] = useState<Record<string, number>>({});
+  // The search, kept as the pool panel keeps its own, under the same key: it
+  // carries over when All Magic is drawn behind.
+  const stateKey = `asset:${node.id}`;
+  const [filter, setFilter] = useRetained<CardFilter>(stateKey, "filter", {});
+  const [showFilters, setShowFilters] = useRetained(stateKey, "showFilters", false);
+  const activeFilters = countActiveFilters(filter);
+  const query = toScryfallQuery(filter).trim();
+  // Half-typed: said, and the last answer kept.
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [front, setFront] = useState<Record<"cards" | "printings", Tile[]> | null>(null);
 
   // A refresh is not a reopen (bug 006): reset only when the asset changes;
   // an edit reads it again and swaps the new in over the old, keeping the
@@ -328,7 +352,10 @@ export function AssetView({
         return [
           {
             // A checklist a tile per line: its lines overlap, a card's total says nothing.
-            tiles: await lineContents(lab, store, node.id, { perLine: node.type !== "place" }),
+            tiles: await lineContents(lab, store, node.id, {
+              by: node.type === "place" ? "card" : "line",
+              query,
+            }),
             atLeast: node.type === "checklist",
             source: { id: node.id, type: node.type },
           },
@@ -336,7 +363,7 @@ export function AssetView({
       if (node.type === "list pool")
         return [
           {
-            tiles: await memberContents(lab, store, node.id),
+            tiles: await memberContents(lab, store, node.id, { query }),
             members: true,
             source: { id: node.id, type: node.type },
           },
@@ -370,16 +397,39 @@ export function AssetView({
         if (!live) return;
         setSections(s);
         setError(null);
+        setQueryError(null);
       })
-      .catch(
-        (e) => live && setError(e instanceof Error ? e.message : String(e)),
-      );
+      .catch((e) => {
+        if (!live) return;
+        if (e instanceof QueryError) setQueryError(e.message);
+        else setError(e instanceof Error ? e.message : String(e));
+      });
     return () => {
       live = false;
     };
     // The path as text: a reloaded tree hands over new arrays for the same path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node.id, node.type, node.path.join("/"), version, refreshKey]);
+  }, [node.id, node.type, node.path.join("/"), version, refreshKey, query]);
+
+  // In front of All Magic: the asset's tiles at each grain, unsearched — the
+  // search goes to Scryfall, and a tile shows where its card turns up.
+  useEffect(() => {
+    const flatType = node.type === "place" || node.type === "checklist" || node.type === "exact checklist" || node.type === "list pool";
+    if (!behindShown || !flatType) return setFront(null);
+    let live = true;
+    (async () => {
+      const lab = { select, execute };
+      const store = await cardStore();
+      const at = (by: TileGrain) =>
+        node.type === "list pool" ? memberContents(lab, store, node.id, { by }) : lineContents(lab, store, node.id, { by });
+      const line = node.type === "checklist" || node.type === "exact checklist";
+      const [cards, printings] = await Promise.all([at(line ? "line" : "card"), at(line ? "line" : "printing")]);
+      if (live) setFront({ cards, printings });
+    })().catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      live = false;
+    };
+  }, [node.id, node.type, behindShown, version, refreshKey]);
 
   const all = sections?.flatMap((s) => s.tiles) ?? [];
   const copies = all.reduce((n, t) => n + t.count, 0);
@@ -399,10 +449,66 @@ export function AssetView({
         )
       : null;
 
-  return (
-    <div className="pool asset-view">
-      <div className="toolbar">
-        <h1>{node.name}</h1>
+  /** One tile: on the asset's own wall, or in All Magic's place in front of it. */
+  const drawTile = (t: Tile, s: Section) => (
+    <div
+      key={`${t.oracleId}:${t.buckets.length === 1 ? bucketKey(bucketOf(t)!) : ""}:${t.state ?? ""}`}
+      className={[
+        "card-tile",
+        selectedId === t.card.id && "selected",
+        t.standIn && "stand-in",
+        t.state === "missing" && "dim",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      onClick={() => {
+        onSelect(t.card);
+        if (s.source) onSelectLines?.(s.source, t.oracleId);
+      }}
+      onMouseEnter={() => onHoverCard?.(t.card)}
+      onMouseLeave={() => onHoverCard?.(null)}
+      title={[
+        t.card.name,
+        t.state === "missing" && `${t.count} on the list, not in this deck`,
+        t.state === "extra" && `${t.count} in this deck, not on the list`,
+        ...(t.state === "missing"
+          ? []
+          : t.buckets.map((b) => describe(b, s.members))),
+        t.standIn && "Shown as Scryfall's pick: no printing recorded",
+      ]
+        .filter(Boolean)
+        .join("\n")}
+    >
+      <CardImage card={t.card} size="small" />
+      {!s.members && (
+        <span className="qty-badge">{bounds(t, s.atLeast)}</span>
+      )}
+      {target && s.source && t.state !== "missing" && (
+        <TileControls tile={t} source={s.source} target={target} />
+      )}
+      {t.standIn && <span className="stand-in-badge">stand-in</span>}
+    </div>
+  );
+
+  // A place, checklist or pool: one wall of its own lines, which a search
+  // narrows locally and All Magic can be drawn behind.
+  const flat =
+    node.type === "place" ||
+    node.type === "checklist" ||
+    node.type === "exact checklist" ||
+    node.type === "list pool";
+  // The asset's tiles in front of All Magic, as a section says how to draw them.
+  const frontSection: Section = {
+    source: { id: node.id, type: node.type },
+    atLeast: node.type === "checklist",
+    members: node.type === "list pool",
+    tiles: [],
+  };
+  const behindNow = flat && behindShown && !!renderBehind;
+
+  const header = (
+    <div className="toolbar">
+      <h1>{node.name}</h1>
         <span className="asset-view-path">
           {/* One kind to the eye: the toggle says whether it is exact. */}/
           {node.path.join("/")} ·{" "}
@@ -469,7 +575,74 @@ export function AssetView({
             </select>
           </label>
         )}
+    </div>
+  );
+
+  if (behindNow && front)
+    return (
+      <div className="pool asset-view">
+        {header}
+        {renderBehind!({
+          name: node.name,
+          present: new Set(front.cards.map((t) => t.oracleId)),
+          tilesAt: (grain) => {
+            const m = new Map<string, ReactNode[]>();
+            for (const t of front[grain]) {
+              const k =
+                grain === "cards"
+                  ? t.oracleId
+                  : `${t.oracleId}|${t.buckets[0]?.printingId ?? ""}`;
+              m.set(k, [...(m.get(k) ?? []), drawTile(t, frontSection)]);
+            }
+            return m;
+          },
+          onHide: () => onBehind?.(false),
+        })}
       </div>
+    );
+
+  return (
+    <div className="pool asset-view">
+      {header}
+
+      {flat && (
+        <>
+          <div className="toolbar">
+            <input
+              className="search-input"
+              placeholder={`Search ${node.name} — t:creature c:r mv<=3`}
+              autoCorrect="off"
+              autoCapitalize="off"
+              autoComplete="off"
+              spellCheck={false}
+              value={filter.query ?? ""}
+              onChange={(e) => setFilter({ ...filter, query: e.target.value })}
+            />
+            <button
+              className={showFilters || activeFilters ? "primary" : ""}
+              onClick={() => setShowFilters((v) => !v)}
+              title="Extra constraints, combined with whatever you have searched for"
+            >
+              More filters{activeFilters ? ` (${activeFilters})` : ""}
+            </button>
+            {onBehind && renderBehind && (
+              <label
+                className="toggle"
+                title={`Also draw All Magic, dimmed, around ${node.name}: paged from Scryfall as All Magic is`}
+              >
+                <input
+                  type="checkbox"
+                  checked={false}
+                  onChange={() => onBehind(true)}
+                />
+                Show not in {node.name}
+              </label>
+            )}
+          </div>
+          {showFilters && <CardFilters filter={filter} onChange={setFilter} />}
+          {queryError && <div className="status error">{queryError}</div>}
+        </>
+      )}
 
       {sections && (
         <div className="stats">
@@ -575,56 +748,7 @@ export function AssetView({
                     </h3>
                   )}
                   <div className="card-grid">
-                    {g.tiles.map((t) => (
-                      <div
-                        key={`${t.oracleId}:${t.buckets.length === 1 ? bucketKey(bucketOf(t)!) : ""}:${t.state ?? ""}`}
-                        className={[
-                          "card-tile",
-                          selectedId === t.card.id && "selected",
-                          t.standIn && "stand-in",
-                          t.state === "missing" && "dim",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        onClick={() => {
-                          onSelect(t.card);
-                          if (s.source) onSelectLines?.(s.source, t.oracleId);
-                        }}
-                        onMouseEnter={() => onHoverCard?.(t.card)}
-                        onMouseLeave={() => onHoverCard?.(null)}
-                        title={[
-                          t.card.name,
-                          t.state === "missing" &&
-                            `${t.count} on the list, not in this deck`,
-                          t.state === "extra" &&
-                            `${t.count} in this deck, not on the list`,
-                          ...(t.state === "missing"
-                            ? []
-                            : t.buckets.map((b) => describe(b, s.members))),
-                          t.standIn &&
-                            "Shown as Scryfall's pick: no printing recorded",
-                        ]
-                          .filter(Boolean)
-                          .join("\n")}
-                      >
-                        <CardImage card={t.card} size="small" />
-                        {!s.members && (
-                          <span className="qty-badge">
-                            {bounds(t, s.atLeast)}
-                          </span>
-                        )}
-                        {target && s.source && t.state !== "missing" && (
-                          <TileControls
-                            tile={t}
-                            source={s.source}
-                            target={target}
-                          />
-                        )}
-                        {t.standIn && (
-                          <span className="stand-in-badge">stand-in</span>
-                        )}
-                      </div>
-                    ))}
+                    {g.tiles.map((t) => drawTile(t, s))}
                   </div>
                 </div>
               ))}

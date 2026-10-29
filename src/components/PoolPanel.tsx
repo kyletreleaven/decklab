@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   collectionItems,
   collectionOracleIds,
@@ -115,6 +115,7 @@ export function PoolPanel({
   activePrintings = {},
   compact = false,
   grainToggle = false,
+  behind,
 }: {
   selectedId: string | null;
   onSelect: (card: Card) => void;
@@ -263,6 +264,14 @@ export function PoolPanel({
    * is wanted (the All Magic view); absent, the panel draws cards.
    */
   grainToggle?: boolean;
+  /**
+   * An asset drawn with All Magic behind it: its own tiles take All Magic's
+   * place wherever it has presence, the rest dimmed (docs/inventory.md →
+   * *Drawing an asset against All Magic*). `tilesAt` keys them by what they
+   * evict: an oracle id at Cards; `oracle|printing` at Printings, and
+   * `oracle|` for a line naming no printing, drawn leading its card.
+   */
+  behind?: Behind;
 }) {
   const [filter, setFilter] = useRetained<CardFilter>(stateKey, "filter", initialFilter);
   const [showFilters, setShowFilters] = useRetained(stateKey, "showFilters", false);
@@ -408,6 +417,9 @@ export function PoolPanel({
   // already at printing grain.
   const offersGrain = grainToggle && drawn === "universe";
   const grain = offersGrain ? chosenGrain : "cards";
+  const inFront = useMemo(() => behind?.tilesAt(grain), [behind, grain]);
+  // Cards whose leading tiles are drawn, this render.
+  const led = new Set<string>();
 
   // Also the fetch effect's only dependency — see `fetchSignature`.
   const signature = fetchSignature({
@@ -952,6 +964,13 @@ export function PoolPanel({
           </div>
         )}
 
+        {behind && (
+          <label className="toggle" title={`Draw ${behind.name} alone`}>
+            <input type="checkbox" checked onChange={behind.onHide} />
+            Show not in {behind.name}
+          </label>
+        )}
+
         {/* Narrows the drawn set to what you own. Offered by the deck pool,
             where you build from your cards; not by the collection pool, where
             you are recording them and All Magic is the only source. */}
@@ -1037,9 +1056,26 @@ export function PoolPanel({
 
         {layout === "wall" ? (
         <div className="card-grid">
-          {visible.map((row) => {
+          {visible.flatMap((row) => {
             const card = row.card;
-            const dimmed = isDimmed(card.oracleId, lit ? inCollection : null, showNotIn);
+            // An asset drawn in front: its tiles take All Magic's place wherever
+            // it has presence (docs/inventory.md → *Drawing an asset against All
+            // Magic*). At Printings, a line naming no printing leads its card.
+            const lead: ReactNode[] = [];
+            if (inFront) {
+              if (grain === "cards") {
+                const own = inFront.get(card.oracleId);
+                if (own) return own;
+              } else {
+                if (!led.has(card.oracleId)) {
+                  led.add(card.oracleId);
+                  lead.push(...(inFront.get(`${card.oracleId}|`) ?? []));
+                }
+                const own = inFront.get(`${card.oracleId}|${card.id}`);
+                if (own) return [...lead, ...own];
+              }
+            }
+            const dimmed = behind ? true : isDimmed(card.oracleId, lit ? inCollection : null, showNotIn);
             // At printing grain the count is what you hold in *this* row; at
             // oracle grain it is what the destination holds of that card.
             // The entry's own count, since `quantities` sums a printing's
@@ -1048,7 +1084,8 @@ export function PoolPanel({
             // card drops its badge without the list being refetched.
             const count = heldIn(card);
             const step = stepperFor(row);
-            return (
+            return [
+              ...lead,
               <div
                 key={row.key}
                 className={[
@@ -1066,7 +1103,7 @@ export function PoolPanel({
                 onDoubleClick={() => step?.inc?.()}
                 title={[
                   card.name,
-                  dimmed && `not in ${lit!.name}`,
+                  dimmed && `not in ${behind?.name ?? lit!.name}`,
                   // Double-click adds, which is otherwise undiscoverable — and
                   // where it lands is exactly the thing that differs between
                   // this grid and the card panel.
@@ -1118,14 +1155,16 @@ export function PoolPanel({
                 {row.kind === "item" && row.item.finish !== "nonfoil" && (
                   <span className="finish-badge">{row.item.finish}</span>
                 )}
-              </div>
-            );
+              </div>,
+            ];
           })}
         </div>
         ) : (
           visible.map((row) => {
             const card = row.card;
-            const dimmed = isDimmed(card.oracleId, lit ? inCollection : null, showNotIn);
+            const dimmed = behind
+              ? !behind.present.has(card.oracleId)
+              : isDimmed(card.oracleId, lit ? inCollection : null, showNotIn);
             // The entry's own count, since `quantities` sums a printing's
             // finishes and would show a foil and a nonfoil the same total. But
             // suppressed once the destination no longer holds it, so a removed
@@ -1204,4 +1243,14 @@ export function PoolPanel({
       </div>
     </div>
   );
+}
+
+/** An asset drawn in front of All Magic: see `PoolPanel`'s `behind`. */
+export interface Behind {
+  name: string;
+  /** Oracle ids it has presence on. */
+  present: Set<string>;
+  tilesAt: (grain: "cards" | "printings") => Map<string, ReactNode[]>;
+  /** Back to the asset alone. */
+  onHide: () => void;
 }

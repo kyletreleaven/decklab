@@ -34,6 +34,14 @@ export interface CompileOptions {
   alias?: string;
   /** Placeholders start at this number plus one. */
   paramOffset?: number;
+  /**
+   * SQL true when the row's printing is not known — a bucket with no
+   * printing, drawn with some printing's card-level fields. A printing-level
+   * term is then unknown (`NULL`), and matches neither way: SQL's three-valued
+   * logic carries it through `and`, `or` and `not` (docs/inventory.md →
+   * *Querying a bucket that leaves a key out*). Absent, every printing is known.
+   */
+  unknownPrinting?: string;
 }
 
 const COLOUR_LETTERS = ["W", "U", "B", "R", "G"] as const;
@@ -47,6 +55,13 @@ const COLOUR_NAMES: Record<string, string> = {
 };
 
 const RARITY_RANK = ["common", "uncommon", "rare", "mythic"];
+
+/**
+ * Fields whose value can differ between printings of a card: unknown for a
+ * bucket with no printing. The rest are the card's, the same on every
+ * printing. Listed in docs/query-language.md → *Field mapping*.
+ */
+export const PRINTING_LEVEL: ReadonlySet<string> = new Set(["r", "rarity", "s", "set", "e", "edition", "a", "ft", "game"]);
 
 /** Fields that are matched as substrings of a text column. */
 const TEXT_FIELDS: Record<string, string> = {
@@ -151,7 +166,7 @@ export function compile(
   node: Node,
   options: CompileOptions = {},
 ): CompiledQuery {
-  const { alias = "c", paramOffset = 0 } = options;
+  const { alias = "c", paramOffset = 0, unknownPrinting } = options;
   const params: unknown[] = [];
 
   /** Bind a value and return its placeholder. */
@@ -381,7 +396,9 @@ export function compile(
   function walk(node: Node): string {
     switch (node.kind) {
       case "term":
-        return term(node);
+        return unknownPrinting && node.field !== null && PRINTING_LEVEL.has(node.field.toLowerCase())
+          ? `(CASE WHEN ${unknownPrinting} THEN NULL ELSE (${term(node)}) END)`
+          : term(node);
       case "not":
         return `NOT (${walk(node.node)})`;
       case "and":

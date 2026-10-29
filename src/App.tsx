@@ -379,6 +379,8 @@ export default function App() {
    * detail's Buckets section lists. Only while that card is the one
    * selected, in an asset view.
    */
+  /** Asset views drawing All Magic behind the asset, by asset id. */
+  const [behindShown, setBehindShown] = useState<Set<string>>(new Set());
   const [selectedLines, setSelectedLines] = useState<{ sourceId: string; oracleId: string } | null>(null);
   const linesSource =
     view.kind === "asset" && selectedLines && selectedCard?.oracleId === selectedLines.oracleId
@@ -1117,6 +1119,8 @@ export default function App() {
 
         {currentAsset && currentAsset.type !== "query pool" && (
           <AssetView
+            // Per asset: its search is retained per asset, read once on mount.
+            key={currentAsset.id}
             node={currentAsset}
             decklists={decklists}
             onSetList={setList}
@@ -1127,6 +1131,32 @@ export default function App() {
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
+            behindShown={behindShown.has(currentAsset.id)}
+            onBehind={(on) =>
+              setBehindShown((s) => {
+                const next = new Set(s);
+                if (on) next.add(currentAsset.id);
+                else next.delete(currentAsset.id);
+                return next;
+              })
+            }
+            // All Magic, the asset in front: paged as All Magic is, and the
+            // search the asset view had, under the same panel key.
+            renderBehind={(behind) => (
+              <PoolPanel
+                key={`behind:${currentAsset.id}`}
+                stateKey={`asset:${currentAsset.id}`}
+                selectedId={selectedCard?.id ?? null}
+                onSelect={setSelectedCard}
+                onHoverCard={hoverCard}
+                destination={labDestination}
+                source={{ kind: "universe" }}
+                activePrintings={activePrintings}
+                grainToggle
+                refreshKey={refreshKey}
+                behind={behind}
+              />
+            )}
           />
         )}
 

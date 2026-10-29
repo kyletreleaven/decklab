@@ -314,12 +314,33 @@ describe("the lab's assets, for display", () => {
     await stepLine(sqlOver(db), id, { oracleId: "bolt" }, 1);
     await stepLine(sqlOver(db), id, { oracleId: "bolt", printingId: "bolt-m10" }, 1);
     await stepLine(sqlOver(db), id, { oracleId: "bolt" }, 1);
-    const per = await lineContents(sqlOver(db), sqlOver(cards), id, { perLine: true });
+    const per = await lineContents(sqlOver(db), sqlOver(cards), id, { by: "line" });
     expect(per.map((t) => [t.card.id, t.count, t.standIn])).toEqual([
       ["bolt-2x2", 2, true],
       ["bolt-m10", 1, false],
     ]);
     expect((await lineContents(sqlOver(db), sqlOver(cards), id)).map((t) => t.count)).toEqual([3]);
+  });
+
+  it("searches an asset's lines locally: a printing-level term is unknown on a line with no printing", async () => {
+    const id = await createAsset(sqlOver(db), "root", "checklist");
+    for (const b of [{ oracleId: "bolt" }, { oracleId: "bolt", printingId: "bolt-m10" }, { oracleId: "sol" }, { oracleId: "sol", printingId: "sol-c21" }])
+      await stepLine(sqlOver(db), id, b, 1);
+    const found = async (query: string) =>
+      (await lineContents(sqlOver(db), sqlOver(cards), id, { by: "line", query })).map((t) =>
+        t.standIn ? `${t.oracleId} any` : t.card.id,
+      );
+    expect(await found("name:bolt")).toEqual(["bolt any", "bolt-m10"]);
+    // Unknown matches neither way, whichever way it is asked.
+    expect(await found("s:m10")).toEqual(["bolt-m10"]);
+    expect(await found("-s:m10")).toEqual(["sol-c21"]);
+    expect(await found("r<rare")).toEqual(["bolt-m10", "sol-c21"]);
+    expect(await found("-a:anyone")).toEqual(["bolt-m10", "sol-c21"]);
+    // A true `or` needs no answer from the unknown side; an `and` does.
+    expect(await found("s:m10 or name:sol")).toEqual(["bolt-m10", "sol any", "sol-c21"]);
+    expect(await found("s:c21 name:sol")).toEqual(["sol-c21"]);
+    expect(await found("")).toHaveLength(4);
+    await expect(found("s:")).rejects.toThrow();
   });
 
   it("steps a target's line, as its type takes it", async () => {

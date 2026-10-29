@@ -293,3 +293,24 @@ describe("compile — unsupported", () => {
     expect(unsupportedTerms(parse("t:creature c:r mv<=3")!)).toEqual([]);
   });
 });
+
+describe("compile — a printing not known", () => {
+  const unknown = (input: string) =>
+    compile(parse(input)!, { unknownPrinting: "c.unknown_printing = 1" }).sql.replace(/\s+/g, " ");
+
+  it("makes a printing-level term unknown, and leaves a card-level one alone", () => {
+    expect(unknown("s:m10")).toBe("(CASE WHEN c.unknown_printing = 1 THEN NULL ELSE (c.set_code = $1) END)");
+    expect(unknown("r>=rare")).toMatch(/^\(CASE WHEN c\.unknown_printing = 1 THEN NULL ELSE/);
+    expect(unknown("t:creature")).toBe(sql("t:creature"));
+    expect(unknown("bolt")).toBe(sql("bolt"));
+  });
+
+  it("guards inside the logic, so not, and, or see the unknown", () => {
+    expect(unknown("-a:x")).toMatch(/^NOT \(\(CASE WHEN/);
+    expect(unknown("s:m10 or t:creature")).toContain(" OR c.type_line LIKE");
+  });
+
+  it("changes nothing without the option", () => {
+    expect(q("s:m10").sql).toBe("c.set_code = $1");
+  });
+});

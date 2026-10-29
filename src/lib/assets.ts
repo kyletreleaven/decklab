@@ -4,6 +4,8 @@ import type { Sql } from "./sql";
 import { scryfallLayer, standIns, type Layer } from "./standIn";
 import type { Card } from "./types";
 import { isA, type AssetType } from "./ontology";
+import { QueryError } from "./collections";
+import { compileQuery } from "./query";
 
 /**
  * Reading the new model's tables (`src-tauri/migrations/lab/1000_assets.sql`)
@@ -93,12 +95,20 @@ interface LineRow {
  * Lines as tiles, sorted by name. A tile draws the printing it holds most
  * copies of; one whose buckets name no printing draws the stand-in.
  */
-async function tiles(store: Sql, lines: LineRow[], layers: Layer[], perLine = false): Promise<Tile[]> {
+/** What a tile stands for: a card, a card's printing (finish and attributes dropped), or a line. */
+export type TileGrain = "card" | "printing" | "line";
+
+async function tiles(store: Sql, lines: LineRow[], layers: Layer[], by: TileGrain = "card"): Promise<Tile[]> {
   // Keyed by card, or — a tile per line — by bucket; either way each key's
   // lines are one card's.
   const byKey = new Map<string, LineRow[]>();
   for (const l of lines) {
-    const k = perLine ? JSON.stringify([l.oracle_id, l.printing_id, l.finish, l.attrs]) : l.oracle_id;
+    const k =
+      by === "line"
+        ? JSON.stringify([l.oracle_id, l.printing_id, l.finish, l.attrs])
+        : by === "printing"
+          ? JSON.stringify([l.oracle_id, l.printing_id])
+          : l.oracle_id;
     byKey.set(k, [...(byKey.get(k) ?? []), l]);
   }
 
@@ -157,8 +167,47 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[], perLine = fa
 }
 
 /**
+ * The lines a search matches, answered from the card store: every card an
+ * asset holds is there, so no request. A line naming a printing is tested on
+ * it; one naming none on a printing of the card with its printing-level
+ * terms unknown, so they match neither way (docs/inventory.md → *Querying a
+ * bucket that leaves a key out*). No query, every line.
+ */
+async function matching(store: Sql, lines: LineRow[], query: string | undefined, layers: Layer[]): Promise<LineRow[]> {
+  if (!query?.trim()) return lines;
+  // Placeholders after the ids: compiled once per chunk, at that chunk's offset.
+  const stand = await standIns(layers, [...new Set(lines.filter((l) => l.printing_id === "").map((l) => l.oracle_id))]);
+  const asked = [
+    ...[...new Set(lines.map((l) => l.printing_id).filter((p) => p !== ""))].map((id) => ({ id, unknown: 0 })),
+    ...[...stand.values()].map((id) => ({ id, unknown: 1 })),
+  ];
+  const known = new Set<string>(); // printing ids matched
+  const unknown = new Set<string>(); // oracle ids matched, printing unknown
+  for (let i = 0; i < asked.length; i += 400) {
+    const chunk = asked.slice(i, i + 400);
+    const holes = (u: number) =>
+      chunk
+        .map((a, j) => (a.unknown === u ? `$${j + 1}` : null))
+        .filter(Boolean)
+        .join(", ") || "NULL";
+    const compiled = compileQuery(query, { alias: "c", paramOffset: chunk.length, unknownPrinting: "c.unknown_printing = 1" });
+    if (compiled.error) throw new QueryError(compiled.error.message, compiled.error.at);
+    const rows = await store.select<{ id: string; oracle_id: string; unknown_printing: number }>(
+      `SELECT c.id, c.oracle_id, c.unknown_printing FROM (
+         SELECT *, 0 AS unknown_printing FROM cards WHERE id IN (${holes(0)})
+         UNION ALL
+         SELECT *, 1 AS unknown_printing FROM cards WHERE id IN (${holes(1)})
+       ) c${compiled.sql ? ` WHERE ${compiled.sql}` : ""}`,
+      [...chunk.map((a) => a.id), ...compiled.params],
+    );
+    for (const r of rows) (r.unknown_printing ? unknown : known).add(r.unknown_printing ? r.oracle_id : r.id);
+  }
+  return lines.filter((l) => (l.printing_id === "" ? unknown.has(l.oracle_id) : known.has(l.printing_id)));
+}
+
+/**
  * A place's, checklist's or exact checklist's lines: one tile per card, or
- * `perLine`, one per line. The count is the same number for each; the type
+ * `by` another grain: a card's printing, or a line. The count is the same number for each; the type
  * says what it means: held, at least, exactly. A checklist is drawn per line:
  * its lines can overlap — at least four Bolts, at least one of them M10 —
  * so a card's total is a number nobody asked for.
@@ -167,13 +216,17 @@ export async function lineContents(
   lab: Sql,
   store: Sql,
   id: string,
-  { perLine = false, layers = [scryfallLayer(store)] }: { perLine?: boolean; layers?: Layer[] } = {},
+  {
+    by = "card",
+    query,
+    layers = [scryfallLayer(store)],
+  }: { by?: TileGrain; query?: string; layers?: Layer[] } = {},
 ): Promise<Tile[]> {
   const lines = await lab.select<LineRow>(
     "SELECT oracle_id, printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1",
     [id],
   );
-  return tiles(store, lines, layers, perLine);
+  return tiles(store, await matching(store, lines, query, layers), layers, by);
 }
 
 export interface ZoneContents {
@@ -228,7 +281,7 @@ export async function deckContents(
       zone,
       ...(target && { target: { id: target.id, path: target.path, type: target.type } }),
       tiles: target
-        ? await lineContents(lab, store, target.id, { layers, perLine: perLine && isA(target.type, "checklist") })
+        ? await lineContents(lab, store, target.id, { layers, by: perLine && isA(target.type, "checklist") ? "line" : "card" })
         : [],
     });
   }
@@ -704,12 +757,17 @@ export async function removeMember(lab: Sql, poolId: string, bucket: Bucket, at 
  * tile's `count` is how many of the card's buckets are members, and its
  * buckets say which.
  */
-export async function memberContents(lab: Sql, store: Sql, poolId: string, layers = [scryfallLayer(store)]): Promise<Tile[]> {
+export async function memberContents(
+  lab: Sql,
+  store: Sql,
+  poolId: string,
+  { by = "card", query, layers = [scryfallLayer(store)] }: { by?: TileGrain; query?: string; layers?: Layer[] } = {},
+): Promise<Tile[]> {
   const lines = await lab.select<LineRow>(
     "SELECT oracle_id, printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1",
     [poolId],
   );
-  return tiles(store, lines, layers);
+  return tiles(store, await matching(store, lines, query, layers), layers, by);
 }
 
 /* ---------- targets ---------- */
