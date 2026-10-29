@@ -402,6 +402,24 @@ choice, the shape *No global ownership* in `TODO.md` asks for. Sum is right
 *because* the parts are locations. Unions need not be disjoint from each
 other: the Cube box is in Paper and also is the Cube.
 
+**The first kind: a sum of its children.** A sum collection's definition
+is its children in the tree, so membership is where things sit and there
+is no member list to keep. It sums each child that is a collection; a child
+that is itself a sum contributes its own sum, recursively. Anything else
+under it — a folder, a checklist, a pool — contributes nothing, so a
+folder still only organises: grouping binders inside Paper takes a nested
+sum, not a folder. The friend's binder stays out by sitting elsewhere.
+
+- **A deck is a special sum**: of its zones, which are places. A deck under
+  Paper counts, and its copies are named by where they are, *Atraxa deck ›
+  main*.
+- **A sum holds no lines of its own and is not a target.** Copies only go
+  into places. Its view is the sum, drawn like a place, with each bucket
+  naming the place it is in; a move acts on that place.
+- **The cost:** a place counts only toward its ancestors. Overlapping sums,
+  the Cube box in both Paper and the Cube, want a later kind with explicit
+  members.
+
 **Several inventories.** A friend's binder, tracked for trade reference, is an
 ordinary location in *their* inventory. A collection's total changes when a
 move crosses from one inventory to another. All Magic is the source outside
@@ -539,8 +557,9 @@ printing* in a checklist — so converting is a change of type alone, and the
 lab keeps every kind's lines in one table for that reason. Asymmetric on
 purpose: a place is a collection, so is a filtered collection (later), and
 any of them can become a checklist; a checklist only ever becomes a place.
-**A deck is not a collection** and does not convert, nor does a decklist:
-a deck is defined against the decklist it builds, so every deck has one. A
+**A deck does not convert**, nor does a decklist. A deck is a collection,
+the sum of its zones (*Unions*), but it is defined against the decklist it
+builds, so every deck has one. A
 conversion is refused when it would leave a zone of the wrong kind.
 
 ### Every decklist has an oracle projection
@@ -869,7 +888,8 @@ nests sub-assets, and a pure folder is an asset with no type.
 and whether a binder holds a card never depends on which folder it sits in.
 That holds for an asset acting as a folder too: **a definition does not refer
 to its children**, at least not automatically. A binder holding three sheets
-is not their union unless its definition says so; a deck holding a decklist
+is not their union unless its definition says so — a sum collection's
+does, and is nothing else (*Unions*); a deck holding a decklist
 is not thereby built from it. References go by path, and renaming or moving
 an asset rewrites every reference to it in the same transaction, so a
 reference follows its target rather than staying with the old position.

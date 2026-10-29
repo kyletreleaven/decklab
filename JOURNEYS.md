@@ -135,7 +135,8 @@ buttons.
 
    Step 2 one slot at a time, and not journey F: F asks where a card is
    anywhere, with no collection chosen; this asks whether *this* collection
-   can fill the slot.
+   can fill the slot. Needs journey E step 3 first: Paper is a sum of
+   places.
 4. ⬜ Walk the shelves with that list and tick off each binder as I finish it.
    Stopping halfway is fine: the deck shows what has arrived and what is still
    to come.
@@ -162,6 +163,11 @@ printing" is the first wall: today a deck entry must name a printing.
    unknown — and fill in the detail later, as I sort.
 3. ⬜ "My collection" is those places added up, and I pick which ones count:
    the friend's binder I track for trades does not.
+
+   First piece: a **sum collection** that sums its children in the tree,
+   recursively, a deck counting as the sum of its zones. Picking is placing:
+   the friend's binder sits outside it. Design in
+   [`docs/inventory.md`](docs/inventory.md) → *Unions*.
 4. ⬜ Put a checklist on my collection: all of MH3, foils included. I see progress
    as a number, and the missing cards as a shopping list.
 5. ⬜ Moving a card from a binder into a deck box changes nothing about my
