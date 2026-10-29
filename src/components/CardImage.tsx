@@ -35,7 +35,9 @@ export function CardImage({
   }, [card.id, size, face]);
 
   if (!src) {
-    return <div className="placeholder">{card.name}</div>;
+    // The image's class too, so whatever box it is given holds while there
+    // is no image yet (bug 007).
+    return <div className={["placeholder", className].filter(Boolean).join(" ")}>{card.name}</div>;
   }
 
   return <img className={className} src={src} alt={card.name} loading="lazy" />;

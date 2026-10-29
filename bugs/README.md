@@ -17,6 +17,7 @@ digging, then read *Traps* for the patterns that have produced bugs before.
 | [004](004-spacecraft-commander-flagged-illegal.md) | open · cause found | A legendary Spacecraft commander is flagged "cannot be a commander" |
 | [005](005-lab-load-rate-limited.md) | open · fix in progress | Loading the library into the lab drew a 429 from Scryfall |
 | [006](006-asset-view-scroll-resets-on-edit.md) | fixed, not yet committed | An asset view jumps back to the top when a tile's button is pressed |
+| [007](007-printing-picker-flashes-and-fetches.md) | open · jump fix applied, awaiting repro | The detail's image flashes while moving through the printing picker; each highlight may fetch an image |
 
 ## Writing a report
 

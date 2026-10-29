@@ -509,13 +509,24 @@ textarea:focus {
 
 /* Fixed aspect, as on the tiles: an image still loading has no height of its
    own, and a collapsing image moves everything under it, including the printing
-   menu's trigger, so the open menu jumps as it follows. */
-.detail img.art {
+   menu's trigger, so the open menu jumps as it follows. The placeholder too,
+   drawn while there is no image at all (bug 007). */
+.detail .art {
   width: 100%;
   aspect-ratio: 488 / 680;
   border-radius: 10px;
   display: block;
   margin-bottom: 12px;
+}
+
+.detail .placeholder.art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  background: var(--bg-raised);
+  color: var(--text-faint);
 }
 
 .detail h2 {
