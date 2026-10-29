@@ -403,7 +403,8 @@ population: `lo ≤ population(bucket) ≤ hi`.
 violates it. Decks are the case that needs `= k`.
 
 **Unlisted cards: excluded or unconstrained.** Every goal has one bit
-saying what holds for cards it does not list:
+saying what holds for cards it does not list. (As built, the kind decides
+it, and only a cap will store it: *Kinds of checklist*.)
 
 | Unlisted cards are… | Interval | Examples |
 | --- | --- | --- |
@@ -447,6 +448,53 @@ copies, and they are disjoint from every other location's. A location is the
 a goal reads populations, so a location read as a goal means the population
 equalities its residuals imply (*Sol Ring = 3*, *Sol Ring C21 foil = 1*), not
 *Sol Ring, printing absent, = 2*.
+
+### Kinds of checklist
+
+The interval above is the general shape. What is built splits it into
+kinds, **each with one meaning**, so a line is only ever a bucket and a
+count, and the kind says how to read the count:
+
+| Kind | A line means | Unlisted cards |
+| --- | --- | --- |
+| **place** (a collection) | `n` held | — |
+| **checklist** | at least `n` | anything: `≥ 0` says nothing |
+| **exact checklist** | exactly `n` | excluded: *exactly these* leaves no other reading |
+| **cap** (later) | at most `n` | a real choice: free, or excluded |
+
+- **An exact checklist is a checklist**: whatever meets *exactly n* meets *at
+  least n*, so it refines the checklist with the same lines. To the eye they
+  are one thing, *checklist*, with *At least | Exactly* in its view.
+- **A decklist's commander and main are exact**; its sideboard is either.
+  A deck's zones are places. Other kinds are refused there.
+- **The unlisted bit is a cap's alone.** For a checklist it could only say
+  *any*, which is what unlisted already means; for an exact one, only
+  *excluded*, which is what exact already means. With caps it comes back as
+  theirs: *at most one Sol Ring* leaves everything else free; *these and
+  nothing else, at most this many each* is a whitelist with limits.
+- **Compounds, later: min, max, intersect.** Exact is then not a primitive
+  but `intersect(checklist, cap with unlisted excluded)` over the same
+  lines. Per bucket, *max* of two checklists is the stronger of each line
+  and *min* the weaker; *intersect* is both holding, which equals
+  per-bucket max only when no two lines' patterns overlap — one C21 Sol
+  Ring meets both *≥ 1 Sol Ring, any* and *≥ 1 Sol Ring, C21*. That is the
+  matching in *Checking a deck against its decklist*.
+- **General constraints stay separate.** *Exactly 100 cards*, singleton,
+  colour identity and *≥ 10 ramp* are filters with counts (*Goals as deck
+  constraints*), not lines of a checklist.
+
+**Converting: collection → checklist, checklist → place.** A collection
+becomes the strongest checklist with only minimums that it meets: its lines,
+read as *at least*. A checklist, exact or not, becomes the smallest place
+that meets it: its lines, read as held. Both keep the lines as they are —
+a card-only line means *printing not recorded* in a place and *any
+printing* in a checklist — so converting is a change of type alone, and the
+lab keeps every kind's lines in one table for that reason. Asymmetric on
+purpose: a place is a collection, so is a filtered collection (later), and
+any of them can become a checklist; a checklist only ever becomes a place.
+**A deck is not a collection** and does not convert, nor does a decklist:
+a deck is defined against the decklist it builds, so every deck has one. A
+conversion is refused when it would leave a zone of the wrong kind.
 
 ### Every decklist has an oracle projection
 
