@@ -385,11 +385,8 @@ lab's sidebar is that tree; Decks and Collections are not shown there.
 difference are what the query language already says (`:ramp or :draw`),
 once `:` can name assets (Card-set algebra, below).
 - 🚧 **List pools, first.** **Built:** a view, membership tiles at oracle
-      grain with no counts and a × per card; *Set as target* in the tree's
-      menu; `+`/`×` in All Magic acting on the target with the bucket the
-      tile stands for — the source says which (the card at Cards grain,
-      the printing at Printings), the target only acts on it. No new
-      requests. **Not yet:** *Save results as pool* (it pages a whole
+      grain with no counts; `+`/`×` acting on the target (*Targets*,
+      below). No new requests. **Not yet:** *Save results as pool* (it pages a whole
       search: count requests first); dimming All Magic against the target.
 - ✅ **Query pools, plain searches.** Opening one is the pool panel running
       its query, paged through the channel as an All Magic search is, with
@@ -398,13 +395,25 @@ once `:` can name assets (Card-set algebra, below).
       and *Save as…* (beside it). A pool keeps its query, not its results or
       sort, so saving sends no requests. Filter controls are baked into the
       text on save.
+- 🚧 **Targets.** List pools, checklists, exact checklists and places,
+      set from the tree's menu. Every view is a source: its tiles hand over
+      the bucket they stand for, whole (printing, finish, attributes), and
+      the target's type decides what the buttons do — a list pool takes the
+      bucket in or out (`+`/`×`); a checklist or place counts its line
+      (`−`/`+`, gone at 0); place to place moves a copy (`→`/`←`). A
+      checklist is drawn a tile per line (its lines overlap: a card's total
+      is a number nobody asked for); a place or pool a tile per card, its
+      buttons greyed when the card is in several buckets. Viewing the target
+      itself is editing it. **Not yet:** where to choose one bucket of a
+      several-bucket tile (the detail lists no buckets today); a decklist
+      as target (needs a zone picker — target its zone); move
+      transactions (two writes, not atomic: a failure between leaves the
+      copy in neither place, and says so).
 
 **Not yet:**
 - ⬜ **Duplicate**, and which menu items each type offers.
 - ⬜ **Filling a deck from other places**: moves (*Later in the campaign*,
       above).
-- ⬜ **Editing contents** in a view: `+`/`−` on a place's or checklist's
-      tiles.
 - ⬜ **Import a deck as a deck or a decklist.** A decklist import makes a
       decklist. A deck import makes a decklist from the lines plus a deck
       building it, whose places hold those lines: the decklist is the
