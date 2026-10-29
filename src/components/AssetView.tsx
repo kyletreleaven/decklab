@@ -21,7 +21,7 @@ import { useRetained } from "../lib/panelState";
 import { CardFilters } from "./CardFilters";
 import type { Behind } from "./PoolPanel";
 import { cardStore, execute, select } from "../lib/db";
-import type { AssetType } from "../lib/ontology";
+import { isA, type AssetType } from "../lib/ontology";
 import type { Card } from "../lib/types";
 import { CATEGORY_ORDER, categoryOf } from "../lib/deckstats";
 import { CardImage } from "./CardImage";
@@ -414,16 +414,13 @@ export function AssetView({
   // In front of All Magic: the asset's tiles at each grain, unsearched — the
   // search goes to Scryfall, and a tile shows where its card turns up.
   useEffect(() => {
-    const flatType = node.type === "place" || node.type === "checklist" || node.type === "exact checklist" || node.type === "list pool";
-    if (!behindShown || !flatType) return setFront(null);
+    if (!behindShown || !isA(node.type, "collection")) return setFront(null);
     let live = true;
     (async () => {
       const lab = { select, execute };
       const store = await cardStore();
-      const at = (by: TileGrain) =>
-        node.type === "list pool" ? memberContents(lab, store, node.id, { by }) : lineContents(lab, store, node.id, { by });
-      const line = node.type === "checklist" || node.type === "exact checklist";
-      const [cards, printings] = await Promise.all([at(line ? "line" : "card"), at(line ? "line" : "printing")]);
+      const at = (by: TileGrain) => lineContents(lab, store, node.id, { by });
+      const [cards, printings] = await Promise.all([at("card"), at("printing")]);
       if (live) setFront({ cards, printings });
     })().catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => {
@@ -504,7 +501,10 @@ export function AssetView({
     members: node.type === "list pool",
     tiles: [],
   };
-  const behindNow = flat && behindShown && !!renderBehind;
+  // All Magic behind a collection only, for now. A pool shows itself: All
+  // Magic with the pool targeted already marks its members.
+  const canBehind = isA(node.type, "collection");
+  const behindNow = canBehind && behindShown && !!renderBehind;
 
   const header = (
     <div className="toolbar">
@@ -625,7 +625,7 @@ export function AssetView({
             >
               More filters{activeFilters ? ` (${activeFilters})` : ""}
             </button>
-            {onBehind && renderBehind && (
+            {canBehind && onBehind && renderBehind && (
               <label
                 className="toggle"
                 title={`Also draw All Magic, dimmed, around ${node.name}: paged from Scryfall as All Magic is`}
