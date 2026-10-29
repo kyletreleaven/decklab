@@ -418,6 +418,16 @@ once `:` can name assets (Card-set algebra, below).
       printing's. Printings come from the detail's own print run: no new
       requests. **Not yet:** *Forget printings* for a whole card (the same
       move per bucket); attributes beyond the fixed set.
+- 🚧 **Searching an asset, and All Magic behind it.** A place, checklist or
+      pool has the pool panel's search and filters, answered locally — a
+      printing-level term unknown on a line with no printing, matching
+      neither way (`unknownPrinting` in the compiler). *Show not in
+      <asset>* draws All Magic behind it: the pool panel, the asset's own
+      tiles in All Magic's place wherever it has presence, the rest dimmed;
+      the search carries over. Off, no requests; on, All Magic's.
+      **Not yet:** decklists and decks (their walls are zones); the list
+      layout only dims, it does not put the asset's tiles in front; `is:`
+      terms need a level each when they land.
 
 **Not yet:**
 - ⬜ **Duplicate**, and which menu items each type offers.

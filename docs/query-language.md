@@ -83,8 +83,9 @@ Every field in v1 hits a column that already exists on `cards`.
 
 **Level** says whose property a field is. A *card* field is the same on
 every printing of the card; a *printing* field can differ between them.
-Against a bucket with no printing, a printing field is unknown — `NULL`,
-and its payload keys removed — so a term on it matches neither way
+Against a bucket with no printing, a term on a printing field is unknown —
+the compiler's `unknownPrinting` option wraps it, `CASE WHEN <unknown>
+THEN NULL ELSE <term> END` — so it matches neither way
 ([`inventory.md`](inventory.md) → *Querying a bucket that leaves a key
 out*).
 

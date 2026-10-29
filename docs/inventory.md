@@ -263,9 +263,10 @@ Not the stand-in: the printing a tile is drawn with is Scryfall's choice
 (*Rendering an `absent` printing or finish*), display only, and testing it
 would answer a question about a printing nobody named.
 
-It is three-valued logic, and SQL's `NULL` is exactly it: a line with no
-printing is queried with its printing-level fields unknown, and `NULL`
-carries through `and`, `or` and `not` as it should — `s:m10 or t:creature`
+It is three-valued logic, and SQL's `NULL` is exactly it: on a line with
+no printing, each printing-level term is `NULL` (the term, not the column —
+a column default such as a missing flavour text read as empty would
+otherwise answer for it), and `NULL` carries through `and`, `or` and `not` as it should — `s:m10 or t:creature`
 still matches a creature, `s:m10 t:creature` matches nothing. Which fields
 are printing-level is listed in
 [`query-language.md`](query-language.md) → *Field mapping*. The finish and
