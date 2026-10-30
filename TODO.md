@@ -20,7 +20,7 @@ What the work is *for* lives in **[`JOURNEYS.md`](JOURNEYS.md)**.
 | Campaign | State | Sections |
 | --- | --- | --- |
 | **1. One panel for every card source** | ~done | Universe as a collection · Card panel layout · Active slots and hover · Panel state retention |
-| **2. Data model: buckets, locations, assets** ⭐⭐⭐ | **next** | Data model · The asset tree, in the lab · [`docs/inventory.md`](docs/inventory.md) |
+| **2. Data model: buckets, locations, assets** ⭐⭐⭐ | **next** | Data model · The asset tree, in the lab · [`docs/inventory/README.md`](docs/inventory/README.md) |
 | **3. Card-set algebra** ⭐⭐ | concepts settled; mechanics to do | Card-set algebra · Set operations |
 | **4. Formats beyond Commander** ⭐ | not started | Format support |
 | **5. Multi-panel workspace** ⭐ | not started | Multi-panel workspace |
@@ -268,7 +268,7 @@ per refetch. Fine at today's sizes.
 - ⬜ **Free-form properties on an asset** (notes and the like) that the app
       does not reason about.
 - ⬜ **Card tags as named ω sets** (`:ramp`, pinned by default — see
-      [`docs/inventory.md`](docs/inventory.md) → *Naming a set in a query*),
+      [`docs/inventory/asset-tree.md`](docs/inventory/asset-tree.md) → *Naming a set in a query*),
       then delete `card_tags` (0 rows)
       and its four uncalled functions in `cards.ts` (`allTags`, `addTag`,
       `removeTag`, `tagsFor`). See
@@ -316,7 +316,7 @@ Both `collection_items` and `deck_cards` require a printing, so neither *"two
 more copies, printing unknown"* nor *"one Sol Ring, any art"* is expressible.
 The model that fixes it — buckets with `absent` as a value, sparse
 attributes, locations and goals, one tree of assets — is in
-[`docs/inventory.md`](docs/inventory.md). Earlier design, partly superseded
+[`docs/inventory/README.md`](docs/inventory/README.md). Earlier design, partly superseded
 (nullable `card_id`, migration "004", which is now `004_quantity_kind`), is in
 [`docs/mixed-grain-storage.md`](docs/mixed-grain-storage.md). One schema, one
 rebuild of real user data — back up first.
@@ -333,7 +333,7 @@ rebuild of real user data — back up first.
 - ⬜ Assets: ids, types, a parent for the tree. Every collection becomes a
       location; every deck a decklist whose zones are zone goals, with
       `maybe` a child goal it does not refer to
-- ⬜ Locations and goals, per inventory.md → *First schema scope*: both
+- ⬜ Locations and goals, per inventory/README.md → *First schema scope*: both
       ship; moves commit immediately and are not stored yet
 
 **Code that follows:**
@@ -356,13 +356,13 @@ Campaign 2's UI, built in the lab first, on the new model's tables
 (`lab/1000_assets.sql`) and before the production rebuild. The model has
 many kinds of entity (binders, decks, goals, pools, moves, plans), and a
 flat sidebar of decks and collections cannot hold them; one tree of assets
-does ([`docs/inventory.md`](docs/inventory.md) → *The asset tree*). The
+does ([`docs/inventory/asset-tree.md`](docs/inventory/asset-tree.md) → *The asset tree*). The
 lab's sidebar is that tree; Decks and Collections are not shown there.
 
 What is built is in [`FEATURES.md`](FEATURES.md) → *The lab*.
 
 **Next: a collection checks a checklist** (journey E step 4; design in
-[`docs/inventory.md`](docs/inventory.md) → *A collection checks a
+[`docs/inventory/goals.md`](docs/inventory/goals.md) → *A collection checks a
 checklist*). Local only, no requests.
 - ⬜ **`checks`**: a place or sum points at one checklist, replacing a
       checklist's `on` in the format and the loader. A *Checks* picker in
@@ -376,10 +376,6 @@ checklist*). Local only, no requests.
       chosen collection, never one counting toward the one filled; *into*
       a place where the copy would count, chosen for a sum, fixed for a
       place or zone.
-
-**Then: split `docs/inventory.md`** (1,161 lines) into `buckets.md`,
-`goals.md`, `asset-tree.md` and `moves.md`, sections moved verbatim and
-every reference repointed.
 
 **Then: `:` references**, the anchored case first (*Card-set algebra*,
 Campaign 3). `:ramp` or `:/Binders/Red` in a query names an asset's cards,
@@ -423,7 +419,7 @@ answer; the local search of an asset is half of the anchored case.
 - ⬜ **Caps: checklists with upper bounds.** A kind of its own, *at most
       n* per line, and the one kind with the unlisted bit (free, or
       excluded). Brings back the background-pool idea: *blue rares and
-      nothing else*. See [`docs/inventory.md`](docs/inventory.md) → *Kinds
+      nothing else*. See [`docs/inventory/goals.md`](docs/inventory/goals.md) → *Kinds
       of checklist*.
 - ⬜ **Compound checklists: min, max, intersect.** Exact becomes
       `intersect(checklist, excluded cap)`. Checking one where patterns
@@ -876,7 +872,7 @@ Small, known, and cheap to fix — listed so they don't get rediscovered.
   selection-as-shared-context.
 - ⬜ **Digital and paper still mix.** Arena and MTGO copies count toward a paper
   deck. Falls out of the data model: a deck is designed against the locations
-  you choose to sum ([`docs/inventory.md`](docs/inventory.md) → *Decks*).
+  you choose to sum ([`docs/inventory/README.md`](docs/inventory/README.md) → *Decks*).
 - ⬜ **`bump()` is a manual convention with nothing enforcing it.** Every
   mutation has to remember to signal, and every consumer has to remember to
   subscribe. Both have been forgotten, three times so far:

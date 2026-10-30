@@ -24,7 +24,7 @@ row, since a `collections` row that can never hold items would be a lie.
 
 ## `writable`, not `kind`
 
-*Superseded by [`inventory.md`](inventory.md).* Which collections count is now a
+*Superseded by [`inventory/README.md`](inventory/README.md).* Which collections count is now a
 union of the locations you choose (*Locations and collections*), and
 writability follows from what an asset is: locations and goals are stored and
 writable, derived collections are not until flattened. Kept as the reasoning
@@ -62,7 +62,7 @@ can hold cards.
 
 ## Arbitrary user metadata
 
-*Superseded by [`inventory.md`](inventory.md).* `game` is answered by which
+*Superseded by [`inventory/README.md`](inventory/README.md).* `game` is answered by which
 locations a deck is designed against, sidebar `colour` and `icon` belong to
 *The asset tree*, and yes/no properties of an asset (archived, favourite) are
 total membership, so labels rather than metadata (*Open → Folders*). What
@@ -102,7 +102,7 @@ the dead `card_tags` table as its storage; it splits three ways:
 | **Copy fact** | signed, altered, condition | a user attribute on a bucket: partial, `absent` means unknown |
 | **Value on a card** | a note, a rating | not decided |
 
-The first two are settled in [`inventory.md`](inventory.md) → *Attributes*, which
+The first two are settled in [`inventory/buckets.md`](inventory/buckets.md) → *Attributes*, which
 also gives the test between them. Scryfall's `oracle_tags` then becomes a
 filter-defined ω set, the same pattern as the cached `is:` collections, rather
 than half-imported user data. The third is partial like an attribute but at

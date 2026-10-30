@@ -140,7 +140,7 @@ Early: one route so far. Design and reasoning in
 
 `npm run lab` runs the app on the new model's tables (`lab.db`), seeded from
 a library file ([`docs/lab.md`](docs/lab.md)); the model is
-[`docs/inventory.md`](docs/inventory.md). What it does so far:
+[`docs/inventory/README.md`](docs/inventory/README.md). What it does so far:
 
 - **The asset tree** is the sidebar: All Magic first, then folders, places,
   checklists, pools and decklists, shown by name. Right-click for a new

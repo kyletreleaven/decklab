@@ -86,7 +86,7 @@ every printing of the card; a *printing* field can differ between them.
 Against a bucket with no printing, a term on a printing field is unknown —
 the compiler's `unknownPrinting` option wraps it, `CASE WHEN <unknown>
 THEN NULL ELSE <term> END` — so it matches neither way
-([`inventory.md`](inventory.md) → *Querying a bucket that leaves a key
+([`inventory/buckets.md`](inventory/buckets.md) → *Querying a bucket that leaves a key
 out*).
 
 | Term | Column | Level | Notes |

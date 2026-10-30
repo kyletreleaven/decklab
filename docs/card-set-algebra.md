@@ -158,7 +158,7 @@ one collection, several specs.
 What this needs in storage — a nullable `card_id`, import that stops
 fabricating printings, an "unknown printing" slot in the carousel — is
 the bucket schema, under *Data model* in [`TODO.md`](../TODO.md), and
-[`inventory.md`](inventory.md).
+[`inventory/README.md`](inventory/README.md).
 
 ## Grain polymorphism, and inferring it
 

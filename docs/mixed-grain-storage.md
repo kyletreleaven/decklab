@@ -1,6 +1,6 @@
 # Mixed-grain storage
 
-**Partly superseded by [`inventory.md`](inventory.md):** `absent` is a real
+**Partly superseded by [`inventory/README.md`](inventory/README.md):** `absent` is a real
 value rather than a nullable `card_id`, `condition` becomes a user attribute,
 and zones are collections. This was called migration 004, but
 `004_quantity_kind.sql` took that number. Kept for the reasoning.

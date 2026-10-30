@@ -7,7 +7,7 @@ load and dump; no UI reads the lab schema yet. Code: `src/lib/paths.ts`
 5), `src/lib/library/labdb.ts` and `src-tauri/migrations/lab/1000_assets.sql`
 (the lab schema). A line's `added` left out stays unknown; an asset's
 `created` and `updated` left out become the time of the load. The library file for the new model
-([`inventory.md`](inventory.md)), to replace v4 ([`lab.md`](lab.md) → *The
+([`inventory/README.md`](inventory/README.md)), to replace v4 ([`lab.md`](lab.md) → *The
 library file*) as the format the lab loads and dumps.
 
 ## Why a version of its own
@@ -42,7 +42,7 @@ hand-written file is an error, not something silently ignored.
 Every asset is one `[[asset]]` table, in tree order: a parent before its
 children. One array rather than one per type (`[[place]]`, `[[deck]]`),
 because TOML parses separate arrays separately and the order across them
-would be lost. **Siblings have no order of their own** (`inventory.md` →
+would be lost. **Siblings have no order of their own** (`inventory/asset-tree.md` →
 *The asset tree*): load takes them in any order, and a dump writes them
 canonically — a decklist's or deck's inline zones first, in zone order, then
 the rest by name.
@@ -57,26 +57,26 @@ created = 2026-03-01T14:02:11.000Z
 updated = 2026-10-20T09:15:40.000Z
 ```
 
-- **`path`** is the identity: no ids in the file (`inventory.md` → *The
+- **`path`** is the identity: no ids in the file (`inventory/asset-tree.md` → *The
   asset tree*). Load assigns fresh ones. A segment with a special character
-  is quoted (`inventory.md` → *Quoting in paths*), so paths are written as
+  is quoted (`inventory/asset-tree.md` → *Quoting in paths*), so paths are written as
   TOML literal strings, in single quotes, and nothing needs escaping:
   `path = '/Decks/"Atraxa v1.2"'`.
-- **Facets are never written** (`inventory.md` → *Facets*): a dump skips
+- **Facets are never written** (`inventory/asset-tree.md` → *Facets*): a dump skips
   them, and a facet can be referenced but not defined.
 - **Folders are implied.** A segment of a path with no asset of its own is a
   folder. An explicit `type = "folder"` is needed only for an empty folder,
   or one with notes.
 - **`type` names one node of a static ontology**, in users' words: `place`
   (a location), `sum` (the sum of its children that are collections, which
-  users call a collection: *Unions* in `inventory.md`), `checklist` and
+  users call a collection: *Unions* in `inventory/README.md`), `checklist` and
   `exact checklist` (goals), `pool`, `list pool` and `query pool` (ω sets),
   `decklist`, `deck` (a sum, of its zones), `arrangement`, `folder`.
   `collection` is a node too, but only one to name — what a place or sum
   is — and an asset of that type is refused. A `sum` has no keys of its
   own, so unlike a folder it is always written. Later, without a version
   change: a union with explicit members, `move`. The ontology is an is-a graph fixed in code and described in
-  [`inventory.md`](inventory.md); a node may have more than one parent,
+  [`inventory/README.md`](inventory/README.md); a node may have more than one parent,
   though that should be rare. The file never encodes the hierarchy: it names
   one node, so the graph can be reshaped without changing the format. Users
   do not add types.
@@ -151,7 +151,7 @@ deck box). It picks the icon and means nothing else: a description like
 
 **A place or a sum may check one checklist**: `checks = "/Checklists/MH3"`.
 The collection points at the goal, as a deck's `list` does, so one
-checklist can be checked by many (`inventory.md` → *A collection checks a
+checklist can be checked by many (`inventory/goals.md` → *A collection checks a
 checklist*). Later: `same = "/Paper"`, an identity clone, whose contents
 are Paper's and whose `checks` is its own.
 
@@ -173,13 +173,13 @@ cards = [
 ```
 
 **No ranges, no `unlisted`.** A line is a bucket and one count, and the
-type says what the count means (`inventory.md` → *Kinds of checklist*).
+type says what the count means (`inventory/goals.md` → *Kinds of checklist*).
 Upper bounds, and whether unlisted cards are allowed, belong to *caps*, a
 kind of their own for later: there the choice is real — *at most one Sol
 Ring* leaves everything else free, *these and nothing else, at most this
 many each* does not. A cap's background could then be any pool: *blue rares
 and nothing else* is a cap with no items over `c:u r:rare`, the filing rule
-in `inventory.md` → *Goals*.
+in `inventory/goals.md` → *Goals*.
 
 **A pool** is membership only, so its lines have no count. It is a **list
 pool**, with `cards`, or a **query pool**, with `query`: two types in the
@@ -199,7 +199,7 @@ query = "c:u usd<1"
 ```
 
 **A decklist and a deck** are two types, as a list and a built deck are two
-things (`inventory.md` → *Every decklist has an oracle projection*):
+things (`inventory/goals.md` → *Every decklist has an oracle projection*):
 
 | | Its zones name | What it says |
 | --- | --- | --- |
@@ -285,7 +285,7 @@ the decklist is shown, not what it holds, so one decklist can have several:
 by type while building, by role while tuning, a sideboard plan.
 
 - **`of` names the decklist**, as the model says an arrangement does
-  (`inventory.md` → *Decks*). It points up, which a relative reference
+  (`inventory/README.md` → *Decks*). It points up, which a relative reference
   cannot, so a dump writes it rooted; pinned, it follows the decklist anyway.
 - **A pile lists buckets without counts**, like a list pool, so every copy
   in one bucket sits in the same pile (two printings of a card can sit in
@@ -304,7 +304,7 @@ by type while building, by role while tuning, a sideboard plan.
 
 **The maybeboard is not a zone.** It is an ordinary checklist (`min`
 counts) that happens to sit under the decklist, which
-does not refer to it (`inventory.md` → *Decks*). Being its child is only
+does not refer to it (`inventory/README.md` → *Decks*). Being its child is only
 tidiness: a folder sums nothing. Anything else beside a decklist, a
 sideboard plan for a later build, say, is the same.
 
@@ -341,14 +341,14 @@ side = "&/Sideboards/current"               # whatever sits at that path
 ```
 
 A decklist whose zones are all `&` references to its children is the
-*conventional* deck of `inventory.md` → *Decks*: it needs no type of its
+*conventional* deck of `inventory/README.md` → *Decks*: it needs no type of its
 own. No *extract zone* action is needed either: an inline zone is already a
 checklist in the tree, and another decklist can refer to it as it is.
 
 ## References
 
 An asset names another by path. Two marks, each answering one question, the
-same as in a query (`inventory.md` → *Naming a set in a query*):
+same as in a query (`inventory/asset-tree.md` → *Naming a set in a query*):
 
 - **`&`: does it follow the target?** Without it, a reference is
   **pinned**: it follows the asset. With it, **by name**: it means whatever
@@ -386,7 +386,7 @@ target leaves its subtree.
 ## v4 → 5: `decklab convert`
 
 Pure, file to file, testable on a real dump. It applies the mapping in
-`inventory.md` → *Mapping today's data*, and **reports every loss** rather
+`inventory/README.md` → *Mapping today's data*, and **reports every loss** rather
 than burying it.
 
 | v4 | v5 |
@@ -424,7 +424,7 @@ than burying it.
   its zones, a union over places). When backgrounds other than the two
   extremes exist, "override card by card" needs care where buckets overlap
   (*Sol Ring ≥ 3* beside *Sol Ring C21 ≥ 1*). The ontology itself is open
-  in [`inventory.md`](inventory.md) → *Open*.
+  in [`inventory/README.md`](inventory/README.md) → *Open*.
 - **Whether one file holds several inventories** (yours, and a friend's
   binder) or each is its own file.
 - **The record.** As in `lab.md` → *Open*: with this format stable, the file

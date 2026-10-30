@@ -109,7 +109,7 @@ A text format for a whole library, written and read by the app.
 - **Property-identified.** A card is its printing and finish, a bucket its
   attribute values (`absent` included), an asset its path. The database
   may use asset ids internally; a dump elides them and a load assigns
-  fresh ones (see [`inventory.md`](inventory.md) → *The asset tree*).
+  fresh ones (see [`inventory/asset-tree.md`](inventory/asset-tree.md) → *The asset tree*).
 - **Detail stays in the cache.** The file says *where cards are*, not what
   they are. Card data is fetched through `scheduledFetch`, cache-first, as
   the app already does, so a new awkward case costs one line and one
@@ -157,7 +157,7 @@ restored is not one.
 
 **A migration is a text-to-text conversion** between two dumps, outside
 both triplets. It is pure and testable on a real dump, and it is where the
-lossy decisions of [`inventory.md`](inventory.md) → *Mapping today's data*
+lossy decisions of [`inventory/README.md`](inventory/README.md) → *Mapping today's data*
 live, said out loud rather than buried in a dump. The two formats share
 most of their syntax, so the conversion touches only what differs.
 
@@ -174,7 +174,7 @@ The same format is also:
 - **a diff** — commit it, and "what changed since last week" is `git diff`;
 - **an upgrade path** — dump with the old app, load with the new, as an
   alternative to converting data in place for a redesign like
-  [`inventory.md`](inventory.md);
+  [`inventory/README.md`](inventory/README.md);
 - **a way to share** — a friend's binder as a file.
 
 **Autosave.** Dumping periodically, or on events (quit, an import, a big

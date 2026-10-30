@@ -104,7 +104,7 @@ not a prerequisite. Reasoning in
 in a collection. Storing quantity 1 would be a false claim and, worse, would
 cap real counts to 1 the first time anything intersected with it. See
 [`docs/card-set-types.md`](docs/card-set-types.md). In
-[`docs/inventory.md`](docs/inventory.md) terms a pool is an ω set: a live
+[`docs/inventory/README.md`](docs/inventory/README.md) terms a pool is an ω set: a live
 pool a *predicate* one, a saved pool a *literal* one, and saving renders the
 first to the second. Today a saved pool is stored as a **binary**
 collection.
@@ -175,11 +175,11 @@ the whole list by place, is the next piece.
    A **sum collection** sums its children in the tree, recursively, a deck
    counting as the sum of its zones. Picking is placing: the friend's
    binder sits outside it. Design in
-   [`docs/inventory.md`](docs/inventory.md) → *Unions*.
+   [`docs/inventory/README.md`](docs/inventory/README.md) → *Unions*.
 4. ⬜ My collection checks a checklist: all of MH3, foils included. I see
    progress as a number, and the missing cards as a shopping list. The
    collection points at the checklist, as a deck at its decklist, so a
-   friend's binder can check the same one (`docs/inventory.md` → *A
+   friend's binder can check the same one (`docs/inventory/goals.md` → *A
    collection checks a checklist*).
 5. ⬜ Moving a card from a binder into a deck box changes nothing about my
    progress — it is still in my collection. Trading it away does. Partly,
@@ -189,7 +189,7 @@ the whole list by place, is the next piece.
 moving cards around is free, and only cards coming in or going out change
 what I have.
 
-Design for both: [`docs/inventory.md`](docs/inventory.md).
+Design for both: [`docs/inventory/README.md`](docs/inventory/README.md).
 
 ---
 
@@ -232,7 +232,7 @@ close out *No global ownership*.
 my foil Islands", "which binders hold anything from `:ramp`". Journey D
 step 2 is it with a decklist as the filter, grouped by place. One card is
 the simplest case and a good first piece. The model is in
-[`docs/inventory.md`](docs/inventory.md) → *Where is it: a population per
+[`docs/inventory/buckets.md`](docs/inventory/buckets.md) → *Where is it: a population per
 place*.
 
 ---
@@ -256,7 +256,7 @@ place*.
 
 **Gap:** steps 1–4 — *The asset tree's UI* in `TODO.md`. Tags as well as
 folders, or instead of them, is open in
-[`docs/inventory.md`](docs/inventory.md) → *Open*; this journey is where
+[`docs/inventory/README.md`](docs/inventory/README.md) → *Open*; this journey is where
 to settle it.
 
 **Not card tags.** A tag is on an *asset*. Grouping *cards* — "my ramp
