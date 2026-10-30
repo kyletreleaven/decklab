@@ -130,7 +130,7 @@ buttons.
 2. ⬜ Ask what to pull, and get it grouped by where the cards are: *Binder 2:
    Sol Ring (C21 foil), Cultivate…*, *Bulk box: 30 Forest*. Cards I have
    nowhere are a separate shopping list.
-3. ⬜ **Fill a slot from a collection.** From one missing slot in the deck, I
+3. 🧪 **Fill a slot from a collection.** From one missing slot in the deck, I
    choose a collection to look in — Paper, say — and the card panel lists
    that collection's copies of the card: *Binder 2: Sol Ring (C21 foil) ×1*.
    `←` on one moves it into the deck. The choice is required: nothing is
@@ -154,7 +154,8 @@ buttons.
 
 **Gap:** all of it outside the lab — the *Data model* campaign in
 `TODO.md`. Step 1's "any printing" was the first wall: a deck entry must
-name a printing. The lab is past it; step 3 is its next piece.
+name a printing. The lab is past it, and fills a slot (step 3); step 2,
+the whole list by place, is the next piece.
 
 ---
 

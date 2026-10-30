@@ -361,27 +361,17 @@ lab's sidebar is that tree; Decks and Collections are not shown there.
 
 What is built is in [`FEATURES.md`](FEATURES.md) → *The lab*.
 
-**Next: filling a slot from a collection** (journey D step 3 in
-[`JOURNEYS.md`](JOURNEYS.md)), now that sum collections exist (journey E
-step 3; [`FEATURES.md`](FEATURES.md), design in
-[`docs/inventory.md`](docs/inventory.md) → *Unions*). Local only, no
-requests.
-- ⬜ **A better name for a sum** in the UI. The lab calls it
-      "collection" for now (*New collection*, *Convert to collection*),
-      but every place is a collection too, so the label suggests a binder
-      is not one. `sum` in code and in the library file.
-- ⬜ **Fill a slot from a collection**: selecting a missing tile in a
-      deck lists, in the detail, the card's copies in a collection you
-      choose (required, remembered per deck), by place; `←` moves one
-      into the zone missing it.
-
-**Then: `:` references**, the anchored case first (*Card-set algebra*,
+**Next: `:` references**, the anchored case first (*Card-set algebra*,
 Campaign 3). `:ramp` or `:/Binders/Red` in a query names an asset's cards,
 so a derived pool is just a query pool (`:ramp or :draw`, `:ramp
 -:/Decks/Burn`). Planned so Scryfall is never paged for what the lab can
 answer; the local search of an asset is half of the anchored case.
 
 **Open, from what is built:**
+- ⬜ **A better name for a sum** in the UI. The lab calls it
+      "collection" for now (*New collection*, *Convert to collection*),
+      but every place is a collection too, so the label suggests a binder
+      is not one. `sum` in code and in the library file.
 - ⬜ **Save results as pool**: a list pool of a search's results, as
       members. It pages the whole search, so count requests first; perhaps
       unneeded beside query pools.

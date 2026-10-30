@@ -156,6 +156,10 @@ a library file ([`docs/lab.md`](docs/lab.md)); the model is
   counts for nothing, so what counts is where you put it. Drawn like a
   place, with search, filters and *Show not in*; each copy says which place
   it is in, and its buttons and *Change…* act on that place
+- **Fill a slot from a collection:** select a card a deck is missing, and
+  the detail asks which collection to look in (kept per deck), then lists
+  that collection's copies by place, each with `←` to move one into the
+  zone
 - **Convert** a place to a checklist and back, refused where a zone must stay
   its kind; a folder to a collection and back
 - **List pools** hold cards or printings as members. **Query pools** keep a
