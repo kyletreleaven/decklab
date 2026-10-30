@@ -149,18 +149,24 @@ cards = [
 deck box). It picks the icon and means nothing else: a description like
 `notes`, not a type, so there is no second tier of classification.
 
+**A place or a sum may check one checklist**: `checks = "/Checklists/MH3"`.
+The collection points at the goal, as a deck's `list` does, so one
+checklist can be checked by many (`inventory.md` → *A collection checks a
+checklist*). Later: `same = "/Paper"`, an identity clone, whose contents
+are Paper's and whose `checks` is its own.
+
 **A checklist** asks for at least `min` of each bucket, and says nothing of
 anything it does not list. **An exact checklist** asks for exactly `qty` of
 each, and for nothing it does not list. The key names the reading, so a line
 copied between the two is caught: a checklist refuses `qty`, an exact one
 `min`, and each count is at least 1. A bucket here is a pattern: left out
-means *any*, not *unknown*. Both may be checked `on` a collection.
+means *any*, not *unknown*. A checklist names no collection: a collection
+`checks` it.
 
 ```toml
 [[asset]]
 path = "/Wishlist"
 type = "checklist"
-on = "/Paper"            # checked against this collection
 cards = [
   { card = "Mana Crypt", oracle = "…", min = 1 },
 ]
@@ -309,8 +315,8 @@ all of these hold:
   the zone;
 - the owner refers to it pinned and relative (`main`);
 - it has an inline zone's defaults and nothing of its own: no notes, no
-  children. For a decklist, an exact checklist with no `on`; for a deck, a
-  place with no `storage`.
+  children. For a decklist, an exact checklist; for a deck, a place with no
+  `storage` and no `checks`.
 
 Otherwise the zone's asset is written as its own `[[asset]]` and the zone as
 a reference. Renaming the child (`main` → `core`) is followed by the pinned
