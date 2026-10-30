@@ -545,6 +545,9 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
         if (!(bare && (children.get(row.id) ?? []).length)) assets.push({ ...common, type: "folder" });
         break;
       }
+      case "sum":
+        assets.push({ ...common, type: "sum" });
+        break;
       case "place":
         assets.push({
           ...common,

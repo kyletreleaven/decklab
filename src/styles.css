@@ -630,6 +630,15 @@ a.external:hover {
   gap: 6px;
 }
 
+/* In a sum: which place the bucket is in. */
+.bucket-place {
+  max-width: 40%;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bucket-qty {
   min-width: 26px;
   font-variant-numeric: tabular-nums;

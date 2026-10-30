@@ -6,6 +6,7 @@ import {
   bucketKey,
   lineContents,
   memberContents,
+  sumContents,
   type AssetNode,
   type Bucket,
   type BuiltZone,
@@ -107,10 +108,18 @@ function describe(b: HeldBucket, member = false): string {
       ? "any printing"
       : "printing not recorded";
   const attrs = Object.entries(b.attrs).map(([k, v]) => `${k} ${String(v)}`);
-  return [member ? printing : `${b.qty}× ${printing}`, b.finish, ...attrs]
+  const what = [member ? printing : `${b.qty}× ${printing}`, b.finish, ...attrs]
     .filter(Boolean)
     .join(" · ");
+  return b.place ? `${b.place.name}: ${what}` : what;
 }
+
+/**
+ * All Magic behind a collection drawn as one wall: a place or a sum. A
+ * deck is a sum too, but drawn by zones, which wait (TODO). A pool shows
+ * itself: All Magic with the pool targeted already marks its members.
+ */
+const behindable = (type: AssetType) => isA(type, "collection") && type !== "deck";
 
 /** The lab's target, as a view's buttons act on it (App holds it). */
 export interface LabTarget {
@@ -142,6 +151,7 @@ function bucketOf(t: Tile): Bucket | null {
  * bucket in or out (`+`, `×`); a checklist or place counts it (`−`, `+`);
  * and a place, from another place, takes a copy from it (`→`, `←`). A tile
  * covering several buckets cannot say which: greyed, until one is chosen.
+ * In a sum, the one bucket's place is the source: copies are only in places.
  */
 function TileControls({
   tile,
@@ -152,11 +162,12 @@ function TileControls({
   source: { id: string; type: AssetType };
   target: LabTarget;
 }) {
+  const place = tile.buckets.length === 1 ? tile.buckets[0].place : undefined;
   return (
     <BucketButtons
       bucket={bucketOf(tile)}
       several={tile.buckets.length}
-      source={source}
+      source={place ? { id: place.id, type: "place" } : source}
       target={target}
       className="tile-controls"
     />
@@ -360,6 +371,13 @@ export function AssetView({
             source: { id: node.id, type: node.type },
           },
         ];
+      if (node.type === "sum")
+        return [
+          {
+            tiles: await sumContents(lab, store, node.id, { query }),
+            source: { id: node.id, type: node.type },
+          },
+        ];
       if (node.type === "list pool")
         return [
           {
@@ -414,12 +432,15 @@ export function AssetView({
   // In front of All Magic: the asset's tiles at each grain, unsearched — the
   // search goes to Scryfall, and a tile shows where its card turns up.
   useEffect(() => {
-    if (!behindShown || !isA(node.type, "collection")) return setFront(null);
+    if (!behindShown || !behindable(node.type)) return setFront(null);
     let live = true;
     (async () => {
       const lab = { select, execute };
       const store = await cardStore();
-      const at = (by: TileGrain) => lineContents(lab, store, node.id, { by });
+      const at = (by: TileGrain) =>
+        node.type === "sum"
+          ? sumContents(lab, store, node.id, { by })
+          : lineContents(lab, store, node.id, { by });
       const [cards, printings] = await Promise.all([at("card"), at("printing")]);
       if (live) setFront({ cards, printings });
     })().catch((e) => live && setError(e instanceof Error ? e.message : String(e)));
@@ -491,6 +512,7 @@ export function AssetView({
   // narrows locally and All Magic can be drawn behind.
   const flat =
     node.type === "place" ||
+    node.type === "sum" ||
     node.type === "checklist" ||
     node.type === "exact checklist" ||
     node.type === "list pool";
@@ -501,9 +523,7 @@ export function AssetView({
     members: node.type === "list pool",
     tiles: [],
   };
-  // All Magic behind a collection only, for now. A pool shows itself: All
-  // Magic with the pool targeted already marks its members.
-  const canBehind = isA(node.type, "collection");
+  const canBehind = behindable(node.type);
   const behindNow = canBehind && behindShown && !!renderBehind;
 
   const header = (
@@ -512,7 +532,11 @@ export function AssetView({
         <span className="asset-view-path">
           {/* One kind to the eye: the toggle says whether it is exact. */}/
           {node.path.join("/")} ·{" "}
-          {node.type === "exact checklist" ? "checklist" : node.type}
+          {node.type === "exact checklist"
+            ? "checklist"
+            : node.type === "sum"
+              ? "collection"
+              : node.type}
         </span>
         {(node.type === "checklist" || node.type === "exact checklist") && (
           <div

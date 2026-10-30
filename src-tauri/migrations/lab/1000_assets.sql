@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS assets (
   name       TEXT NOT NULL,
   -- A node of the static ontology (src/lib/ontology.ts).
   type       TEXT NOT NULL CHECK (type IN (
-               'folder', 'checklist', 'exact checklist', 'place', 'list pool',
-               'query pool', 'decklist', 'deck', 'arrangement')),
+               'folder', 'checklist', 'exact checklist', 'place', 'sum',
+               'list pool', 'query pool', 'decklist', 'deck', 'arrangement')),
   notes      TEXT,
   created_at TEXT,
   updated_at TEXT,

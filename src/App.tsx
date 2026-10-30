@@ -386,11 +386,10 @@ export default function App() {
     view.kind === "asset" && selectedLines && selectedCard?.oracleId === selectedLines.oracleId
       ? (assetById.get(selectedLines.sourceId) ?? null)
       : null;
-  /** n of one bucket to another, in the selected tile's asset. Throws, for the editor to say why. */
-  const moveBucket = async (from: Bucket, to: Bucket, n: number) => {
-    if (!linesSource) return;
+  /** n of one bucket to another, in the selected tile's asset — in a sum, the bucket's place. Throws, for the editor to say why. */
+  const moveBucket = async (assetId: string, from: Bucket, to: Bucket, n: number) => {
     try {
-      await moveLines(labSql, await cardStore(), { assetId: linesSource.id, bucket: from }, { assetId: linesSource.id, bucket: to }, n);
+      await moveLines(labSql, await cardStore(), { assetId, bucket: from }, { assetId, bucket: to }, n);
     } finally {
       await reloadAssets();
       setTargetVersion((v) => v + 1);

@@ -4,6 +4,7 @@ import {
   bucketsOf,
   CONDITIONS,
   type Bucket,
+  type Place,
 } from "../lib/assets";
 import { select, execute } from "../lib/db";
 import type { AssetType } from "../lib/ontology";
@@ -38,10 +39,10 @@ export function BucketsSection({
   target: LabTarget | null;
   /** Bumped by any edit, to read the buckets again. */
   version: number;
-  /** Move n from one bucket of the source to another. */
-  onMove: (from: Bucket, to: Bucket, n: number) => Promise<void>;
+  /** Move n from one bucket to another, in `assetId`: the source, or in a sum the bucket's place. */
+  onMove: (assetId: string, from: Bucket, to: Bucket, n: number) => Promise<void>;
 }) {
-  const [rows, setRows] = useState<{ bucket: Bucket; qty: number }[] | null>(null);
+  const [rows, setRows] = useState<{ bucket: Bucket; qty: number; place?: Place }[] | null>(null);
   const [runs, setRuns] = useState<Card[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -68,7 +69,8 @@ export function BucketsSection({
 
   const pool = source.type === "list pool";
   const byId = new Map(runs.map((c) => [c.id, c]));
-  const unknown = pool || source.type !== "place" ? "any printing" : "printing not recorded";
+  const unknown =
+    pool || (source.type !== "place" && source.type !== "sum") ? "any printing" : "printing not recorded";
   const label = (b: Bucket) => {
     const c = b.printingId ? byId.get(b.printingId) : undefined;
     const printing = b.printingId ? (c ? printingLabel(c) : b.printingId) : unknown;
@@ -84,17 +86,20 @@ export function BucketsSection({
         In <strong>{source.name}</strong>
       </div>
       {rows?.length === 0 && <div className="hint">None left here.</div>}
-      {rows?.map(({ bucket, qty }) => {
-        const k = bucketKey(bucket);
+      {rows?.map(({ bucket, qty, place }) => {
+        // In a sum, a bucket is its place's: the source of its buttons and moves.
+        const from = place ? { id: place.id, type: "place" as const, name: place.name } : source;
+        const k = `${from.id}:${bucketKey(bucket)}`;
         return (
           <div key={k} className="bucket-row">
             <div className="bucket-line">
+              {place && <span className="bucket-place">{place.name}</span>}
               {!pool && <span className="bucket-qty">{qty}×</span>}
               <span className="bucket-label">{label(bucket)}</span>
               {target && (
                 <BucketButtons
                   bucket={bucket}
-                  source={source}
+                  source={from}
                   target={target}
                   className="bucket-buttons"
                 />
@@ -114,7 +119,7 @@ export function BucketsSection({
                 runs={runs}
                 unknown={unknown}
                 onMove={async (to, n) => {
-                  await onMove(bucket, to, n);
+                  await onMove(from.id, bucket, to, n);
                   setEditing(null);
                 }}
               />

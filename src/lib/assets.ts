@@ -3,7 +3,7 @@ import { badName, parseRef, pathKey } from "./paths";
 import type { Sql } from "./sql";
 import { scryfallLayer, standIns, type Layer } from "./standIn";
 import type { Card } from "./types";
-import { isA, type AssetType } from "./ontology";
+import { isA, TYPES, type AssetType } from "./ontology";
 import { QueryError } from "./collections";
 import { compileQuery } from "./query";
 
@@ -61,6 +61,14 @@ export interface HeldBucket {
   finish?: string;
   attrs: Record<string, unknown>;
   qty: number;
+  /** In a sum: the place the copies are in, named from the sum down. */
+  place?: Place;
+}
+
+/** A place in a sum, by its path below the sum: `Atraxa › main`. */
+export interface Place {
+  id: string;
+  name: string;
 }
 
 /**
@@ -89,6 +97,8 @@ interface LineRow {
   finish: string;
   attrs: string;
   qty: number;
+  /** A sum's line: which of its places holds it. */
+  place?: Place;
 }
 
 /**
@@ -160,6 +170,7 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[], by: TileGrai
         ...(l.finish !== "" && { finish: l.finish }),
         attrs: JSON.parse(l.attrs) as Record<string, unknown>,
         qty: l.qty,
+        ...(l.place && { place: l.place }),
       })),
     });
   }
@@ -229,6 +240,65 @@ export async function lineContents(
   return tiles(store, await matching(store, lines, query, layers), layers, by);
 }
 
+/** The types that are collections; of them, the sums, which count their children. */
+const COLLECTIONS = TYPES.filter((t) => isA(t, "collection"));
+const SUMS = TYPES.filter((t) => isA(t, "sum"));
+const quoted = (ts: readonly string[]) => ts.map((t) => `'${t}'`).join(", ");
+
+/**
+ * The places a sum adds up: its children that are collections, a child sum
+ * — a deck among them — by its own children, recursively. Anything else
+ * under it, a folder included, contributes nothing (docs/inventory.md →
+ * *Unions*). Each named by its path below the sum.
+ */
+export async function sumPlaces(lab: Sql, sumId: string): Promise<Place[]> {
+  const rows = await lab.select<{ id: string; name: string }>(
+    `WITH RECURSIVE under (id, type, name) AS (
+       SELECT id, type, name FROM assets WHERE parent_id = $1 AND type IN (${quoted(COLLECTIONS)})
+       UNION ALL
+       SELECT a.id, a.type, u.name || ' › ' || a.name FROM assets a JOIN under u ON a.parent_id = u.id
+        WHERE u.type IN (${quoted(SUMS)}) AND a.type IN (${quoted(COLLECTIONS)})
+     )
+     SELECT id, name FROM under WHERE type = 'place' ORDER BY name COLLATE NOCASE, name`,
+    [sumId],
+  );
+  return rows;
+}
+
+/** A sum's lines, each with the place it is in. */
+async function sumLines(lab: Sql, sumId: string, oracleId?: string): Promise<LineRow[]> {
+  const places = await sumPlaces(lab, sumId);
+  const byId = new Map(places.map((p) => [p.id, p]));
+  const out: LineRow[] = [];
+  for (let i = 0; i < places.length; i += 400) {
+    const chunk = places.slice(i, i + 400);
+    const rows = await lab.select<LineRow & { asset_id: string }>(
+      `SELECT asset_id, oracle_id, printing_id, finish, attrs, qty FROM lines
+        WHERE asset_id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")})
+        ${oracleId ? `AND oracle_id = $${chunk.length + 1}` : ""}`,
+      [...chunk.map((p) => p.id), ...(oracleId ? [oracleId] : [])],
+    );
+    for (const { asset_id, ...r } of rows) out.push({ ...r, place: byId.get(asset_id)! });
+  }
+  // In place order, so a tile lists its buckets place by place.
+  const rank = new Map(places.map((p, i) => [p.id, i]));
+  return out.sort((a, b) => rank.get(a.place!.id)! - rank.get(b.place!.id)!);
+}
+
+/**
+ * A sum's tiles: every copy in its places, a tile per card or `by` printing,
+ * each bucket saying which place it is in. The same bucket in two places is
+ * two buckets.
+ */
+export async function sumContents(
+  lab: Sql,
+  store: Sql,
+  id: string,
+  { by = "card", query, layers = [scryfallLayer(store)] }: { by?: TileGrain; query?: string; layers?: Layer[] } = {},
+): Promise<Tile[]> {
+  return tiles(store, await matching(store, await sumLines(lab, id), query, layers), layers, by);
+}
+
 export interface ZoneContents {
   zone: string;
   /** The asset the zone names; absent when the reference is broken. */
@@ -294,7 +364,7 @@ export async function deckContents(
  * What the tree's menu can create; the others need more than a name. A deck
  * needs its decklist: it is made from one (`newDeckFrom`).
  */
-export const CREATABLE = ["folder", "place", "checklist", "list pool", "decklist"] as const;
+export const CREATABLE = ["folder", "place", "sum", "checklist", "list pool", "decklist"] as const;
 export type Creatable = (typeof CREATABLE)[number];
 
 /** An edit the tree refuses, with a message to show as it stands. */
@@ -308,6 +378,7 @@ export class AssetError extends Error {
 const DEFAULT_NAME: Record<Creatable | "deck", string> = {
   folder: "New folder",
   place: "New place",
+  sum: "New collection",
   checklist: "New checklist",
   "list pool": "New pool",
   decklist: "New decklist",
@@ -396,6 +467,10 @@ export async function setPoolQuery(lab: Sql, id: string, query: string, at = new
  * checklist*).
  */
 export const CONVERSIONS: Partial<Record<AssetType, AssetType[]>> = {
+  // Neither holds anything of its own: a sum counts its children, a folder
+  // only organises them.
+  folder: ["sum"],
+  sum: ["folder"],
   place: ["checklist"],
   checklist: ["place", "exact checklist"],
   "exact checklist": ["place", "checklist"],
@@ -429,6 +504,14 @@ export async function convertAsset(lab: Sql, id: string, to: AssetType, at = new
   if (clash) {
     const what = clash.owner === "deck" ? "a place" : clash.role === "side" ? "a checklist" : "an exact checklist";
     throw new AssetError(`Cannot convert: it is the ${clash.role} zone of ${clash.owner} “${clash.name}”, which must be ${what}.`);
+  }
+  // A checklist is checked on a collection; a folder is none.
+  if (to === "folder") {
+    const [on] = await lab.select<{ name: string }>(
+      "SELECT a.name FROM asset_refs r JOIN assets a ON a.id = r.asset_id WHERE r.target_id = $1 AND r.role = 'on'",
+      [id],
+    );
+    if (on) throw new AssetError(`Cannot convert: checklist “${on.name}” is checked on it, and a folder holds nothing.`);
   }
   await lab.execute("UPDATE assets SET type = $2, updated_at = $3 WHERE id = $1", [id, to, at]);
 }
@@ -842,18 +925,24 @@ export async function moveCopy(lab: Sql, fromId: string, toId: string, bucket: B
 export const FIXED_ATTRIBUTES = { condition: "condition", signed: "boolean", altered: "boolean", note: "text" } as const;
 export const CONDITIONS = ["M", "NM", "LP", "MP", "HP", "DMG"] as const;
 
-/** One card's buckets in an asset, and what each holds: a member counts 1. */
+/**
+ * One card's buckets in an asset, and what each holds: a member counts 1.
+ * A sum's are its places', each saying which, in place order.
+ */
 export async function bucketsOf(
   lab: Sql,
   asset: { id: string; type: AssetType },
   oracleId: string,
-): Promise<{ bucket: Bucket; qty: number }[]> {
-  const rows = await lab.select<{ printing_id: string; finish: string; attrs: string; qty: number }>(
-    asset.type === "list pool"
-      ? "SELECT printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1 AND oracle_id = $2"
-      : "SELECT printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1 AND oracle_id = $2",
-    [asset.id, oracleId],
-  );
+): Promise<{ bucket: Bucket; qty: number; place?: Place }[]> {
+  const rows: Omit<LineRow, "oracle_id">[] = isA(asset.type, "sum")
+    ? await sumLines(lab, asset.id, oracleId)
+    : await lab.select<Omit<LineRow, "oracle_id">>(
+        asset.type === "list pool"
+          ? "SELECT printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1 AND oracle_id = $2"
+          : "SELECT printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1 AND oracle_id = $2",
+        [asset.id, oracleId],
+      );
+  const order = (r: { bucket: Bucket; place?: Place }) => `${r.place?.name ?? ""}\u0000${bucketKey(r.bucket)}`;
   return rows
     .map((r) => ({
       bucket: {
@@ -863,8 +952,9 @@ export async function bucketsOf(
         attrs: JSON.parse(r.attrs) as Record<string, unknown>,
       },
       qty: r.qty,
+      ...(r.place && { place: r.place }),
     }))
-    .sort((a, b) => (bucketKey(a.bucket) < bucketKey(b.bucket) ? -1 : 1));
+    .sort((a, b) => (order(a) < order(b) ? -1 : 1));
 }
 
 /** Refuse an attribute outside the fixed set, or of the wrong kind; declare it if new. */

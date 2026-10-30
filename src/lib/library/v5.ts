@@ -92,6 +92,8 @@ interface Common {
 export type Asset = Common &
   (
     | { type: "folder" }
+    /** The sum of its children that are collections: nothing of its own. */
+    | { type: "sum" }
     | { type: "place"; storage?: string; cards: PlaceLine[] }
     | { type: "checklist"; on?: Ref; cards: ChecklistLine[] }
     /** Exactly its counts, and nothing it does not list. */
@@ -402,6 +404,7 @@ export function dumpV5(library: V5Library): string {
         break;
       }
       case "folder":
+      case "sum":
         break;
     }
 
@@ -667,6 +670,11 @@ export function loadV5(text: string): V5Library {
       case "folder": {
         const r = new Reader(table, where, ASSET_KEYS);
         assets.push({ ...common(r), type: "folder" });
+        break;
+      }
+      case "sum": {
+        const r = new Reader(table, where, ASSET_KEYS);
+        assets.push({ ...common(r), type: "sum" });
         break;
       }
       case "place": {

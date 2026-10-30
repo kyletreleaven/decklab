@@ -14,6 +14,7 @@ export const TYPES = [
   "checklist",
   "exact checklist",
   "place",
+  "sum",
   "pool",
   "list pool",
   "query pool",
@@ -32,13 +33,16 @@ interface Node {
 
 const ONTOLOGY: Record<AssetType, Node> = {
   folder: { parents: [], facets: [] },
-  // What holds cards: a place, and someday a filtered collection. Not a type
-  // an asset has, only one to name: a checklist is checked `on` one. Any
-  // collection converts to a checklist, its lines read as minimums; a
-  // checklist converts back to a place (docs/inventory.md → *Kinds of
-  // checklist*). A deck is not a collection.
+  // What holds cards: a place, a sum of them, and someday a filtered
+  // collection. Not a type an asset has, only one to name: a checklist is
+  // checked `on` one. A place converts to a checklist, its lines read as
+  // minimums; a checklist converts back to a place (docs/inventory.md →
+  // *Kinds of checklist*).
   collection: { parents: [], facets: [] },
   place: { parents: ["collection"], facets: [] },
+  // The sum of its children that are collections, recursively; nothing of
+  // its own. A deck is one, of its zones (docs/inventory.md → *Unions*).
+  sum: { parents: ["collection"], facets: [] },
   // A checklist asks for at least its counts. An exact one asks for exactly
   // them and nothing unlisted, so it refines the checklist with its lines.
   checklist: { parents: [], facets: [] },
@@ -56,7 +60,7 @@ const ONTOLOGY: Record<AssetType, Node> = {
     parents: [],
     facets: ["oracle", "arranged.by_mana", "arranged.by_type", "arranged.by_colour"],
   },
-  deck: { parents: [], facets: [] },
+  deck: { parents: ["sum"], facets: [] },
   arrangement: { parents: [], facets: [] },
 };
 

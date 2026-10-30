@@ -12,6 +12,7 @@ const GLYPH: Record<AssetType, string> = {
   checklist: "☐",
   "exact checklist": "☐",
   place: "▤",
+  sum: "▦",
   pool: "◌",
   "list pool": "◌",
   "query pool": "◌",
@@ -23,6 +24,8 @@ const GLYPH: Record<AssetType, string> = {
 const LABEL: Record<Creatable, string> = {
   folder: "folder",
   place: "place",
+  // What users call a sum: Paper, the places it adds up.
+  sum: "collection",
   checklist: "checklist",
   "list pool": "pool",
   decklist: "decklist",
@@ -31,6 +34,7 @@ const LABEL: Record<Creatable, string> = {
 /** What opening an asset shows: places and decks have views; the rest not yet. */
 export const OPENABLE: ReadonlySet<AssetType> = new Set([
   "place",
+  "sum",
   "decklist",
   "deck",
   "checklist",
@@ -40,11 +44,14 @@ export const OPENABLE: ReadonlySet<AssetType> = new Set([
 ]);
 
 /**
- * The menu's conversions: a place to a checklist, a checklist (either kind)
- * to a place. Exact or not is the checklist view's toggle.
+ * The menu's conversions: a folder to a collection (a sum) and back, a place
+ * to a checklist, a checklist (either kind) to a place. Exact or not is the
+ * checklist view's toggle.
  */
 const CONVERT_TO: Partial<Record<AssetType, { to: AssetType; label: string }>> =
   {
+    folder: { to: "sum", label: "Convert to collection" },
+    sum: { to: "folder", label: "Convert to folder" },
     place: { to: "checklist", label: "Convert to checklist" },
     checklist: { to: "place", label: "Convert to place" },
     "exact checklist": { to: "place", label: "Convert to place" },

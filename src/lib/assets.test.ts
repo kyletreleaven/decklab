@@ -28,6 +28,8 @@ import {
   setPoolQuery,
   stepLine,
   stepTarget,
+  sumContents,
+  sumPlaces,
   targetCounts,
 } from "./assets";
 import { readLab } from "./library/labdb";
@@ -441,5 +443,60 @@ describe("the lab's assets, for display", () => {
     await removeMember(sqlOver(db), pool, c21);
     expect([...(await poolMembers(sqlOver(db), pool))]).toEqual([bucketKey(m10)]);
     await expect(addMember(sqlOver(db), await find("Binders/Red"), anySol)).rejects.toThrow(/Only a list pool/);
+  });
+
+  it("sums a collection's children, recursively: a deck by its zones, a folder not at all", async () => {
+    const paper = await createAsset(sqlOver(db), "root", "sum", { name: "Paper" });
+    await moveAsset(sqlOver(db), await find("Binders"), paper);
+    await moveAsset(sqlOver(db), await find("Decks/Burn box"), paper);
+    await moveAsset(sqlOver(db), await find("Sideboards/Burn"), paper);
+    // Binders is a folder: it only organises, so Red is not counted yet.
+    expect((await sumPlaces(sqlOver(db), paper)).map((p) => p.name)).toEqual(["Burn box › main"]);
+
+    await convertAsset(sqlOver(db), await find("Paper/Binders"), "sum");
+    // Red is the deck's side zone too, but a child of Binders: counted once.
+    expect((await sumPlaces(sqlOver(db), paper)).map((p) => p.name)).toEqual(["Binders › Red", "Burn box › main"]);
+    const tiles = await sumContents(sqlOver(db), sqlOver(cards), paper);
+    expect(
+      // Place by place; within one, in no order of their own.
+      tiles.map((t) => [t.card.name, t.count, t.buckets.map((b) => `${b.place?.name}: ${b.qty}`).sort()]),
+    ).toEqual([
+      ["Lightning Bolt", 9, ["Binders › Red: 1", "Binders › Red: 2", "Binders › Red: 3", "Burn box › main: 3"]],
+      ["Sol Ring", 2, ["Binders › Red: 2"]],
+    ]);
+    // A search narrows it as it does a place.
+    expect((await sumContents(sqlOver(db), sqlOver(cards), paper, { query: "s:m10" })).map((t) => t.count)).toEqual([5]);
+
+    // The same bucket in two places is two buckets, each its place's.
+    const m10 = (await bucketsOf(sqlOver(db), { id: paper, type: "sum" }, "bolt")).filter((b) => b.bucket.printingId === "bolt-m10");
+    expect(m10.map((b) => [b.place?.id, b.qty])).toEqual([
+      [await find("Paper/Binders/Red"), 2],
+      [await find("Paper/Burn box/main"), 3],
+    ]);
+  });
+
+  it("converts a folder to a sum and back, unless a checklist is checked on it", async () => {
+    const binders = await find("Binders");
+    await convertAsset(sqlOver(db), binders, "sum");
+    expect((await assetTree(sqlOver(db)))[0].type).toBe("sum");
+    await convertAsset(sqlOver(db), binders, "folder");
+    expect((await assetTree(sqlOver(db)))[0].type).toBe("folder");
+
+    await convertAsset(sqlOver(db), binders, "sum");
+    db.prepare("INSERT INTO asset_refs (asset_id, role, target_id, path, rooted, facets) VALUES (?, 'on', ?, NULL, 0, '')").run(
+      await find("Sideboards/Burn"),
+      binders,
+    );
+    await expect(convertAsset(sqlOver(db), binders, "folder")).rejects.toThrow(/checked on it/);
+  });
+
+  it("dumps and loads a sum, empty or not", async () => {
+    const paper = await createAsset(sqlOver(db), "root", "sum", { name: "Paper" });
+    await createAsset(sqlOver(db), "root", "sum", { name: "Empty" });
+    await moveAsset(sqlOver(db), await find("Binders"), paper);
+    const text = dumpV5(await readLab(sqlOver(db), sqlOver(cards)));
+    expect(text).toContain(`path = '/Paper'\ntype = "sum"`);
+    expect(text).toContain(`path = '/Empty'\ntype = "sum"`);
+    expect(dumpV5(loadV5(text))).toBe(text);
   });
 });
