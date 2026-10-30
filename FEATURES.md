@@ -151,8 +151,13 @@ a library file ([`docs/lab.md`](docs/lab.md)); the model is
   **A decklist** shows its zones, main grouped by type. **A deck** builds a
   decklist (*New deck from this decklist*, *Builds* to switch) and is drawn
   as it: what it holds, what it is missing (dimmed), what is extra
+- **A collection** (a *sum*) adds up its children: places, collections
+  inside it, and decks by their zones, recursively. A folder inside one
+  counts for nothing, so what counts is where you put it. Drawn like a
+  place, with search, filters and *Show not in*; each copy says which place
+  it is in, and its buttons and *Change…* act on that place
 - **Convert** a place to a checklist and back, refused where a zone must stay
-  its kind
+  its kind; a folder to a collection and back
 - **List pools** hold cards or printings as members. **Query pools** keep a
   search: *Save as pool* from All Magic, then *Save*, *Save as…* and
   *Revert* in the pool; opening one runs it, with the Cards | Printings

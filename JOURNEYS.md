@@ -6,7 +6,8 @@ the roadmap: [`TODO.md`](TODO.md) says what to build, this says what for.
 Each step is marked with whether it works *today*, so a journey doubles as a
 click-through.
 
-Legend: ✅ works · 🐛 broken · ⬜ not built
+Legend: ✅ works · 🧪 works in the lab only (`npm run lab`) · 🐛 broken ·
+⬜ not built
 
 ---
 
@@ -73,10 +74,12 @@ it is good evidence it is the right primitive.
 1. ✅ Search in All Magic until the results are right — query, facets and sort
    all already work, and the panel remembers them if I navigate away.
 2. Choose what to keep:
-   - ⬜ **Save as live pool** — the query itself. It stays up to date: a new
-     printing that matches joins it.
+   - 🧪 **Save as live pool** — the query itself. It stays up to date: a new
+     printing that matches joins it. The lab's query pool, which its
+     All Magic calls *Save as pool*.
    - ✅ **Save as pool** — today's **Save as collection…** — the cards that
-     match right now, defaulting the name to the query text.
+     match right now, defaulting the name to the query text. Not yet in
+     the lab (*Save results as pool* in `TODO.md`).
 3. ⬜ Saving a pool takes *all* matches, not the page in hand — but **capped
    at ~10 pages (about 1,750 cards)**, refusing above that with "narrow your
    search first".
@@ -122,7 +125,7 @@ buttons.
 > deck box: the foil Sol Ring from my binder, any Island at all, and a clear
 > list of what I still have to buy.
 
-1. ⬜ Pin printings only where I care — *this* Sol Ring, the C21 foil — and
+1. 🧪 Pin printings only where I care — *this* Sol Ring, the C21 foil — and
    leave the rest as "any printing". Pinning art never makes the list illegal.
 2. ⬜ Ask what to pull, and get it grouped by where the cards are: *Binder 2:
    Sol Ring (C21 foil), Cultivate…*, *Bulk box: 30 Forest*. Cards I have
@@ -139,15 +142,19 @@ buttons.
    places.
 4. ⬜ Walk the shelves with that list and tick off each binder as I finish it.
    Stopping halfway is fine: the deck shows what has arrived and what is still
-   to come.
+   to come. Partly, in the lab: a deck shows what it holds and what it is
+   missing, but there are no binders to tick off.
 5. ⬜ If another deck is counting on the same Sol Ring, I am told *before* I
    pull it, not when the other deck comes up short.
 6. ⬜ Weeks later I swap Cultivate for Kodama's Reach in the list. The deck box
    shows it is out of date: Kodama's Reach to put in, Cultivate to take out,
-   and which binder it goes back to.
+   and which binder it goes back to. Partly, in the lab: a deck shows what
+   it is missing and what is extra against its list, but not where an
+   extra goes back to.
 
-**Gap:** all of it — the *Data model* campaign in `TODO.md`. Step 1's "any
-printing" is the first wall: today a deck entry must name a printing.
+**Gap:** all of it outside the lab — the *Data model* campaign in
+`TODO.md`. Step 1's "any printing" was the first wall: a deck entry must
+name a printing. The lab is past it; step 3 is its next piece.
 
 ---
 
@@ -157,23 +164,24 @@ printing" is the first wall: today a deck entry must name a printing.
 > to show where each card actually is, and I want to chase all of MH3,
 > foils included.
 
-1. ⬜ Set up places that match my shelves: Binder 1, Binder 2, the bulk box,
+1. 🧪 Set up places that match my shelves: Binder 1, Binder 2, the bulk box,
    each deck box. A card is in one place, as on the shelf.
-2. ⬜ Enter cards as loosely as I know them — "4 Lightning Bolt", printing
-   unknown — and fill in the detail later, as I sort.
-3. ⬜ "My collection" is those places added up, and I pick which ones count:
+2. 🧪 Enter cards as loosely as I know them — "4 Lightning Bolt", printing
+   unknown — and fill in the detail later, as I sort (*Change…*).
+3. 🧪 "My collection" is those places added up, and I pick which ones count:
    the friend's binder I track for trades does not.
 
-   First piece: a **sum collection** that sums its children in the tree,
-   recursively, a deck counting as the sum of its zones. Picking is placing:
-   the friend's binder sits outside it. Design in
+   A **sum collection** sums its children in the tree, recursively, a deck
+   counting as the sum of its zones. Picking is placing: the friend's
+   binder sits outside it. Design in
    [`docs/inventory.md`](docs/inventory.md) → *Unions*.
 4. ⬜ Put a checklist on my collection: all of MH3, foils included. I see progress
    as a number, and the missing cards as a shopping list.
 5. ⬜ Moving a card from a binder into a deck box changes nothing about my
-   progress — it is still in my collection. Trading it away does.
+   progress — it is still in my collection. Trading it away does. Partly,
+   in the lab: copies move between places, but there is no progress yet.
 
-**Gap:** all of it, as with D. Step 5 is the point of mirroring the shelves:
+**Gap:** steps 4–5, outside the lab; 1–3 work in it. Step 5 is the point of mirroring the shelves:
 moving cards around is free, and only cards coming in or going out change
 what I have.
 
@@ -233,15 +241,16 @@ place*.
 
 1. ⬜ Put decks and collections in folders I choose, and drag to reorder them.
    A folder only organises: moving a binder into one changes nothing about
-   what it holds.
+   what it holds. Partly, in the lab: folders, and drag to re-parent; no
+   order of my own, as the tree sorts by name on purpose.
 2. ⬜ Tag assets: brewing / built / retired, favourite, competitive. Any asset
    takes tags, not just decks.
 3. ⬜ Retire a deck without deleting it. It leaves the list but stays
    findable, history intact.
 4. ⬜ Find assets by tag, format or folder.
-5. ⬜ Folders fold, so fifty decks still fit on a screen.
+5. 🧪 Folders fold, so fifty decks still fit on a screen.
 
-**Gap:** all of it — *The asset tree's UI* in `TODO.md`. Tags as well as
+**Gap:** steps 1–4 — *The asset tree's UI* in `TODO.md`. Tags as well as
 folders, or instead of them, is open in
 [`docs/inventory.md`](docs/inventory.md) → *Open*; this journey is where
 to settle it.

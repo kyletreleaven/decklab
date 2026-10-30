@@ -361,15 +361,15 @@ lab's sidebar is that tree; Decks and Collections are not shown there.
 
 What is built is in [`FEATURES.md`](FEATURES.md) → *The lab*.
 
-**Next: sum collections, then filling a slot from one** (journeys E step
-3 and D step 3 in [`JOURNEYS.md`](JOURNEYS.md); design in
+**Next: filling a slot from a collection** (journey D step 3 in
+[`JOURNEYS.md`](JOURNEYS.md)), now that sum collections exist (journey E
+step 3; [`FEATURES.md`](FEATURES.md), design in
 [`docs/inventory.md`](docs/inventory.md) → *Unions*). Local only, no
 requests.
-- ⬜ **Sum collections**: a new asset type that sums its children,
-      recursively; a deck counts as the sum of its zones, and anything
-      else under it contributes nothing. No lines of its own, not a
-      target. Drawn like a place, each bucket naming its place, with
-      search, filters and All Magic behind; a move acts on that place.
+- ⬜ **A better name for a sum** in the UI. The lab calls it
+      "collection" for now (*New collection*, *Convert to collection*),
+      but every place is a collection too, so the label suggests a binder
+      is not one. `sum` in code and in the library file.
 - ⬜ **Fill a slot from a collection**: selecting a missing tile in a
       deck lists, in the detail, the card's copies in a collection you
       choose (required, remembered per deck), by place; `←` moves one

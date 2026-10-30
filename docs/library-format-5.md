@@ -68,11 +68,14 @@ updated = 2026-10-20T09:15:40.000Z
   folder. An explicit `type = "folder"` is needed only for an empty folder,
   or one with notes.
 - **`type` names one node of a static ontology**, in users' words: `place`
-  (a location), `checklist` and `exact checklist` (goals), `pool`, `list
-  pool` and `query pool` (ω sets), `decklist`, `deck`, `arrangement`,
-  `folder`. `collection` is a node too, but only one to name — what a place
-  is — and an asset of that type is refused. Later, without a version change: `union`,
-  `move`. The ontology is an is-a graph fixed in code and described in
+  (a location), `sum` (the sum of its children that are collections, which
+  users call a collection: *Unions* in `inventory.md`), `checklist` and
+  `exact checklist` (goals), `pool`, `list pool` and `query pool` (ω sets),
+  `decklist`, `deck` (a sum, of its zones), `arrangement`, `folder`.
+  `collection` is a node too, but only one to name — what a place or sum
+  is — and an asset of that type is refused. A `sum` has no keys of its
+  own, so unlike a folder it is always written. Later, without a version
+  change: a union with explicit members, `move`. The ontology is an is-a graph fixed in code and described in
   [`inventory.md`](inventory.md); a node may have more than one parent,
   though that should be rare. The file never encodes the hierarchy: it names
   one node, so the graph can be reshaped without changing the format. Users
