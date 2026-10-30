@@ -615,6 +615,51 @@ it costs nothing at decklist size, and it says *which* lines are unmet —
 grain until a view wants *right card, wrong printing*, then match by flow
 rather than by a greedy rule that is right only while patterns nest.
 
+### A collection checks a checklist
+
+**The collection points at the goal**, as a deck builds its decklist:
+Paper `checks` the MH3 checklist, and the checklist names no collection.
+So one checklist serves any number of collections, each with its own
+progress: my Paper and a friend's binder can both check *All of MH3*. In
+the library file, `checks` on a place or sum replaces a checklist's `on`,
+which pointed the other way.
+
+**One checklist per collection**, without loss of generality:
+
+- **Several goals at once** are one compound checklist (*Kinds of
+  checklist*: min, max, intersect).
+- **Switching between goals** is repointing the one reference, or an
+  **identity clone**: a collection with a single reference to another,
+  `same = "/Paper"`, whose contents are exactly Paper's and which checks a
+  checklist of its own. *Paper: MH3* and *Paper: Old border* side by side.
+  Not built.
+
+**Drawn as its checklist**, as a deck is drawn as its decklist: each card
+held, missing or, for an exact checklist, extra, with progress
+`count(Min(actual, lo)) / count(lo)` (*Goals*). At card grain until a
+checklist pins printings; a collector goal does, so it waits on the
+matching in *Checking a deck against its decklist*. A deck is the case
+built first: its `list` is this reference, zone by zone.
+
+**Filling a missing slot** takes two choices:
+
+- **From:** a collection to look in, chosen, never guessed. Not the
+  collection being filled, nor anything that counts toward it: a copy
+  already there is not missing.
+- **Into:** a place to move the copy to. **A placement is valid when the
+  copy, in that place, would count in the collection afterwards.** For a
+  place, or a deck's zone, that is the place itself, and there is nothing
+  to choose. For a sum, any place it sums; for an identity clone, a place
+  of what it clones.
+
+The rule is about the copy as much as the place. Today it reduces to *a
+place the collection sums*, because nothing filters. A filtered collection
+is where it bites: *Paper, foils only* takes a foil into any of its binders
+and a nonfoil into none, so a copy that would count nowhere is offered
+greyed, saying why; *Paper minus the bulk box* rules a place out whatever
+the copy. One question, *where would this copy count?*, which filters
+extend rather than special-case.
+
 ### Goals as deck constraints
 
 Goals are a simplified class of deck constraints, and a sensible one: the
