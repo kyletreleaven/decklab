@@ -308,8 +308,11 @@ export function AssetView({
    * source, and hands over the bucket a tile stands for. Absent, no buttons.
    */
   target?: LabTarget;
-  /** A tile chosen: which asset's lines it is, for the detail's buckets. */
-  onSelectLines?: (source: { id: string; type: AssetType }, oracleId: string) => void;
+  /**
+   * A tile chosen: which asset's lines it is, for the detail's buckets —
+   * or, `missing` from a deck's zone, the zone to fill.
+   */
+  onSelectLines?: (source: { id: string; type: AssetType }, oracleId: string, missing: boolean) => void;
   /** All Magic drawn behind the asset, dimmed: a place, checklist or pool. */
   behindShown?: boolean;
   onBehind?: (on: boolean) => void;
@@ -481,7 +484,7 @@ export function AssetView({
         .join(" ")}
       onClick={() => {
         onSelect(t.card);
-        if (s.source) onSelectLines?.(s.source, t.oracleId);
+        if (s.source) onSelectLines?.(s.source, t.oracleId, t.state === "missing");
       }}
       onMouseEnter={() => onHoverCard?.(t.card)}
       onMouseLeave={() => onHoverCard?.(null)}

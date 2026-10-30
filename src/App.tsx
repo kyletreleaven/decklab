@@ -15,7 +15,7 @@ import { PoolPanel, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import { AssetTree } from "./components/AssetTree";
 import { AssetView, type LabTarget } from "./components/AssetView";
-import { BucketsSection } from "./components/BucketsSection";
+import { BucketsSection, FindSection } from "./components/BucketsSection";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   assetTree,
@@ -381,7 +381,9 @@ export default function App() {
    */
   /** Asset views drawing All Magic behind the asset, by asset id. */
   const [behindShown, setBehindShown] = useState<Set<string>>(new Set());
-  const [selectedLines, setSelectedLines] = useState<{ sourceId: string; oracleId: string } | null>(null);
+  const [selectedLines, setSelectedLines] = useState<{ sourceId: string; oracleId: string; missing: boolean } | null>(
+    null,
+  );
   const linesSource =
     view.kind === "asset" && selectedLines && selectedCard?.oracleId === selectedLines.oracleId
       ? (assetById.get(selectedLines.sourceId) ?? null)
@@ -390,6 +392,28 @@ export default function App() {
   const moveBucket = async (assetId: string, from: Bucket, to: Bucket, n: number) => {
     try {
       await moveLines(labSql, await cardStore(), { assetId, bucket: from }, { assetId, bucket: to }, n);
+    } finally {
+      await reloadAssets();
+      setTargetVersion((v) => v + 1);
+    }
+  };
+  /**
+   * What a deck's missing slot can be filled from: sum collections and
+   * places, but not a deck's own zones — a deck is found through the sum
+   * holding it. By path.
+   */
+  const findIn = useMemo(
+    () =>
+      [...assetById.values()]
+        .filter((n) => n.type === "sum" || (n.type === "place" && assetById.get(n.parentId)?.type !== "deck"))
+        .map((n) => ({ id: n.id, type: n.type, label: n.path.join("/") }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [assetById],
+  );
+  /** One copy into the deck's zone that misses it, from a place, its bucket kept. */
+  const takeInto = async (zoneId: string, fromId: string, bucket: Bucket) => {
+    try {
+      await moveLines(labSql, null, { assetId: fromId, bucket }, { assetId: zoneId, bucket }, 1);
     } finally {
       await reloadAssets();
       setTargetVersion((v) => v + 1);
@@ -1126,7 +1150,7 @@ export default function App() {
             onConvert={convert}
             target={labTargeting ?? undefined}
             refreshKey={targetVersion}
-            onSelectLines={(source, oracleId) => setSelectedLines({ sourceId: source.id, oracleId })}
+            onSelectLines={(source, oracleId, missing) => setSelectedLines({ sourceId: source.id, oracleId, missing })}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
@@ -1298,7 +1322,17 @@ export default function App() {
         }
         refreshKey={refreshKey}
         lab={
-          linesSource && selectedLines && (
+          !linesSource || !selectedLines ? null : selectedLines.missing && currentAsset ? (
+            // Missing from a deck's zone: where to fill it from.
+            <FindSection
+              oracleId={selectedLines.oracleId}
+              deckId={currentAsset.id}
+              into={{ id: linesSource.id, name: linesSource.path.join("/") }}
+              collections={findIn}
+              version={targetVersion}
+              onTake={(fromId, bucket) => takeInto(linesSource.id, fromId, bucket)}
+            />
+          ) : (
             <BucketsSection
               source={linesSource}
               oracleId={selectedLines.oracleId}

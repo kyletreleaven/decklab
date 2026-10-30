@@ -7,6 +7,7 @@ import {
   type Place,
 } from "../lib/assets";
 import { select, execute } from "../lib/db";
+import { useRetained } from "../lib/panelState";
 import type { AssetType } from "../lib/ontology";
 import { printingLabel } from "../lib/printings";
 import * as scryfall from "../lib/scryfall";
@@ -15,6 +16,58 @@ import { BucketButtons, type LabTarget } from "./AssetView";
 
 /** Finishes to offer when the printing is not known. */
 const ANY_FINISHES = ["nonfoil", "foil", "etched"];
+
+type Row = { bucket: Bucket; qty: number; place?: Place };
+
+/** One card's buckets in an asset, read again when `version` moves; null while reading. */
+function useBuckets(asset: { id: string; type: AssetType } | null, oracleId: string, version: number): Row[] | null {
+  const [rows, setRows] = useState<Row[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    // No reset to null: an edit swaps the new rows in without a flash.
+    if (!asset) setRows(null);
+    else bucketsOf({ select, execute }, asset, oracleId).then((r) => live && setRows(r));
+    return () => {
+      live = false;
+    };
+  }, [asset?.id, asset?.type, oracleId, version]);
+  return rows;
+}
+
+/**
+ * The card's print run, to say which printing a bucket is: the detail's
+ * own (`scryfall.printings`, memoised), so this sends no request the
+ * selection did not already send.
+ */
+function usePrintRun(oracleId: string): Card[] {
+  const [runs, setRuns] = useState<Card[]>([]);
+  useEffect(() => {
+    let live = true;
+    setRuns([]);
+    scryfall.storedPrintings(oracleId).then((r) => live && r.length && setRuns(r));
+    scryfall
+      .printings(oracleId)
+      .then((r) => live && r.length && setRuns(r))
+      .catch(() => {}); // the detail's carousel says so
+    return () => {
+      live = false;
+    };
+  }, [oracleId]);
+  return runs;
+}
+
+/** A bucket as a row says it: printing, finish, attributes; `unknown` for no printing. */
+function labeller(runs: Card[], unknown: string): (b: Bucket) => string {
+  const byId = new Map(runs.map((c) => [c.id, c]));
+  return (b) => {
+    const c = b.printingId ? byId.get(b.printingId) : undefined;
+    const printing = b.printingId ? (c ? printingLabel(c) : b.printingId) : unknown;
+    const attrs = Object.entries(b.attrs ?? {}).map(([k, v]) =>
+      v === true ? k : v === false ? `not ${k}` : `${k} ${String(v)}`,
+    );
+    return [printing, b.finish, ...attrs].filter(Boolean).join(" · ");
+  };
+}
 
 /**
  * The selected card's buckets in the asset it was chosen from, one row each:
@@ -42,43 +95,14 @@ export function BucketsSection({
   /** Move n from one bucket to another, in `assetId`: the source, or in a sum the bucket's place. */
   onMove: (assetId: string, from: Bucket, to: Bucket, n: number) => Promise<void>;
 }) {
-  const [rows, setRows] = useState<{ bucket: Bucket; qty: number; place?: Place }[] | null>(null);
-  const [runs, setRuns] = useState<Card[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    bucketsOf({ select, execute }, source, oracleId).then((r) => live && setRows(r));
-    return () => {
-      live = false;
-    };
-  }, [source.id, source.type, oracleId, version]);
-
-  useEffect(() => {
-    let live = true;
-    setRuns([]);
-    scryfall.storedPrintings(oracleId).then((r) => live && r.length && setRuns(r));
-    scryfall
-      .printings(oracleId)
-      .then((r) => live && r.length && setRuns(r))
-      .catch(() => {}); // the detail's carousel says so
-    return () => {
-      live = false;
-    };
-  }, [oracleId]);
+  const rows = useBuckets(source, oracleId, version);
+  const runs = usePrintRun(oracleId);
 
   const pool = source.type === "list pool";
-  const byId = new Map(runs.map((c) => [c.id, c]));
   const unknown =
     pool || (source.type !== "place" && source.type !== "sum") ? "any printing" : "printing not recorded";
-  const label = (b: Bucket) => {
-    const c = b.printingId ? byId.get(b.printingId) : undefined;
-    const printing = b.printingId ? (c ? printingLabel(c) : b.printingId) : unknown;
-    const attrs = Object.entries(b.attrs ?? {}).map(([k, v]) =>
-      v === true ? k : v === false ? `not ${k}` : `${k} ${String(v)}`,
-    );
-    return [printing, b.finish, ...attrs].filter(Boolean).join(" · ");
-  };
+  const label = labeller(runs, unknown);
 
   return (
     <div className="buckets">
@@ -127,6 +151,103 @@ export function BucketsSection({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** A collection to look in, as the picker lists it. */
+export interface FindIn {
+  id: string;
+  type: AssetType;
+  /** Its path, to tell two binders called Red apart. */
+  label: string;
+}
+
+/**
+ * Filling a missing slot of a deck (journey D step 3): the card's copies in
+ * a collection you choose — required, nothing guessed — each with `←`,
+ * which moves one, bucket and all, into the zone missing it. The choice is
+ * kept per deck, as its search is. Read from the lab: no requests.
+ */
+export function FindSection({
+  oracleId,
+  deckId,
+  into,
+  collections,
+  version,
+  onTake,
+}: {
+  oracleId: string;
+  deckId: string;
+  /** The deck's zone the card is missing from: a place. */
+  into: { id: string; name: string };
+  collections: FindIn[];
+  /** Bumped by any edit, to read the copies again. */
+  version: number;
+  /** Move one copy of `bucket` from the place `fromId` into `into`. Throws, to say why. */
+  onTake: (fromId: string, bucket: Bucket) => Promise<void>;
+}) {
+  const [chosenId, setChosenId] = useRetained(`asset:${deckId}`, "findIn", "");
+  const chosen = collections.find((c) => c.id === chosenId) ?? null;
+  const rows = useBuckets(chosen, oracleId, version);
+  const label = labeller(usePrintRun(oracleId), "printing not recorded");
+  const [error, setError] = useState<string | null>(null);
+
+  // A place chosen holds its rows itself; a sum's say which place. The zone
+  // itself is no source, should the chosen sum hold the deck.
+  const copies = (rows ?? [])
+    .map((r) => ({ ...r, from: r.place ?? { id: chosen!.id, name: chosen!.label } }))
+    .filter((r) => r.from.id !== into.id);
+
+  return (
+    <div className="buckets">
+      <div className="buckets-head">
+        Missing from <strong>{into.name}</strong>. Find it in{" "}
+        <select
+          value={chosen?.id ?? ""}
+          onChange={(e) => {
+            setChosenId(e.target.value);
+            setError(null);
+          }}
+        >
+          <option value="" disabled>
+            choose a collection…
+          </option>
+          {collections.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {!chosen && <div className="hint">Choose a collection to find this card in.</div>}
+      {chosen && rows && copies.length === 0 && <div className="hint">None in {chosen.label}.</div>}
+      {error && <div className="status error">{error}</div>}
+      {chosen &&
+        copies.map(({ bucket, qty, from }) => (
+          <div key={`${from.id}:${bucketKey(bucket)}`} className="bucket-row">
+            <div className="bucket-line">
+              <span className="bucket-place">{from.name}</span>
+              <span className="bucket-qty">{qty}×</span>
+              <span className="bucket-label">{label(bucket)}</span>
+              <span className="bucket-buttons">
+                <button
+                  title={`Move one from ${from.name} into ${into.name}`}
+                  onClick={async () => {
+                    setError(null);
+                    try {
+                      await onTake(from.id, bucket);
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : String(e));
+                    }
+                  }}
+                >
+                  ←
+                </button>
+              </span>
+            </div>
+          </div>
+        ))}
     </div>
   );
 }
