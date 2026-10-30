@@ -38,7 +38,7 @@ export interface CompileOptions {
    * SQL true when the row's printing is not known — a bucket with no
    * printing, drawn with some printing's card-level fields. A printing-level
    * term is then unknown (`NULL`), and matches neither way: SQL's three-valued
-   * logic carries it through `and`, `or` and `not` (docs/inventory.md →
+   * logic carries it through `and`, `or` and `not` (docs/inventory/buckets.md →
    * *Querying a bucket that leaves a key out*). Absent, every printing is known.
    */
   unknownPrinting?: string;

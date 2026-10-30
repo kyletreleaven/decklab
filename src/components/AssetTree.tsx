@@ -71,7 +71,7 @@ type DropTarget = AssetNode | "top";
 const SPRING_MS = 600;
 
 /**
- * The lab's asset tree (docs/inventory.md → *The asset tree*): the section's
+ * The lab's asset tree (docs/inventory/asset-tree.md → *The asset tree*): the section's
  * header, `children` (All Magic, built in), then the tree. Folders and
  * anything with children expand; top-level folders start open. Siblings come
  * in name order: the tree has no order of its own.

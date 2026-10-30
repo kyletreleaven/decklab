@@ -1,6 +1,6 @@
 /**
  * The asset types: a static is-a graph, fixed here. Users do not add types.
- * See docs/inventory.md → *Open* (the ontology of asset types) and
+ * See docs/inventory/README.md → *Open* (the ontology of asset types) and
  * docs/library-format-5.md.
  *
  * Each type names its parents and the facets every asset of it has. A file
@@ -36,12 +36,12 @@ const ONTOLOGY: Record<AssetType, Node> = {
   // What holds cards: a place, a sum of them, and someday a filtered
   // collection. Not a type an asset has, only one to name: a checklist is
   // checked `on` one. A place converts to a checklist, its lines read as
-  // minimums; a checklist converts back to a place (docs/inventory.md →
+  // minimums; a checklist converts back to a place (docs/inventory/goals.md →
   // *Kinds of checklist*).
   collection: { parents: [], facets: [] },
   place: { parents: ["collection"], facets: [] },
   // The sum of its children that are collections, recursively; nothing of
-  // its own. A deck is one, of its zones (docs/inventory.md → *Unions*).
+  // its own. A deck is one, of its zones (docs/inventory/README.md → *Unions*).
   sum: { parents: ["collection"], facets: [] },
   // A checklist asks for at least its counts. An exact one asks for exactly
   // them and nothing unlisted, so it refines the checklist with its lines.
@@ -54,7 +54,7 @@ const ONTOLOGY: Record<AssetType, Node> = {
   // A decklist's zones are checklists: what a deck should hold — its
   // commander and main exact. A deck's zones are places: what it does hold,
   // and it always builds a decklist. Arrangements are the decklist's; a
-  // deck shows one of its decklist's (docs/inventory.md → *Every decklist
+  // deck shows one of its decklist's (docs/inventory/goals.md → *Every decklist
   // has an oracle projection*).
   decklist: {
     parents: [],

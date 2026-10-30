@@ -181,7 +181,7 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[], by: TileGrai
  * The lines a search matches, answered from the card store: every card an
  * asset holds is there, so no request. A line naming a printing is tested on
  * it; one naming none on a printing of the card with its printing-level
- * terms unknown, so they match neither way (docs/inventory.md → *Querying a
+ * terms unknown, so they match neither way (docs/inventory/buckets.md → *Querying a
  * bucket that leaves a key out*). No query, every line.
  */
 async function matching(store: Sql, lines: LineRow[], query: string | undefined, layers: Layer[]): Promise<LineRow[]> {
@@ -248,7 +248,7 @@ const quoted = (ts: readonly string[]) => ts.map((t) => `'${t}'`).join(", ");
 /**
  * The places a sum adds up: its children that are collections, a child sum
  * — a deck among them — by its own children, recursively. Anything else
- * under it, a folder included, contributes nothing (docs/inventory.md →
+ * under it, a folder included, contributes nothing (docs/inventory/README.md →
  * *Unions*). Each named by its path below the sum.
  */
 export async function sumPlaces(lab: Sql, sumId: string): Promise<Place[]> {
@@ -463,7 +463,7 @@ export async function setPoolQuery(lab: Sql, id: string, query: string, at = new
  * What converting can make of an asset: a checklist of a place (its lines
  * read as minimums); a place of either checklist (as held); and a checklist
  * exact or not. Lines stay as they are: one table holds them all, so it is a
- * change of type, in one statement (docs/inventory.md → *Kinds of
+ * change of type, in one statement (docs/inventory/goals.md → *Kinds of
  * checklist*).
  */
 export const CONVERSIONS: Partial<Record<AssetType, AssetType[]>> = {
@@ -518,7 +518,7 @@ export async function convertAsset(lab: Sql, id: string, to: AssetType, at = new
 
 /**
  * Rename an asset. Pinned references follow it; by-name ones keep the old
- * name, which is what *by name* means (docs/inventory.md → *Naming a set in
+ * name, which is what *by name* means (docs/inventory/asset-tree.md → *Naming a set in
  * a query*).
  */
 export async function renameAsset(lab: Sql, id: string, name: string, at = new Date().toISOString()): Promise<void> {

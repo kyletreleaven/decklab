@@ -266,7 +266,7 @@ export function PoolPanel({
   grainToggle?: boolean;
   /**
    * An asset drawn with All Magic behind it: its own tiles take All Magic's
-   * place wherever it has presence, the rest dimmed (docs/inventory.md →
+   * place wherever it has presence, the rest dimmed (docs/inventory/buckets.md →
    * *Drawing an asset against All Magic*). `tilesAt` keys them by what they
    * evict: an oracle id at Cards; `oracle|printing` at Printings, and
    * `oracle|` for a line naming no printing, drawn leading its card.
@@ -1059,7 +1059,7 @@ export function PoolPanel({
           {visible.flatMap((row) => {
             const card = row.card;
             // An asset drawn in front: its tiles take All Magic's place wherever
-            // it has presence (docs/inventory.md → *Drawing an asset against All
+            // it has presence (docs/inventory/buckets.md → *Drawing an asset against All
             // Magic*). At Printings, a line naming no printing leads its card.
             const lead: ReactNode[] = [];
             if (inFront) {

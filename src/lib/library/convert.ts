@@ -14,7 +14,7 @@ import {
 } from "./v5";
 
 /**
- * v4 → 5, file to file: the mapping in docs/inventory.md → *Mapping today's
+ * v4 → 5, file to file: the mapping in docs/inventory/README.md → *Mapping today's
  * data*, as written out in docs/library-format-5.md → *v4 → 5*.
  *
  * Pure. What it needs from the card store comes in as two lookups, so the

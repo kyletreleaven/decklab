@@ -159,7 +159,7 @@ const byBucket = <L extends { bucket: Bucket }>(lines: L[]) =>
  * The tree, parents first, siblings in the canonical order: a decklist's or
  * deck's zones that could be written inline come first, in zone order —
  * where a load puts inline zones back — then the rest by name. The tree has
- * no order of its own (docs/inventory.md → *The asset tree*).
+ * no order of its own (docs/inventory/asset-tree.md → *The asset tree*).
  */
 function treeOrder(assets: Asset[]): Asset[] {
   const byPath = new Map(assets.map((a) => [pathKey(a.path), a]));

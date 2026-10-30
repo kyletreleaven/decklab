@@ -2,7 +2,7 @@ import type { Sql } from "./sql";
 
 /**
  * Which printing to draw for a card whose bucket names none: the stand-in.
- * See docs/inventory.md → *Rendering an `absent` printing or finish*.
+ * See docs/inventory/buckets.md → *Rendering an `absent` printing or finish*.
  *
  * A chain of layers, tried in order; each answers for the cards it can and
  * leaves the rest to the next. Printing selectors will be layers here. Until

@@ -1,6 +1,6 @@
 /**
  * Asset paths and references, as written in a library file and a query.
- * See docs/inventory.md → *Naming a set in a query*, *Facets* and *Quoting in
+ * See docs/inventory/asset-tree.md → *Naming a set in a query*, *Facets* and *Quoting in
  * paths*.
  *
  * Two marks, each answering one question:
