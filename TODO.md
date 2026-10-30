@@ -361,7 +361,27 @@ lab's sidebar is that tree; Decks and Collections are not shown there.
 
 What is built is in [`FEATURES.md`](FEATURES.md) → *The lab*.
 
-**Next: `:` references**, the anchored case first (*Card-set algebra*,
+**Next: a collection checks a checklist** (journey E step 4; design in
+[`docs/inventory.md`](docs/inventory.md) → *A collection checks a
+checklist*). Local only, no requests.
+- ⬜ **`checks`**: a place or sum points at one checklist, replacing a
+      checklist's `on` in the format and the loader. A *Checks* picker in
+      the collection's view, like a deck's *Builds*. The collection is
+      then drawn as its checklist — held, missing, extra for an exact one —
+      with progress. Card grain first; a checklist pinning printings
+      needs the matching in *Checking a deck against its decklist*. Head
+      towards one `builtContents` for both: a deck is a collection
+      checking its decklist, zone by zone.
+- ⬜ **Fill a slot, for any collection checking a checklist**: *from* a
+      chosen collection, never one counting toward the one filled; *into*
+      a place where the copy would count, chosen for a sum, fixed for a
+      place or zone.
+
+**Then: split `docs/inventory.md`** (1,161 lines) into `buckets.md`,
+`goals.md`, `asset-tree.md` and `moves.md`, sections moved verbatim and
+every reference repointed.
+
+**Then: `:` references**, the anchored case first (*Card-set algebra*,
 Campaign 3). `:ramp` or `:/Binders/Red` in a query names an asset's cards,
 so a derived pool is just a query pool (`:ramp or :draw`, `:ramp
 -:/Decks/Burn`). Planned so Scryfall is never paged for what the lab can

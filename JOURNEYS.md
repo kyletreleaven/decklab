@@ -176,8 +176,11 @@ the whole list by place, is the next piece.
    counting as the sum of its zones. Picking is placing: the friend's
    binder sits outside it. Design in
    [`docs/inventory.md`](docs/inventory.md) → *Unions*.
-4. ⬜ Put a checklist on my collection: all of MH3, foils included. I see progress
-   as a number, and the missing cards as a shopping list.
+4. ⬜ My collection checks a checklist: all of MH3, foils included. I see
+   progress as a number, and the missing cards as a shopping list. The
+   collection points at the checklist, as a deck at its decklist, so a
+   friend's binder can check the same one (`docs/inventory.md` → *A
+   collection checks a checklist*).
 5. ⬜ Moving a card from a binder into a deck box changes nothing about my
    progress — it is still in my collection. Trading it away does. Partly,
    in the lab: copies move between places, but there is no progress yet.
