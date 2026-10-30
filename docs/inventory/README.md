@@ -329,6 +329,8 @@ decklist does not refer to.
   breaks something. References outside the app (an exported list, a
   note) are not rewritten, which an identifier would not fix either.
 - **Rendering `absent` printings and finishes:** the rule, and its scopes.
+- **Loans:** a move with a return due ([`moves.md`](moves.md)). Lending,
+  borrowing, and whether a lent copy still counts in my collection.
 - **Arrangements:** whether a card may sit in more than one pile of one
   arrangement. That arrangements are assets of their own is settled (see
   *Decks*, and [`library-format-5.md`](../library-format-5.md)).
