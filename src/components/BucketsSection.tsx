@@ -145,6 +145,7 @@ export function BucketsSection({
                 from={bucket}
                 qty={qty}
                 pool={pool}
+                place={from.type === "place"}
                 runs={runs}
                 unknown={unknown}
                 onMove={async (to, n) => {
@@ -262,6 +263,7 @@ function BucketEditor({
   from,
   qty,
   pool,
+  place,
   runs,
   unknown,
   onMove,
@@ -269,6 +271,8 @@ function BucketEditor({
   from: Bucket;
   qty: number;
   pool: boolean;
+  /** A place records what its copies are; a pool or checklist asks for them. */
+  place: boolean;
   runs: Card[];
   unknown: string;
   onMove: (to: Bucket, n: number) => Promise<void>;
@@ -276,7 +280,10 @@ function BucketEditor({
   const [printingId, setPrintingId] = useState(from.printingId ?? from.shownId ?? "");
   // A printing is the bucket's own, or only how its copies are drawn
   // (docs/inventory/buckets.md → *Suggested printings*).
-  const [bound, setBound] = useState(!from.shownId);
+  // A printing first given to a bare bucket: in a place, what the copy was
+  // seen to be; elsewhere a suggestion, an art and not a requirement. One
+  // already bound stays so.
+  const [bound, setBound] = useState(!!from.printingId || (place && !from.shownId));
   const [finish, setFinish] = useState(from.finish ?? "");
   const attrs = from.attrs ?? {};
   const [condition, setCondition] = useState(String(attrs.condition ?? ""));
@@ -335,7 +342,8 @@ function BucketEditor({
       </label>
       <label title="Bound: only this printing. Suggested: any printing, drawn as this one.">
         Printing is
-        <select value={bound ? "bound" : "suggested"} disabled={!printingId} onChange={(e) => setBound(e.target.value === "bound")}>
+        <select value={!printingId ? "" : bound ? "bound" : "suggested"} disabled={!printingId} onChange={(e) => setBound(e.target.value === "bound")}>
+          {!printingId && <option value="">—</option>}
           <option value="bound">bound</option>
           <option value="suggested">suggested</option>
         </select>

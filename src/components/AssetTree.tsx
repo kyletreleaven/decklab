@@ -1,5 +1,5 @@
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CREATABLE, TARGETABLE, type AssetNode, type Creatable } from "../lib/assets";
 import type { AssetType } from "../lib/ontology";
 import { formatPath } from "../lib/paths";
@@ -135,6 +135,19 @@ export function AssetTree({
       if (!next.delete(id)) next.add(id);
       return next;
     });
+
+  // A menu stays on screen: one that would run off the bottom opens upward
+  // from the click instead, one off the right edge opens to its left.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!menu || !el) return;
+    const gap = 4;
+    const { width, height } = el.getBoundingClientRect();
+    const fitsBelow = menu.y + height <= window.innerHeight - gap;
+    const fitsRight = menu.x + width <= window.innerWidth - gap;
+    el.style.top = `${Math.max(gap, fitsBelow ? menu.y : menu.y - height)}px`;
+    el.style.left = `${Math.max(gap, fitsRight ? menu.x : menu.x - width)}px`;
+  }, [menu]);
 
   // A menu closes on a click elsewhere, Escape, or the window losing focus.
   useEffect(() => {
