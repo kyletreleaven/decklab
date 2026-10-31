@@ -1907,3 +1907,34 @@ a.external:hover {
   align-items: center;
   gap: 4px;
 }
+
+/* The pull sheet: a line per card a deck lacks, a source to pull from each. */
+.dialog.pull-sheet {
+  width: min(720px, 92vw);
+  max-height: 86vh;
+}
+
+.pull-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.pull-row {
+  display: grid;
+  grid-template-columns: 2.5em minmax(10em, 1fr) minmax(0, 1.6fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.pull-row select {
+  min-width: 0;
+}
+
+.pull-qty {
+  text-align: right;
+  color: var(--text-dim);
+}

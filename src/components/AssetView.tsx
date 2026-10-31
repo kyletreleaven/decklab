@@ -31,6 +31,7 @@ import { isA, type AssetType } from "../lib/ontology";
 import type { Card } from "../lib/types";
 import { CATEGORY_ORDER, categoryOf } from "../lib/deckstats";
 import { CardImage } from "./CardImage";
+import { PullSheet } from "./PullSheet";
 import { plainestPrintings } from "../lib/printings";
 import { printingsInSet } from "../lib/scryfall";
 
@@ -334,6 +335,7 @@ export function AssetView({
   // Bumped by an edit made here, to read the asset again.
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pulling, setPulling] = useState(false);
   // A deck whose decklist no longer exists: drawn from its places instead.
   const [lost, setLost] = useState(false);
   const [shown, setShown] = useState<Record<string, number>>({});
@@ -591,6 +593,14 @@ export function AssetView({
             onChanged={() => setVersion((v) => v + 1)}
             onError={setError}
           />
+        )}
+        {node.type === "deck" && list && (
+          <button className="ghost" title="Pull what the deck lacks from a collection" onClick={() => setPulling(true)}>
+            Pull…
+          </button>
+        )}
+        {pulling && (
+          <PullSheet deck={node} onClose={() => setPulling(false)} onChanged={() => setVersion((v) => v + 1)} />
         )}
         {node.type === "deck" && (
           <label className="asset-builds" title="The decklist this deck builds">

@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  addCopies,
   addMember,
+  ALL_MAGIC,
   AssetError,
   assetTree,
   bucketKey,
@@ -23,6 +25,7 @@ import {
   moveLines,
   newDeckFrom,
   poolMembers,
+  pullSheet,
   removeMember,
   renameAsset,
   setDeckList,
@@ -440,6 +443,51 @@ describe("the lab's assets, for display", () => {
       card("only-promo", "x", "1", { promo: true }),
     ]);
     expect(Object.fromEntries(picks)).toEqual({ bolt: "bolt-117", sol: "sol-263", x: "only-promo" });
+  });
+
+  it("sheets what a deck lacks, with the buckets in a collection that would fill it, and pulls from one", async () => {
+    const box = await find("Decks/Burn box");
+    const main = await find("Decks/Burn box/main");
+    const shoebox = await createAsset(sqlOver(db), "root", "place", { name: "Shoebox" });
+    db.exec(`INSERT INTO lines (asset_id, oracle_id, printing_id, shown_id, qty) VALUES
+      ('${shoebox}', 'bolt', 'bolt-m10', '', 1),
+      ('${shoebox}', 'bolt', '', '', 4),
+      ('${shoebox}', 'sol', '', '', 1)`);
+    // The deck's main asks 4 Bolts and holds 3: one missing.
+    const rows = await pullSheet(sqlOver(db), sqlOver(cards), box, shoebox);
+    expect(rows.map((r) => [r.zone, r.card.name, r.missing, r.zoneId === main])).toEqual([["main", "Lightning Bolt", 1, true]]);
+    // Most copies first; the deck's own places — its side is /Binders/Red — are never offered.
+    expect(rows[0].sources.map((s) => [s.place.name, s.bucket.printingId ?? "", s.qty])).toEqual([
+      ["Shoebox", "", 4],
+      ["Shoebox", "bolt-m10", 1],
+    ]);
+    expect(await pullSheet(sqlOver(db), sqlOver(cards), box, await find("Binders/Red"))).toEqual([
+      expect.objectContaining({ sources: [] }),
+    ]);
+
+    // A line that binds a printing is filled only by that printing.
+    db.exec(`UPDATE lines SET printing_id = 'bolt-m10' WHERE asset_id = '${await find("Decks/Burn/main")}'`);
+    const bound = await pullSheet(sqlOver(db), sqlOver(cards), box, shoebox);
+    expect(bound[0].sources.map((s) => s.bucket.printingId)).toEqual(["bolt-m10"]);
+
+    await moveLines(sqlOver(db), null, { assetId: shoebox, bucket: bound[0].sources[0].bucket }, { assetId: main, bucket: bound[0].sources[0].bucket }, 1);
+    expect(await pullSheet(sqlOver(db), sqlOver(cards), box, shoebox)).toEqual([]);
+  });
+
+  it("pulls from All Magic what the decklist line says, as it says it, adding copies", async () => {
+    const box = await find("Decks/Burn box");
+    const main = await find("Decks/Burn box/main");
+    db.exec(`UPDATE lines SET printing_id = '', shown_id = 'bolt-2x2', qty = 6 WHERE asset_id = '${await find("Decks/Burn/main")}'`);
+    const [row] = await pullSheet(sqlOver(db), sqlOver(cards), box, ALL_MAGIC);
+    expect([row.missing, row.sources.length, row.sources[0].place.name]).toEqual([3, 1, "All Magic"]);
+    expect(row.sources[0].bucket).toEqual({ oracleId: "bolt", attrs: {}, shownId: "bolt-2x2" });
+    await addCopies(sqlOver(db), main, row.sources[0].bucket, row.missing);
+    expect(db.prepare(`SELECT printing_id, shown_id, qty FROM lines WHERE asset_id = ? ORDER BY printing_id`).all(main)).toEqual([
+      { printing_id: "", shown_id: "bolt-2x2", qty: 3 },
+      { printing_id: "bolt-m10", shown_id: "", qty: 3 },
+    ]);
+    expect(await pullSheet(sqlOver(db), sqlOver(cards), box, ALL_MAGIC)).toEqual([]);
+    await expect(addCopies(sqlOver(db), await find("Decks/Burn/main"), row.sources[0].bucket, 1)).rejects.toThrow(/added to a place/);
   });
 
   it("steps a target's line, as its type takes it", async () => {

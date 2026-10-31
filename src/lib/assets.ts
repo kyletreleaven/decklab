@@ -814,6 +814,162 @@ export async function builtContents(
   return out;
 }
 
+/**
+ * All Magic as a pull sheet's source: the one collection holding every
+ * card, in any number. Pulling from it adds copies rather than moving them.
+ */
+export const ALL_MAGIC = "all-magic";
+
+/**
+ * `n` copies of a bucket added to a place: from All Magic, where they were
+ * not counted anywhere before. A copy already there of the same bucket
+ * gains them.
+ */
+export async function addCopies(lab: Sql, placeId: string, bucket: Bucket, n: number, at = new Date().toISOString()): Promise<void> {
+  const [me] = await lab.select<{ type: AssetType }>("SELECT type FROM assets WHERE id = $1", [placeId]);
+  if (me?.type !== "place") throw new AssetError("Copies are added to a place.");
+  if (!Number.isInteger(n) || n < 1) throw new AssetError("Add at least one.");
+  await lab.execute(
+    `INSERT INTO lines (asset_id, oracle_id, printing_id, finish, attrs, shown_id, qty, added_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (asset_id, oracle_id, printing_id, finish, attrs, shown_id) DO UPDATE SET qty = qty + excluded.qty`,
+    [placeId, ...columns(bucket), n, at],
+  );
+  await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [placeId, at]);
+}
+
+/** Copies somewhere that would fill a deck's slot: a bucket in a place, and how many. */
+export interface PullSource {
+  place: Place;
+  bucket: Bucket;
+  qty: number;
+}
+
+/** A card a deck's decklist asks for and the deck lacks: how many, where it goes, and where it could come from. */
+export interface PullRow {
+  zone: string;
+  /** The deck's place for the zone; absent when the deck has no such zone. */
+  zoneId?: string;
+  oracleId: string;
+  card: Card;
+  missing: number;
+  sources: PullSource[];
+}
+
+/**
+ * A copy's bucket fills a decklist line when it lies inside the line's:
+ * the line's printing, if it binds one, finish and attributes all matched.
+ * A suggestion asks nothing (docs/inventory/buckets.md → *Suggested printings*).
+ */
+function fills(want: HeldBucket, have: HeldBucket): boolean {
+  if (want.printingId && want.printingId !== have.printingId) return false;
+  if (want.finish && want.finish !== have.finish) return false;
+  return Object.entries(want.attrs).every(([k, v]) => have.attrs[k] === v);
+}
+
+/**
+ * What a deck lacks, with every bucket in `fromId` — a place, or a sum's
+ * places — that would fill it: the pull sheet. The deck's own places are
+ * never a source. Sources come in the order to offer them: the line's
+ * suggested art first, then the most copies. Local only: no request.
+ */
+export async function pullSheet(lab: Sql, store: Sql, deckId: string, fromId: string): Promise<PullRow[]> {
+  const built = await builtContents(lab, store, deckId);
+  if (!built) return [];
+  const missing = built.flatMap((z) =>
+    z.tiles.filter((t) => t.state === "missing").map((t) => ({ zone: z.zone, zoneId: z.target?.id, tile: t })),
+  );
+  if (!missing.length) return [];
+
+  // All Magic holds every card, any number: what the decklist line says, as it says it.
+  if (fromId === ALL_MAGIC) {
+    const place = { id: ALL_MAGIC, name: "All Magic" };
+    return missing.map(({ zone, zoneId, tile }) => ({
+      zone,
+      ...(zoneId && { zoneId }),
+      oracleId: tile.oracleId,
+      card: tile.card,
+      missing: tile.count,
+      sources: tile.buckets.map((w) => ({
+        place,
+        qty: tile.count,
+        bucket: {
+          oracleId: tile.oracleId,
+          ...(w.printingId && { printingId: w.printingId }),
+          ...(w.finish && { finish: w.finish }),
+          attrs: w.attrs,
+          ...(w.shownId && { shownId: w.shownId }),
+        },
+      })),
+    }));
+  }
+
+  const [from] = await lab.select<{ id: string; name: string; type: AssetType }>("SELECT id, name, type FROM assets WHERE id = $1", [fromId]);
+  if (!from) throw new AssetError("That collection no longer exists.");
+  // Its own: what is below it, and the places its zones name, wherever they are.
+  const zoneTargets = await lab.select<{ target_id: string }>(
+    "SELECT target_id FROM asset_refs WHERE asset_id = $1 AND role IN ('commander', 'main', 'side') AND target_id IS NOT NULL",
+    [deckId],
+  );
+  const own = new Set([...(await subtree(lab, deckId)), ...zoneTargets.map((z) => z.target_id)]);
+  const places = (isA(from.type, "sum") ? await sumPlaces(lab, from.id) : from.type === "place" ? [{ id: from.id, name: from.name }] : []).filter(
+    (p) => !own.has(p.id),
+  );
+  const byId = new Map(places.map((p) => [p.id, p]));
+  const oracles = [...new Set(missing.map((m) => m.tile.oracleId))];
+  const rows: (LineRow & { asset_id: string })[] = [];
+  for (let i = 0; i < places.length; i += 200) {
+    const chunk = places.slice(i, i + 200);
+    for (let j = 0; j < oracles.length; j += 200) {
+      const cards = oracles.slice(j, j + 200);
+      rows.push(
+        ...(await lab.select<LineRow & { asset_id: string }>(
+          `SELECT asset_id, oracle_id, printing_id, finish, attrs, shown_id, qty FROM lines
+            WHERE asset_id IN (${chunk.map((_, k) => `$${k + 1}`).join(", ")})
+              AND oracle_id IN (${cards.map((_, k) => `$${chunk.length + k + 1}`).join(", ")})`,
+          [...chunk.map((p) => p.id), ...cards],
+        )),
+      );
+    }
+  }
+
+  return missing.map(({ zone, zoneId, tile }) => {
+    const wants = tile.buckets;
+    const drawn = new Set(wants.flatMap((w) => [w.printingId, w.shownId]).filter(Boolean));
+    const sources = rows
+      .filter((r) => r.oracle_id === tile.oracleId)
+      .map((r) => {
+        const held: HeldBucket = {
+          ...(r.printing_id && { printingId: r.printing_id }),
+          ...(r.finish && { finish: r.finish }),
+          attrs: JSON.parse(r.attrs) as Record<string, unknown>,
+          ...(r.shown_id && { shownId: r.shown_id }),
+          qty: r.qty,
+        };
+        return { held, place: byId.get(r.asset_id)! };
+      })
+      .filter(({ held }) => wants.some((w) => fills(w, held)))
+      .map(({ held, place }) => ({
+        place,
+        qty: held.qty,
+        bucket: {
+          oracleId: tile.oracleId,
+          ...(held.printingId && { printingId: held.printingId }),
+          ...(held.finish && { finish: held.finish }),
+          attrs: held.attrs,
+          ...(held.shownId && { shownId: held.shownId }),
+        } as Bucket,
+      }))
+      .sort(
+        (a, b) =>
+          Number(drawn.has(b.bucket.printingId)) - Number(drawn.has(a.bucket.printingId)) ||
+          b.qty - a.qty ||
+          a.place.name.localeCompare(b.place.name),
+      );
+    return { zone, ...(zoneId && { zoneId }), oracleId: tile.oracleId, card: tile.card, missing: tile.count, sources };
+  });
+}
+
 /* ---------- a list pool's members ---------- */
 
 /**
