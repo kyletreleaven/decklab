@@ -61,7 +61,12 @@ function labeller(runs: Card[], unknown: string): (b: Bucket) => string {
   const byId = new Map(runs.map((c) => [c.id, c]));
   return (b) => {
     const c = b.printingId ? byId.get(b.printingId) : undefined;
-    const printing = b.printingId ? (c ? printingLabel(c) : b.printingId) : unknown;
+    const s = b.shownId ? byId.get(b.shownId) : undefined;
+    const printing = b.printingId
+      ? c ? printingLabel(c) : b.printingId
+      : b.shownId
+        ? `${unknown}, suggested ${s ? printingLabel(s) : b.shownId}`
+        : unknown;
     const attrs = Object.entries(b.attrs ?? {}).map(([k, v]) =>
       v === true ? k : v === false ? `not ${k}` : `${k} ${String(v)}`,
     );
@@ -268,7 +273,10 @@ function BucketEditor({
   unknown: string;
   onMove: (to: Bucket, n: number) => Promise<void>;
 }) {
-  const [printingId, setPrintingId] = useState(from.printingId ?? "");
+  const [printingId, setPrintingId] = useState(from.printingId ?? from.shownId ?? "");
+  // A printing is the bucket's own, or only how its copies are drawn
+  // (docs/inventory/buckets.md → *Suggested printings*).
+  const [bound, setBound] = useState(!from.shownId);
   const [finish, setFinish] = useState(from.finish ?? "");
   const attrs = from.attrs ?? {};
   const [condition, setCondition] = useState(String(attrs.condition ?? ""));
@@ -297,16 +305,15 @@ function BucketEditor({
   );
   const to: Bucket = {
     oracleId: from.oracleId,
-    ...(printingId && { printingId }),
+    ...(printingId && (bound ? { printingId } : { shownId: printingId })),
     ...(finish && { finish }),
     attrs: nextAttrs,
   };
   const same = bucketKey(to) === bucketKey(from);
   const nOk = Number.isInteger(n) && n >= 1 && n <= qty;
   // A printing no longer in the run (or not yet loaded) still shows as itself.
-  const options = from.printingId && !runs.some((c) => c.id === from.printingId)
-    ? [{ id: from.printingId, label: from.printingId }]
-    : [];
+  const was = from.printingId ?? from.shownId;
+  const options = was && !runs.some((c) => c.id === was) ? [{ id: was, label: was }] : [];
 
   return (
     <div className="bucket-editor">
@@ -324,6 +331,13 @@ function BucketEditor({
               {printingLabel(c)}
             </option>
           ))}
+        </select>
+      </label>
+      <label title="Bound: only this printing. Suggested: any printing, drawn as this one.">
+        Printing is
+        <select value={bound ? "bound" : "suggested"} disabled={!printingId} onChange={(e) => setBound(e.target.value === "bound")}>
+          <option value="bound">bound</option>
+          <option value="suggested">suggested</option>
         </select>
       </label>
       <label>

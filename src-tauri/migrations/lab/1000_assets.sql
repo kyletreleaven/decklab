@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_refs_target ON asset_refs (target_id);
 
 -- ---------------------------------------------------------- buckets
 -- A bucket is a value, not a row: every table of lines below repeats its
--- four columns, and its identity is those four.
+-- five columns, and its identity is those five.
 --
 --   oracle_id    the card: required, the minimum grain
 --   printing_id  Scryfall's printing id, '' when absent. No foreign key to
@@ -87,6 +87,10 @@ CREATE INDEX IF NOT EXISTS idx_asset_refs_target ON asset_refs (target_id);
 --   finish       '' when absent
 --   attrs        user attributes as canonical JSON, keys sorted; '{}' when
 --                none. Queried with json_extract.
+--   shown_id     a suggested printing, '' when none: how the copies are
+--                drawn. Never matched, so SQL that counts or compares
+--                buckets leaves it out, and never beside a printing_id
+--                (docs/inventory/buckets.md → *Suggested printings*).
 
 CREATE TABLE IF NOT EXISTS attributes (
   name TEXT PRIMARY KEY,
@@ -106,20 +110,25 @@ CREATE TABLE IF NOT EXISTS lines (
   printing_id TEXT NOT NULL DEFAULT '',
   finish      TEXT NOT NULL DEFAULT '',
   attrs       TEXT NOT NULL DEFAULT '{}',
+  shown_id    TEXT NOT NULL DEFAULT '',
   qty         INTEGER NOT NULL CHECK (qty >= 1),
   added_at    TEXT,
-  PRIMARY KEY (asset_id, oracle_id, printing_id, finish, attrs)
+  PRIMARY KEY (asset_id, oracle_id, printing_id, finish, attrs, shown_id),
+  CHECK (printing_id = '' OR shown_id = '')
 );
 
--- A list pool's members: membership, no count.
+-- A list pool's members: membership, no count. No copies to split across
+-- arts, so a member has at most one suggestion: the key leaves it out.
 CREATE TABLE IF NOT EXISTS pool_members (
   asset_id    TEXT NOT NULL REFERENCES assets (id) ON DELETE CASCADE,
   oracle_id   TEXT NOT NULL,
   printing_id TEXT NOT NULL DEFAULT '',
   finish      TEXT NOT NULL DEFAULT '',
   attrs       TEXT NOT NULL DEFAULT '{}',
+  shown_id    TEXT NOT NULL DEFAULT '',
   added_at    TEXT,
-  PRIMARY KEY (asset_id, oracle_id, printing_id, finish, attrs)
+  PRIMARY KEY (asset_id, oracle_id, printing_id, finish, attrs),
+  CHECK (printing_id = '' OR shown_id = '')
 );
 
 CREATE INDEX IF NOT EXISTS idx_lines_oracle        ON lines (oracle_id);
@@ -143,6 +152,8 @@ CREATE TABLE IF NOT EXISTS pile_members (
   printing_id TEXT NOT NULL DEFAULT '',
   finish      TEXT NOT NULL DEFAULT '',
   attrs       TEXT NOT NULL DEFAULT '{}',
+  shown_id    TEXT NOT NULL DEFAULT '',
   added_at    TEXT,
-  PRIMARY KEY (pile_id, oracle_id, printing_id, finish, attrs)
+  PRIMARY KEY (pile_id, oracle_id, printing_id, finish, attrs, shown_id),
+  CHECK (printing_id = '' OR shown_id = '')
 );

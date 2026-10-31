@@ -21,6 +21,14 @@ export interface ParsedLine {
   /** Set by adapters that already know the Scryfall printing id (e.g. Archidekt). */
   scryfallId?: string;
   foil?: boolean;
+  /** Which finish `foil` is, where the source says: `*F*` or `*E*`. */
+  finish?: "foil" | "etched";
+  /**
+   * DeckLab's own, after the printing: `!` binds it, `?` only suggests it.
+   * Left out, the reader's default decides (docs/inventory/buckets.md →
+   * *Suggested printings*).
+   */
+  marker?: "!" | "?";
   condition?: string;
   section: Section;
 }
@@ -74,12 +82,20 @@ export function parseLine(raw: string, section: Section): ParsedLine | null {
   let text = raw.trim();
   if (!text) return null;
 
-  let foil = false;
+  let finish: "foil" | "etched" | undefined;
 
   // Moxfield marks finishes with *F* (foil) and *E* (etched).
-  if (/\*F\*/i.test(text) || /\*E\*/i.test(text)) {
-    foil = true;
+  if (/\*[FE]\*/i.test(text)) {
+    finish = /\*E\*/i.test(text) ? "etched" : "foil";
     text = text.replace(/\*[FE]\*/gi, " ").trim();
+  }
+
+  // A `!` or `?` on its own after the printing, either side of the finish.
+  let marker: "!" | "?" | undefined;
+  const mark = text.match(/\s([!?])$/);
+  if (mark) {
+    marker = mark[1] as "!" | "?";
+    text = text.slice(0, mark.index).trim();
   }
 
   let quantity = 1;
@@ -118,7 +134,9 @@ export function parseLine(raw: string, section: Section): ParsedLine | null {
     name: text,
     setCode,
     collectorNumber,
-    foil: foil || undefined,
+    foil: finish !== undefined || undefined,
+    ...(finish && { finish }),
+    ...(marker && { marker }),
     section,
   };
 }

@@ -143,6 +143,7 @@ function bucketOf(t: Tile): Bucket | null {
     ...(b.printingId && { printingId: b.printingId }),
     ...(b.finish && { finish: b.finish }),
     attrs: b.attrs,
+    ...(b.shownId && { shownId: b.shownId }),
   };
 }
 

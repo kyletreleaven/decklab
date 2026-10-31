@@ -357,6 +357,28 @@ describe("the lab's assets, for display", () => {
     await expect(found("s:")).rejects.toThrow();
   });
 
+  it("draws a line's suggestion over Scryfall's pick, still as a stand-in, and steps that line alone", async () => {
+    const box = await createAsset(sqlOver(db), "root", "place", { name: "Box" });
+    db.exec(`INSERT INTO lines (asset_id, oracle_id, shown_id, qty) VALUES ('${box}', 'sol', 'sol-c21', 2), ('${box}', 'sol', '', 1)`);
+    const [tile] = await lineContents(sqlOver(db), sqlOver(cards), box);
+    expect([tile.card.id, tile.standIn, tile.count]).toEqual(["sol-c21", true, 3]);
+    expect(tile.buckets.map((b) => b.shownId)).toEqual(expect.arrayContaining(["sol-c21", undefined]));
+
+    const suggested = { oracleId: "sol", shownId: "sol-c21", attrs: {} };
+    await stepLine(sqlOver(db), box, suggested, 1);
+    await stepLine(sqlOver(db), box, { oracleId: "sol", attrs: {} }, -1);
+    expect(db.prepare(`SELECT shown_id, qty FROM lines WHERE asset_id = ? ORDER BY shown_id`).all(box)).toEqual([
+      { shown_id: "sol-c21", qty: 3 },
+    ]);
+    // Never beside a printing, and only of its own card.
+    await expect(moveLines(sqlOver(db), sqlOver(cards), { assetId: box, bucket: suggested }, { assetId: box, bucket: { ...suggested, printingId: "sol-cmr" } }, 1)).rejects.toThrow(
+      /names its printing or suggests one/,
+    );
+    await expect(moveLines(sqlOver(db), sqlOver(cards), { assetId: box, bucket: suggested }, { assetId: box, bucket: { ...suggested, shownId: "bolt-m10" } }, 1)).rejects.toThrow(
+      /another card/,
+    );
+  });
+
   it("steps a target's line, as its type takes it", async () => {
     const red = await find("Binders/Red");
     const m10 = { oracleId: "bolt", printingId: "bolt-m10", attrs: {} };

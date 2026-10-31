@@ -13,6 +13,7 @@ import {
   type AttributeValue,
   type Bucket,
   type Pile,
+  type Printing,
   type V5Library,
   type Zone,
 } from "./v5";
@@ -36,9 +37,11 @@ interface Stored {
   printing_id: string;
   finish: string;
   attrs: string;
+  /** A suggested printing, `''` for none: drawn, never matched. */
+  shown_id: string;
 }
 
-const BUCKET_COLUMNS = ["oracle_id", "printing_id", "finish", "attrs"] as const;
+const BUCKET_COLUMNS = ["oracle_id", "printing_id", "finish", "attrs", "shown_id"] as const;
 
 /** User attributes as canonical JSON, keys sorted: part of the bucket's key. */
 function attrsJson(attrs: Record<string, AttributeValue>): string {
@@ -144,16 +147,17 @@ async function resolveBuckets(
   cards: Sql,
   fetchMissing: NonNullable<LabWriteOptions["fetchMissing"]>,
 ): Promise<{ resolve: (b: Bucket) => Stored; fetched: number }> {
-  const keyOf = (b: Bucket) => printingKey(b.printing!.set, b.printing!.number, b.printing!.lang);
-  const printed = buckets.filter((b) => b.printing);
+  const keyOf = (p: Printing) => printingKey(p.set, p.number, p.lang);
+  // Every printing a line names, its own or a suggestion: each looked up, and fetched, once.
+  const printed = [...new Set(buckets.flatMap((b) => [b.printing, b.shown].filter((p) => p !== undefined)).map(keyOf))];
   const named = buckets.filter((b) => !b.printing && b.oracle === undefined && b.card !== undefined);
 
-  let printings = await printingsByKey(cards, [...new Set(printed.map(keyOf))]);
+  let printings = await printingsByKey(cards, printed);
   let byName = await oraclesByName(cards, named.map((b) => b.card!));
 
   // What the store has never had: fetched once, through the channel, then
   // read back from the store.
-  const missingPrintings = [...new Set(printed.map(keyOf))].filter((k) => !printings.has(k));
+  const missingPrintings = printed.filter((k) => !printings.has(k));
   const foreign = missingPrintings.filter((k) => !k.endsWith("|en"));
   if (foreign.length) {
     throw new LibraryFormatError(
@@ -177,7 +181,7 @@ async function resolveBuckets(
   let fetched = 0;
   if (wanted.length) {
     fetched = (await fetchMissing(wanted)).found.length;
-    printings = await printingsByKey(cards, [...new Set(printed.map(keyOf))]);
+    printings = await printingsByKey(cards, printed);
     byName = await oraclesByName(cards, named.map((b) => b.card!));
   }
 
@@ -194,7 +198,7 @@ async function resolveBuckets(
     let oracle = b.oracle;
     let printingId = "";
     if (b.printing) {
-      const p = printings.get(keyOf(b));
+      const p = printings.get(keyOf(b.printing));
       if (!p) {
         problems.push(`${label}: no such printing`);
         continue;
@@ -222,7 +226,27 @@ async function resolveBuckets(
       problems.push(`${label}: that card is ${name}`);
       continue;
     }
-    resolved.set(b, { oracle_id: oracle!, printing_id: printingId, finish: b.finish ?? "", attrs: attrsJson(b.attrs) });
+    let shownId = "";
+    if (b.shown) {
+      const s = printings.get(keyOf(b.shown));
+      const as = `${b.card ?? name} suggested as (${b.shown.set}) ${b.shown.number}`;
+      if (!s) {
+        problems.push(`${as}: no such printing`);
+        continue;
+      }
+      if (s.oracle_id !== oracle) {
+        problems.push(`${as}: that printing is ${s.name}`);
+        continue;
+      }
+      shownId = s.id;
+    }
+    resolved.set(b, {
+      oracle_id: oracle!,
+      printing_id: printingId,
+      finish: b.finish ?? "",
+      attrs: attrsJson(b.attrs),
+      shown_id: shownId,
+    });
   }
   if (problems.length) {
     const shown = problems.slice(0, 10).join("\n");
@@ -546,7 +570,7 @@ export async function readLab(sql: Sql, cards: Sql, { only }: { only?: string[] 
 
   // What the file says about each card, from the store.
   const all = [...countedLines, ...poolMembers, ...pileMembers];
-  const printingIds = [...new Set(all.map((l) => l.printing_id).filter((p) => p !== ""))];
+  const printingIds = [...new Set(all.flatMap((l) => [l.printing_id, l.shown_id]).filter((p) => p !== ""))];
   const printingRows = await inChunks(printingIds, (chunk) =>
     cards.select<PrintingRow>(
       `SELECT id, oracle_id, name, set_code, collector_number,
@@ -569,6 +593,11 @@ export async function readLab(sql: Sql, cards: Sql, { only }: { only?: string[] 
       else b.printing = { set: p.set_code, number: p.collector_number, lang: p.lang };
     }
     if (l.finish !== "") b.finish = l.finish;
+    if (l.shown_id !== "") {
+      const s = printings.get(l.shown_id);
+      if (!s) problems.push(`suggested printing ${l.shown_id} is not in the card store`);
+      else b.shown = { set: s.set_code, number: s.collector_number, lang: s.lang };
+    }
     return b;
   };
   const added = (l: { added_at: string | null }) => (l.added_at === null ? {} : { added: l.added_at });

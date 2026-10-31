@@ -56,6 +56,11 @@ export interface Bucket {
   printing?: Printing;
   finish?: string;
   attrs: Record<string, AttributeValue>;
+  /**
+   * A suggested printing: how the copies are drawn. Part of the bucket, but
+   * never matched, and never beside `printing`.
+   */
+  shown?: Printing;
 }
 
 /**
@@ -139,6 +144,7 @@ export function bucketKey(b: Bucket): string {
     b.printing ? [b.printing.set, b.printing.number, b.printing.lang] : null,
     b.finish ?? null,
     sortedAttrs(b.attrs),
+    b.shown ? [b.shown.set, b.shown.number, b.shown.lang] : null,
   ]);
 }
 
@@ -274,6 +280,11 @@ function detailFields(b: Bucket): Field[] {
     if (b.printing.lang !== "en") fields.push(["lang", str(b.printing.lang)]);
   }
   if (b.finish !== undefined) fields.push(["finish", str(b.finish)]);
+  if (b.shown) {
+    const shown: Field[] = [["set", str(b.shown.set)], ["number", str(b.shown.number)]];
+    if (b.shown.lang !== "en") shown.push(["lang", str(b.shown.lang)]);
+    fields.push(["shown", inline(shown)]);
+  }
   const attrs = sortedAttrs(b.attrs);
   if (attrs.length) fields.push(["attrs", inline(attrs.map(([k, v]) => [key(k), value(v)]))]);
   return fields;
@@ -290,7 +301,7 @@ function filtersInline(f: SavedFilters): string {
   return inline(
     Object.entries(savedFilters(f)).map(([k, v]): Field => [
       k,
-      Array.isArray(v) ? `[${v.map((x) => str(x)).join(", ")}]` : String(v),
+      Array.isArray(v) ? `[${v.map((x) => str(x)).join(", ")}]` : typeof v === "string" ? str(v) : String(v),
     ]),
   );
 }
@@ -516,7 +527,18 @@ class Reader {
   }
 }
 
-const BUCKET_KEYS = ["card", "oracle", "set", "number", "lang", "finish", "attrs", "added"];
+const BUCKET_KEYS = ["card", "oracle", "set", "number", "lang", "finish", "attrs", "shown", "added"];
+
+/** A printing as `set`, `number` and `lang`: all or none, `lang` only when not English. */
+function readPrinting(r: Reader): Printing | undefined {
+  if (!r.has("set") && !r.has("number") && !r.has("lang")) return undefined;
+  if (!r.has("set") || !r.has("number")) {
+    r.fail("a printing needs both `set` and `number` (and `lang` only when not English)");
+  }
+  const lang = r.optText("lang") ?? "en";
+  if (r.has("lang") && lang === "en") r.fail("`lang` is left out when English");
+  return { set: r.text("set"), number: r.text("number"), lang };
+}
 const ASSET_KEYS = ["path", "type", "notes", "created", "updated"];
 
 function readBucket(r: Reader, attributes: Record<string, AttributeType>): Bucket {
@@ -528,14 +550,17 @@ function readBucket(r: Reader, attributes: Record<string, AttributeType>): Bucke
     r.fail("a line must say which card: `card`, `oracle`, or a printing");
   }
 
-  let printing: Printing | undefined;
-  if (r.has("set") || r.has("number") || r.has("lang")) {
-    if (!r.has("set") || !r.has("number")) {
-      r.fail("a printing needs both `set` and `number` (and `lang` only when not English)");
-    }
-    const lang = r.optText("lang") ?? "en";
-    if (r.has("lang") && lang === "en") r.fail("`lang` is left out when English");
-    printing = { set: r.text("set"), number: r.text("number"), lang };
+  const printing = readPrinting(r);
+
+  // A suggestion says how the copies are drawn, not which card: the line
+  // still has to say that, and the two must agree on load.
+  let shown: Printing | undefined;
+  if (r.has("shown")) {
+    const raw = r.table.shown;
+    if (!isTable(raw)) r.fail("`shown` must be a table: `{ set, number }`");
+    if (printing) r.fail("a line names its printing or suggests one with `shown`, not both");
+    shown = readPrinting(new Reader(raw, `${r.where}, shown`, ["set", "number", "lang"]));
+    if (!shown) r.fail("`shown` needs `set` and `number`");
   }
 
   const finish = r.optText("finish");
@@ -571,6 +596,7 @@ function readBucket(r: Reader, attributes: Record<string, AttributeType>): Bucke
   if (oracle !== undefined) bucket.oracle = oracle;
   if (printing) bucket.printing = printing;
   if (finish !== undefined) bucket.finish = finish;
+  if (shown) bucket.shown = shown;
   return bucket;
 }
 
@@ -752,7 +778,8 @@ export function loadV5(text: string): V5Library {
           const cards = lines(r, "cards", []).map((l) =>
             withAdded(l, { bucket: readBucket(l, attributes) }),
           );
-          noDuplicates(cards.map((c) => c.bucket));
+          // No copies to split across arts: one suggestion a match.
+          noDuplicates(cards.map((c) => ({ ...c.bucket, shown: undefined })));
           assets.push({ ...common(r), type: "list pool", cards });
         }
         break;

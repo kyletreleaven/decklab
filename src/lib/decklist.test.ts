@@ -123,7 +123,18 @@ describe("parseLine", () => {
       name: "Sol Ring",
       foil: true,
     });
-    expect(parseLine("1 Sol Ring *E*", "main")).toMatchObject({ foil: true });
+    expect(parseLine("1 Sol Ring *E*", "main")).toMatchObject({ foil: true, finish: "etched" });
+  });
+
+  it("reads DeckLab's `!` and `?` after the printing, either side of the finish", () => {
+    const at = { name: "Sol Ring", setCode: "c21", collectorNumber: "263" };
+    expect(parseLine("1 Sol Ring (C21) 263 !", "main")).toMatchObject({ ...at, marker: "!" });
+    expect(parseLine("1 Sol Ring (C21) 263 ? *F*", "main")).toMatchObject({ ...at, marker: "?", finish: "foil" });
+    expect(parseLine("1 Sol Ring (C21) 263 *F* ?", "main")).toMatchObject({ ...at, marker: "?", finish: "foil" });
+    expect(parseLine("1 Sol Ring (C21) 263", "main")).not.toHaveProperty("marker");
+    // Only on its own: a name's own punctuation stays.
+    expect(parseLine("1 Kaboom!", "main")).toMatchObject({ name: "Kaboom!" });
+    expect(parseLine("1 Kaboom!", "main")).not.toHaveProperty("marker");
   });
 
   it("leaves parenthesised card names alone", () => {

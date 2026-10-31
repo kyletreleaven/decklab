@@ -17,6 +17,7 @@ function store() {
      VALUES (?, ?, ?, ?, 'Set', ?, ?, 'common', 'normal', '{"lang":"en"}', '2020-01-01')`,
   );
   insert.run("sol-c21", "sol", "Sol Ring", "c21", "263", "2021-04-23");
+  insert.run("sol-cmr", "sol", "Sol Ring", "cmr", "472", "2020-11-20");
   insert.run("bolt-m10", "bolt", "Lightning Bolt", "m10", "146", "2009-07-17");
   return db;
 }
@@ -166,6 +167,61 @@ describe("agent API, lab routes", () => {
     await put(at, "Maybeboard\n", "text/plain");
     expect(await text()).toBe("Commander\n1 Sol Ring\n\nDeck\n3 Lightning Bolt\n");
     expect(onWrite).toHaveBeenCalledTimes(3);
+  });
+
+  it("reads a printing in text as a suggestion, unless `!` or a finish binds it, and writes it back the shortest way", async () => {
+    const at = "/lab/assets/Decklists/Sol";
+    const list = [
+      "1 Sol Ring (C21) 263", // suggested
+      "1 Sol Ring (CMR) 472 !", // bound
+      "1 Sol Ring (C21) 263 *F*", // bound by its finish
+      "1 Sol Ring (CMR) 472 ? *F*", // suggested, finish and all
+    ].join("\n");
+    expect((await put(`${at}?type=decklist`, `Deck\n${list}`, "text/plain")).status).toBe(201);
+    const rows = db
+      .prepare("SELECT printing_id, shown_id, finish FROM lines l JOIN assets a ON a.id = l.asset_id WHERE a.name = 'main' ORDER BY printing_id, shown_id, finish")
+      .all();
+    expect(rows).toEqual([
+      { printing_id: "", shown_id: "sol-c21", finish: "" },
+      { printing_id: "", shown_id: "sol-cmr", finish: "foil" },
+      { printing_id: "sol-c21", shown_id: "", finish: "foil" },
+      { printing_id: "sol-cmr", shown_id: "", finish: "" },
+    ]);
+
+    const text = async (q = "") => (await app.request(`${at}${q}`, { headers: { ...auth, Accept: "text/plain" } })).text();
+    const back = await text();
+    for (const l of list.split("\n")) expect(back).toContain(`${l}\n`);
+    // Read back, it is the same decklist; without marks, another site's text, read with the defaults.
+    expect((await put(at, back, "text/plain")).status).toBe(200);
+    expect(await text()).toBe(back);
+    const plain = await text("?marks=no");
+    expect(plain).not.toMatch(/ [!?]( |\n)/);
+    expect(plain).toContain("1 Sol Ring (CMR) 472\n");
+
+    // The JSON says it outright: `set` is the bucket's printing, `shown` a suggestion.
+    const me = await (await app.request(`${at}/main`, { headers: auth })).json();
+    expect(me.cards).toContainEqual(
+      expect.objectContaining({ bucket: expect.objectContaining({ shown: { set: "c21", number: "263", lang: "en" } }), qty: 1 }),
+    );
+  });
+
+  it("refuses a `!` with no printing, and `set` beside `shown`; a pool keeps one suggestion a card", async () => {
+    const refused = async (res: Response, why: RegExp) => {
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(why);
+    };
+    await refused(await put("/lab/assets/D?type=decklist", "1 Sol Ring !", "text/plain"), /`!` binds a printing, and the line gives none/);
+    const both = { type: "list pool", cards: [{ card: "Sol Ring", set: "c21", number: "263", shown: { set: "cmr", number: "472" } }] };
+    await refused(await put("/lab/assets/P", JSON.stringify(both)), /names its printing or suggests one/);
+    const wrong = { type: "list pool", cards: [{ card: "Sol Ring", shown: { set: "m10", number: "146" } }] };
+    await refused(await put("/lab/assets/P", JSON.stringify(wrong)), /that printing is Lightning Bolt/);
+
+    // Membership has no copies to split: the first suggestion stands.
+    expect((await put("/lab/assets/P", "1 Sol Ring\n1 Sol Ring (CMR) 472\n1 Sol Ring (C21) 263", "text/plain")).status).toBe(201);
+    expect(db.prepare("SELECT printing_id, shown_id FROM pool_members").all()).toEqual([{ printing_id: "", shown_id: "sol-cmr" }]);
+    // A new suggestion replaces it.
+    await put("/lab/assets/P", "1 Sol Ring (C21) 263", "text/plain");
+    expect(db.prepare("SELECT printing_id, shown_id FROM pool_members").all()).toEqual([{ printing_id: "", shown_id: "sol-c21" }]);
   });
 
   it("puts a decklist as JSON, making the zones it names, and refuses a zone it does not own", async () => {

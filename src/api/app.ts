@@ -84,9 +84,10 @@ export function createApp(token: () => Promise<string | null>, labAccess?: LabAc
 
   app.get("/lab/assets/*", async (c) => {
     const { lab: sql, cards } = await lab();
-    // A decklist reads as text when asked: the zones, as `PUT` takes them.
+    // A decklist reads as text when asked: the zones, as `PUT` takes them;
+    // `?marks=no` without `!` and `?`, for another site.
     if ((c.req.header("accept") ?? "").includes("text/plain")) {
-      return c.text(await decklistText(sql, cards, pathOf(c)));
+      return c.text(await decklistText(sql, cards, pathOf(c), { marks: c.req.query("marks") !== "no" }));
     }
     return c.json(await assetAt(sql, cards, pathOf(c)));
   });

@@ -75,6 +75,7 @@ updated = 2026-03-01T14:02:11.000Z
 main = [
   { card = "Lightning Bolt", oracle = "${BOLT}", qty = 1, set = "m10", number = "146" },
   { card = "Sol Ring", oracle = "${SOL}", qty = 1 },
+  { card = "Sol Ring", oracle = "${SOL}", qty = 2, shown = { set = "c21", number = "263" } },
 ]
 side = '&/Sideboards/current'
 
@@ -135,7 +136,10 @@ describe("the lab database, against library file version 5", () => {
   it("round-trips: dump(read(write(file))) is the file", async () => {
     const summary = await writeLab(sqlOver(db), sqlOver(cards), loadV5(FILE), { fetchMissing: noFetch });
     expect(summary.fetched).toBe(0);
-    expect(dumpV5(await readLab(sqlOver(db), sqlOver(cards)))).toBe(dumpV5(loadV5(FILE)));
+    const dump = dumpV5(await readLab(sqlOver(db), sqlOver(cards)));
+    expect(dump).toBe(dumpV5(loadV5(FILE)));
+    // And it loads: comparing dumps alone let a bad one through (bug 010).
+    expect(dumpV5(loadV5(dump))).toBe(dump);
   });
 
   it("reads one asset as the whole dump has it, an implied folder included", async () => {
@@ -151,9 +155,9 @@ describe("the lab database, against library file version 5", () => {
   it("stores absent as '' and '{}', never NULL, and implied folders as rows", async () => {
     await writeLab(sqlOver(db), sqlOver(cards), loadV5(FILE), { fetchMissing: noFetch });
     const sol = db
-      .prepare("SELECT printing_id, finish, attrs FROM lines WHERE oracle_id = ? AND printing_id = ''")
+      .prepare("SELECT printing_id, finish, attrs, shown_id FROM lines WHERE oracle_id = ? AND printing_id = '' AND shown_id = ''")
       .get(SOL);
-    expect(sol).toEqual({ printing_id: "", finish: "", attrs: "{}" });
+    expect(sol).toEqual({ printing_id: "", finish: "", attrs: "{}", shown_id: "" });
     const folders = db.prepare("SELECT name FROM assets WHERE type = 'folder' AND id <> 'root' ORDER BY name").all();
     expect(folders).toEqual([{ name: "Binders" }, { name: "Built" }, { name: "Decks" }, { name: "pools" }]);
   });
@@ -211,6 +215,44 @@ cards = [ { card = "Sol Ring", qty = 1 }, { card = "Delver of Secrets", qty = 1 
     if (box.type !== "place") throw new Error("not a place");
     // The front face still names a card no other has whole.
     expect(box.cards.map((l) => l.bucket.oracle).sort()).toEqual([DELVER, SOL]);
+  });
+
+  it("keeps a suggestion apart from the printing, and refuses one of another card, or two in a pool", async () => {
+    const file = (cards: string, type = "place") => `format = "decklab-library"
+version = 5
+
+[[asset]]
+path = '/Box'
+type = "${type}"
+cards = [
+${cards}
+]
+`;
+    expect(() => loadV5(file(`  { card = "Sol Ring", qty = 1, set = "c21", number = "263", shown = { set = "cmr", number = "472" } },`))).toThrow(
+      /names its printing or suggests one/,
+    );
+    expect(() => loadV5(file(`  { card = "Sol Ring", qty = 1, shown = { set = "cmr" } },`))).toThrow(/needs both `set` and `number`/);
+    expect(() =>
+      loadV5(file(`  { card = "Sol Ring", shown = { set = "c21", number = "263" } },\n  { card = "Sol Ring", shown = { set = "cmr", number = "472" } },`, "list pool")),
+    ).toThrow(/two lines for the same bucket/);
+    // Two arts of one card in a place are two buckets, as ten Islands in five arts are five.
+    const arts = loadV5(file(`  { card = "Sol Ring", qty = 1, shown = { set = "c21", number = "263" } },\n  { card = "Sol Ring", qty = 2, shown = { set = "cmr", number = "472" } },`));
+    await writeLab(sqlOver(db), sqlOver(cards), arts, { fetchMissing: noFetch });
+    expect(db.prepare("SELECT printing_id, shown_id, qty FROM lines ORDER BY shown_id").all()).toEqual([
+      { printing_id: "", shown_id: "sol-c21", qty: 1 },
+      { printing_id: "", shown_id: "sol-cmr", qty: 2 },
+    ]);
+    // A suggestion of another card is refused on load, against the store.
+    const lab2 = lab();
+    await expect(
+      writeLab(sqlOver(lab2), sqlOver(cards), loadV5(file(`  { card = "Sol Ring", qty = 1, shown = { set = "m10", number = "146" } },`)), {
+        fetchMissing: noFetch,
+      }),
+    ).rejects.toThrow(/Sol Ring suggested as \(m10\) 146: that printing is Lightning Bolt/);
+    // And the schema holds the line to one or the other.
+    expect(() => db.exec(`INSERT INTO lines (asset_id, oracle_id, printing_id, shown_id, qty) VALUES ('root', '${SOL}', 'sol-c21', 'sol-cmr', 1)`)).toThrow(
+      /CHECK constraint failed/,
+    );
   });
 
   it("refuses a line whose parts disagree, before writing anything", async () => {

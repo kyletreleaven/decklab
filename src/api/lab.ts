@@ -8,7 +8,7 @@ import {
   setPoolQuery,
   type AssetNode,
 } from "../lib/assets";
-import { asSection, parseDecklist, type Section } from "../lib/decklist";
+import { asSection, parseDecklist, type ParsedLine, type Section } from "../lib/decklist";
 import { parseSavedFilters, type SavedFilters } from "../lib/filters";
 import { insertRows, readLab, resolveForApi, type LabWriteOptions, type StoredBucket } from "../lib/library/labdb";
 import { LibraryFormatError } from "../lib/library/v5";
@@ -120,11 +120,24 @@ const bad = (why: string): never => {
 function bucketFromJson(raw: unknown, where: string, extra: string[] = []): { bucket: Bucket; m: Record<string, unknown> } {
   if (typeof raw !== "object" || raw === null) return bad(`${where} must be an object.`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!MEMBER_KEYS.includes(k) && !extra.includes(k)) bad(`${where}: unknown key \`${k}\`.`);
+  for (const k of Object.keys(m)) {
+    if (!MEMBER_KEYS.includes(k) && k !== "shown" && !extra.includes(k)) bad(`${where}: unknown key \`${k}\`.`);
+  }
   for (const k of MEMBER_KEYS) if (m[k] !== undefined && typeof m[k] !== "string") bad(`${where}.${k} must be a string.`);
   const s = (k: string) => m[k] as string | undefined;
   if (!s("card") && !s("oracle") && !s("set")) bad(`${where} must say which card: \`card\`, \`oracle\`, or \`set\` and \`number\`.`);
   if (!!s("set") !== !!s("number")) bad(`${where}: a printing needs both \`set\` and \`number\`.`);
+  // A suggested printing: how the line is drawn, not which card it is.
+  let shown: Bucket["shown"];
+  if (m.shown !== undefined) {
+    const v = m.shown as Record<string, unknown>;
+    const ok = typeof v === "object" && v !== null && typeof v.set === "string" && typeof v.number === "string";
+    if (!ok || Object.keys(v).some((k) => !["set", "number", "lang"].includes(k)) || (v.lang !== undefined && typeof v.lang !== "string")) {
+      bad(`${where}.shown must be \`{ set, number }\`, with \`lang\` only when not English.`);
+    }
+    if (s("set")) bad(`${where}: a line names its printing or suggests one with \`shown\`, not both.`);
+    shown = { set: (v.set as string).toLowerCase(), number: v.number as string, lang: (v.lang as string | undefined) ?? "en" };
+  }
   return {
     m,
     bucket: {
@@ -133,6 +146,7 @@ function bucketFromJson(raw: unknown, where: string, extra: string[] = []): { bu
       ...(s("set") && { printing: { set: s("set")!.toLowerCase(), number: s("number")!, lang: s("lang") ?? "en" } }),
       ...(s("finish") && { finish: s("finish") }),
       attrs: {},
+      ...(shown && { shown }),
     },
   };
 }
@@ -186,12 +200,21 @@ export function bodyFromJson(json: unknown): PutBody {
   return bad('`type` must be "list pool", "query pool" or "decklist".');
 }
 
-/** A text line's card: a printing pinned by `(SET) 123`, foil by `*F*`. */
-function textBucket(l: { name: string; setCode?: string; collectorNumber?: string; foil?: boolean }): Bucket {
+/**
+ * A text line's card. `(SET) 123` suggests a printing, unless `!` binds it
+ * or a finish (`*F*`, `*E*`) does, since a marked foil is almost always that
+ * foil; `?` keeps it a suggestion even then (docs/inventory/buckets.md →
+ * *Suggested printings*).
+ */
+function textBucket(l: ParsedLine): Bucket {
+  const given = l.setCode && l.collectorNumber ? { set: l.setCode.toLowerCase(), number: l.collectorNumber, lang: "en" } : undefined;
+  if (!given && l.marker === "!") throw new LabApiError(`${l.raw.trim()}: \`!\` binds a printing, and the line gives none.`, 400);
+  const finish = l.finish ?? (l.foil ? "foil" : undefined);
+  const binds = l.marker === "!" || (l.marker !== "?" && finish !== undefined);
   return {
     card: l.name,
-    ...(l.setCode && l.collectorNumber && { printing: { set: l.setCode.toLowerCase(), number: l.collectorNumber, lang: "en" } }),
-    ...(l.foil && { finish: "foil" }),
+    ...(given && (binds ? { printing: given } : { shown: given })),
+    ...(finish && { finish }),
     attrs: {},
   };
 }
@@ -234,7 +257,10 @@ export function decklistFromText(text: string): DecklistBody {
 
 type Row = StoredBucket & { qty?: number; added_at?: string | null };
 
-const rowKey = (s: StoredBucket) => JSON.stringify([s.oracle_id, s.printing_id, s.finish, s.attrs]);
+const rowKey = (s: StoredBucket) => JSON.stringify([s.oracle_id, s.printing_id, s.finish, s.attrs, s.shown_id]);
+
+/** A pool member's key: its bucket's match, since a member has one suggestion at most. */
+const memberKey = (s: StoredBucket) => JSON.stringify([s.oracle_id, s.printing_id, s.finish, s.attrs]);
 
 /**
  * Make an asset's rows — a pool's members, or a checklist's lines with their
@@ -251,31 +277,32 @@ async function replaceRows(
   at: string,
 ): Promise<boolean> {
   const counted = table === "lines";
+  const keyOf = counted ? rowKey : memberKey;
   const had = await lab.select<Row>(
-    `SELECT oracle_id, printing_id, finish, attrs, added_at${counted ? ", qty" : ""} FROM ${table} WHERE asset_id = $1`,
+    `SELECT oracle_id, printing_id, finish, attrs, shown_id, added_at${counted ? ", qty" : ""} FROM ${table} WHERE asset_id = $1`,
     [assetId],
   );
   const gone: Row[] = [];
   const fresh = new Map(wanted);
   for (const h of had) {
-    const w = fresh.get(rowKey(h));
+    const w = fresh.get(keyOf(h));
     if (!w) gone.push(h);
-    else if (counted && Number(h.qty) !== w.qty) {
-      // A new count: out, and back in with its old date.
+    else if ((counted && Number(h.qty) !== w.qty) || h.shown_id !== w.shown_id) {
+      // A new count, or a member's new suggestion: out, and back in with its old date.
       gone.push(h);
-      fresh.set(rowKey(h), { ...w, added_at: h.added_at });
-    } else fresh.delete(rowKey(h));
+      fresh.set(keyOf(h), { ...w, added_at: h.added_at });
+    } else fresh.delete(keyOf(h));
   }
   for (let i = 0; i < gone.length; i += 200) {
     const chunk = gone.slice(i, i + 200);
     await lab.execute(
-      `DELETE FROM ${table} WHERE asset_id = $1 AND (oracle_id, printing_id, finish, attrs) IN (VALUES ${chunk
-        .map((_, j) => `($${4 * j + 2}, $${4 * j + 3}, $${4 * j + 4}, $${4 * j + 5})`)
+      `DELETE FROM ${table} WHERE asset_id = $1 AND (oracle_id, printing_id, finish, attrs, shown_id) IN (VALUES ${chunk
+        .map((_, j) => `($${5 * j + 2}, $${5 * j + 3}, $${5 * j + 4}, $${5 * j + 5}, $${5 * j + 6})`)
         .join(", ")})`,
-      [assetId, ...chunk.flatMap((h) => [h.oracle_id, h.printing_id, h.finish, h.attrs])],
+      [assetId, ...chunk.flatMap((h) => [h.oracle_id, h.printing_id, h.finish, h.attrs, h.shown_id])],
     );
   }
-  const columns = ["asset_id", "oracle_id", "printing_id", "finish", "attrs", "added_at", ...(counted ? ["qty"] : [])];
+  const columns = ["asset_id", "oracle_id", "printing_id", "finish", "attrs", "shown_id", "added_at", ...(counted ? ["qty"] : [])];
   await insertRows(
     lab,
     table,
@@ -286,6 +313,7 @@ async function replaceRows(
       s.printing_id,
       s.finish,
       s.attrs,
+      s.shown_id,
       s.added_at === undefined ? at : s.added_at,
       ...(counted ? [s.qty] : []),
     ]),
@@ -349,7 +377,12 @@ export async function putPool(
     return { created };
   }
   const { id, created } = await ensure(lab, names, "list pool", (parent, name) => createAsset(lab, parent, "list pool", { name, at }), at);
-  const wanted = new Map(body.cards.map((b) => resolve!(b)).map((s) => [rowKey(s), s as Row]));
+  // One member a match, with the first suggestion its lines give.
+  const wanted = new Map<string, Row>();
+  for (const s of body.cards.map((b) => resolve!(b))) {
+    const prior = wanted.get(memberKey(s));
+    if (!prior || (prior.shown_id === "" && s.shown_id !== "")) wanted.set(memberKey(s), s);
+  }
   await replaceRows(lab, "pool_members", id, wanted, at);
   const [{ n }] = await lab.select<{ n: number }>("SELECT COUNT(*) AS n FROM pool_members WHERE asset_id = $1", [id]);
   return { created, members: n };
@@ -449,17 +482,26 @@ const HEADINGS: [DeckZone, string][] = [
   ["maybe", "Maybeboard"],
 ];
 
-function textLine(qty: number, b: Bucket): string {
-  const printing = b.printing ? ` (${b.printing.set.toUpperCase()}) ${b.printing.number}` : "";
+/**
+ * A line in the shortest form that reads back the same: a marker only where
+ * the default would read it otherwise — `!` on a bound printing with no
+ * finish, `?` on a suggested one with a finish. `marks: false` leaves them
+ * out, for another site, which reads back with the defaults.
+ */
+function textLine(qty: number, b: Bucket, marks: boolean): string {
+  const p = b.printing ?? b.shown;
   const finish = b.finish === "foil" ? " *F*" : b.finish === "etched" ? " *E*" : "";
-  return `${qty} ${b.card ?? b.oracle}${printing}${finish}`;
+  const marker = !marks || !p ? "" : b.printing && !finish ? " !" : b.shown && finish ? " ?" : "";
+  const printing = p ? ` (${p.set.toUpperCase()}) ${p.number}` : "";
+  return `${qty} ${b.card ?? b.oracle}${printing}${marker}${finish}`;
 }
 
 /**
  * A decklist as text, the way `PUT` takes one: a heading per zone it has,
- * then its maybeboard. Attributes are not written.
+ * then its maybeboard. Attributes are not written; nor, with `marks: false`,
+ * whether a printing binds.
  */
-export async function decklistText(lab: Sql, cards: Sql, names: string[]): Promise<string> {
+export async function decklistText(lab: Sql, cards: Sql, names: string[], { marks = true } = {}): Promise<string> {
   const me = await assetAt(lab, cards, names);
   if (me.type !== "decklist") throw new LabApiError(`${formatPath(names)} is a ${me.type}: only a decklist reads as text.`, 400);
   const blocks: string[] = [];
@@ -474,7 +516,7 @@ export async function decklistText(lab: Sql, cards: Sql, names: string[]): Promi
     const [asset] = (await readLab(lab, cards, { only: at })).assets;
     if (!asset || !("cards" in asset)) continue;
     const lines = (asset.cards as { bucket: Bucket; qty?: number; min?: number }[]).map((l) =>
-      textLine(l.qty ?? l.min ?? 1, l.bucket),
+      textLine(l.qty ?? l.min ?? 1, l.bucket, marks),
     );
     if (lines.length || zone !== "maybe") blocks.push([heading, ...lines].join("\n"));
   }

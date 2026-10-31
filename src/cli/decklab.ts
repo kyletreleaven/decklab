@@ -38,10 +38,29 @@ assets options (the app must be open, with Tools → Agent API → Enable):
   --text                          get: as text, whatever the file
   --type <type>                   put: what a new asset from a .txt file is
                                   (decklist, list pool)
+
+  --force                         write over a file that exists. Without it, dump,
+                                  convert and assets get refuse to
 `;
 
 /** Thrown for a mistake in the command line itself: exit 2, with usage. */
 class UsageError extends Error {}
+
+/**
+ * Write a new file, refusing one that exists unless `force`: a dump written
+ * over the last one has lost the only copy of a lab before (see
+ * docs/cli.md). `wx` makes the check and the write one step.
+ */
+function writeNew(path: string, text: string, force: boolean): void {
+  try {
+    writeFileSync(path, text, { flag: force ? "w" : "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(`${path} exists: write to a new name, or pass --force to replace it`);
+    }
+    throw e;
+  }
+}
 
 /**
  * Where the app keeps its databases: Tauri's app config directory, which the
@@ -99,7 +118,7 @@ function openToRead(path: string): Database {
  * snapshot even if the app commits an edit meanwhile. In WAL mode the app
  * is not held up by it.
  */
-async function dump(path: string, out: string | undefined, storePath: string): Promise<void> {
+async function dump(path: string, out: string | undefined, storePath: string, force: boolean): Promise<void> {
   const db = openToRead(path);
   let storeDb: Database | undefined;
   const store = () => sqlOver((storeDb ??= openToRead(storePath)));
@@ -116,11 +135,13 @@ async function dump(path: string, out: string | undefined, storePath: string): P
         );
       }
       text = await dumpOf(sql, store);
+      // A lab dump is a backup: one that does not load is none (bug 010).
+      if (schema === 1000) loadV5(text);
     } finally {
       db.run("COMMIT");
     }
     if (out === undefined) process.stdout.write(text);
-    else writeFileSync(out, text);
+    else writeNew(out, text, force);
   } finally {
     db.close();
     storeDb?.close();
@@ -133,7 +154,7 @@ async function dump(path: string, out: string | undefined, storePath: string): P
  * reported, not fetched. The result is loaded back before it is written, so
  * a converter bug cannot produce a file version 5 refuses.
  */
-function convert(input: string, out: string | undefined, store: string): void {
+function convert(input: string, out: string | undefined, store: string, force: boolean): void {
   const v4 = loadV4(readFileSync(input, "utf8"));
   const db = openToRead(store);
   try {
@@ -155,7 +176,7 @@ function convert(input: string, out: string | undefined, store: string): void {
     const text = dumpV5(library);
     loadV5(text);
     if (out === undefined) process.stdout.write(text);
-    else writeFileSync(out, text);
+    else writeNew(out, text, force);
     process.stderr.write(formatReport(report) || "nothing lost\n");
   } finally {
     db.close();
@@ -170,6 +191,7 @@ interface Parsed {
   token?: string;
   port?: string;
   text: boolean;
+  force: boolean;
   type?: string;
 }
 
@@ -179,6 +201,7 @@ function parse(argv: string[]): Parsed {
   let store = appDatabase("card-cache.db");
   const given: Record<string, string> = {};
   let text = false;
+  let force = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--db" || arg === "--store" || arg === "--token" || arg === "--port" || arg === "--type") {
@@ -189,6 +212,8 @@ function parse(argv: string[]): Parsed {
       else given[arg.slice(2)] = value;
     } else if (arg === "--text") {
       text = true;
+    } else if (arg === "--force") {
+      force = true;
     } else if (arg === "-h" || arg === "--help") {
       args.unshift("help");
     } else if (arg.startsWith("-")) {
@@ -198,7 +223,7 @@ function parse(argv: string[]): Parsed {
     }
   }
   const [command = "help", ...rest] = args;
-  return { command, args: rest, db, store, text, ...given };
+  return { command, args: rest, db, store, text, force, ...given };
 }
 
 /**
@@ -213,18 +238,18 @@ function toTheApp(url: string, init?: RequestInit): Promise<Response> {
 }
 
 async function main(argv: string[]): Promise<number> {
-  const { command, args, db, store, token, port, text, type } = parse(argv);
+  const { command, args, db, store, token, port, text, force, type } = parse(argv);
   switch (command) {
     case "help":
       process.stdout.write(USAGE);
       return 0;
     case "dump":
       if (args.length > 1) throw new UsageError("dump takes at most one file");
-      await dump(db, args[0], store);
+      await dump(db, args[0], store, force);
       return 0;
     case "convert":
       if (args.length < 1 || args.length > 2) throw new UsageError("convert takes a file, and optionally where to write");
-      convert(args[0], args[1], store);
+      convert(args[0], args[1], store, force);
       return 0;
     case "assets": {
       const [sub, ...rest] = args;
@@ -238,7 +263,7 @@ async function main(argv: string[]): Promise<number> {
             base: `${LOOPBACK}${port ?? process.env.DECKLAB_API_PORT ?? 47474}`,
             token: token ?? process.env.DECKLAB_TOKEN,
             readFile: (path) => readFileSync(path, "utf8"),
-            writeFile: (path, text) => writeFileSync(path, text),
+            writeFile: (path, text) => writeNew(path, text, force),
             out: (text) => process.stdout.write(text),
           },
         );

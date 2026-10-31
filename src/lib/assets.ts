@@ -64,6 +64,8 @@ export interface HeldBucket {
   printing?: { set: string; number: string };
   finish?: string;
   attrs: Record<string, unknown>;
+  /** A suggested printing: how the copies are drawn, never which they are. */
+  shownId?: string;
   qty: number;
   /** In a sum: the place the copies are in, named from the sum down. */
   place?: Place;
@@ -100,6 +102,7 @@ interface LineRow {
   printing_id: string;
   finish: string;
   attrs: string;
+  shown_id: string;
   qty: number;
   /** A sum's line: which of its places holds it. */
   place?: Place;
@@ -119,7 +122,7 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[], by: TileGrai
   for (const l of lines) {
     const k =
       by === "line"
-        ? JSON.stringify([l.oracle_id, l.printing_id, l.finish, l.attrs])
+        ? JSON.stringify([l.oracle_id, l.printing_id, l.finish, l.attrs, l.shown_id])
         : by === "printing"
           ? JSON.stringify([l.oracle_id, l.printing_id])
           : l.oracle_id;
@@ -132,8 +135,14 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[], by: TileGrai
   for (const [key, ls] of byKey) {
     const perPrinting = new Map<string, number>();
     for (const l of ls) if (l.printing_id !== "") perPrinting.set(l.printing_id, (perPrinting.get(l.printing_id) ?? 0) + l.qty);
-    const most = [...perPrinting].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
+    // Failing that, the most suggested: still a stand-in, but the line's own.
+    const perShown = new Map<string, number>();
+    for (const l of ls) if (l.shown_id !== "") perShown.set(l.shown_id, (perShown.get(l.shown_id) ?? 0) + l.qty);
+    const top = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
+    const most = top(perPrinting);
+    const suggested = top(perShown);
     if (most) drawn.set(key, { id: most[0], standIn: false });
+    else if (suggested) drawn.set(key, { id: suggested[0], standIn: true });
     else unprinted.add(ls[0].oracle_id);
   }
   const stood = await standIns(layers, [...unprinted]);
@@ -173,6 +182,7 @@ async function tiles(store: Sql, lines: LineRow[], layers: Layer[], by: TileGrai
         }),
         ...(l.finish !== "" && { finish: l.finish }),
         attrs: JSON.parse(l.attrs) as Record<string, unknown>,
+        ...(l.shown_id !== "" && { shownId: l.shown_id }),
         qty: l.qty,
         ...(l.place && { place: l.place }),
       })),
@@ -238,7 +248,7 @@ export async function lineContents(
   }: { by?: TileGrain; query?: string; layers?: Layer[] } = {},
 ): Promise<Tile[]> {
   const lines = await lab.select<LineRow>(
-    "SELECT oracle_id, printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1",
+    "SELECT oracle_id, printing_id, finish, attrs, shown_id, qty FROM lines WHERE asset_id = $1",
     [id],
   );
   return tiles(store, await matching(store, lines, query, layers), layers, by);
@@ -277,7 +287,7 @@ async function sumLines(lab: Sql, sumId: string, oracleId?: string): Promise<Lin
   for (let i = 0; i < places.length; i += 400) {
     const chunk = places.slice(i, i + 400);
     const rows = await lab.select<LineRow & { asset_id: string }>(
-      `SELECT asset_id, oracle_id, printing_id, finish, attrs, qty FROM lines
+      `SELECT asset_id, oracle_id, printing_id, finish, attrs, shown_id, qty FROM lines
         WHERE asset_id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")})
         ${oracleId ? `AND oracle_id = $${chunk.length + 1}` : ""}`,
       [...chunk.map((p) => p.id), ...(oracleId ? [oracleId] : [])],
@@ -816,13 +826,18 @@ export interface Bucket {
   printingId?: string;
   finish?: string;
   attrs?: Record<string, unknown>;
+  /** A suggested printing: drawn, never matched, never beside `printingId`. */
+  shownId?: string;
 }
 
-/** A bucket as its four columns, `absent` as the schema stores it. */
-function columns(b: Bucket): [string, string, string, string] {
+/** A bucket as its five columns, `absent` as the schema stores it. */
+function columns(b: Bucket): [string, string, string, string, string] {
   const attrs = Object.fromEntries(Object.entries(b.attrs ?? {}).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)));
-  return [b.oracleId, b.printingId ?? "", b.finish ?? "", JSON.stringify(attrs)];
+  return [b.oracleId, b.printingId ?? "", b.finish ?? "", JSON.stringify(attrs), b.shownId ?? ""];
 }
+
+/** The row with a bucket's five columns, from `$1` (the asset) on. */
+const BUCKET_WHERE = "asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5 AND shown_id = $6";
 
 /** A bucket's identity: equal keys, one bucket. */
 export const bucketKey = (b: Bucket): string => JSON.stringify(columns(b));
@@ -831,11 +846,11 @@ export const bucketKey = (b: Bucket): string => JSON.stringify(columns(b));
 export type Members = Set<string>;
 
 export async function poolMembers(lab: Sql, poolId: string): Promise<Members> {
-  const rows = await lab.select<{ oracle_id: string; printing_id: string; finish: string; attrs: string }>(
-    "SELECT oracle_id, printing_id, finish, attrs FROM pool_members WHERE asset_id = $1",
+  const rows = await lab.select<{ oracle_id: string; printing_id: string; finish: string; attrs: string; shown_id: string }>(
+    "SELECT oracle_id, printing_id, finish, attrs, shown_id FROM pool_members WHERE asset_id = $1",
     [poolId],
   );
-  return new Set(rows.map((r) => JSON.stringify([r.oracle_id, r.printing_id, r.finish, r.attrs])));
+  return new Set(rows.map((r) => JSON.stringify([r.oracle_id, r.printing_id, r.finish, r.attrs, r.shown_id])));
 }
 
 async function requireListPool(lab: Sql, poolId: string): Promise<void> {
@@ -850,8 +865,8 @@ async function requireListPool(lab: Sql, poolId: string): Promise<void> {
 export async function addMember(lab: Sql, poolId: string, bucket: Bucket, at = new Date().toISOString()): Promise<void> {
   await requireListPool(lab, poolId);
   await lab.execute(
-    `INSERT OR IGNORE INTO pool_members (asset_id, oracle_id, printing_id, finish, attrs, added_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT OR IGNORE INTO pool_members (asset_id, oracle_id, printing_id, finish, attrs, shown_id, added_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [poolId, ...columns(bucket), at],
   );
   await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [poolId, at]);
@@ -861,8 +876,7 @@ export async function addMember(lab: Sql, poolId: string, bucket: Bucket, at = n
 export async function removeMember(lab: Sql, poolId: string, bucket: Bucket, at = new Date().toISOString()): Promise<void> {
   await requireListPool(lab, poolId);
   await lab.execute(
-    `DELETE FROM pool_members
-      WHERE asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5`,
+    `DELETE FROM pool_members WHERE ${BUCKET_WHERE}`,
     [poolId, ...columns(bucket)],
   );
   await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [poolId, at]);
@@ -880,7 +894,7 @@ export async function memberContents(
   { by = "card", query, layers = [scryfallLayer(store)] }: { by?: TileGrain; query?: string; layers?: Layer[] } = {},
 ): Promise<Tile[]> {
   const lines = await lab.select<LineRow>(
-    "SELECT oracle_id, printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1",
+    "SELECT oracle_id, printing_id, finish, attrs, shown_id, 1 AS qty FROM pool_members WHERE asset_id = $1",
     [poolId],
   );
   return tiles(store, await matching(store, lines, query, layers), layers, by);
@@ -897,13 +911,13 @@ export const TARGETABLE: ReadonlySet<AssetType> = new Set<AssetType>(["list pool
 
 /** What a target holds of each bucket, by `bucketKey`: a member counts 1. */
 export async function targetCounts(lab: Sql, target: { id: string; type: AssetType }): Promise<Map<string, number>> {
-  const rows = await lab.select<{ oracle_id: string; printing_id: string; finish: string; attrs: string; qty: number }>(
+  const rows = await lab.select<{ oracle_id: string; printing_id: string; finish: string; attrs: string; shown_id: string; qty: number }>(
     target.type === "list pool"
-      ? "SELECT oracle_id, printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1"
-      : "SELECT oracle_id, printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1",
+      ? "SELECT oracle_id, printing_id, finish, attrs, shown_id, 1 AS qty FROM pool_members WHERE asset_id = $1"
+      : "SELECT oracle_id, printing_id, finish, attrs, shown_id, qty FROM lines WHERE asset_id = $1",
     [target.id],
   );
-  return new Map(rows.map((r) => [JSON.stringify([r.oracle_id, r.printing_id, r.finish, r.attrs]), r.qty]));
+  return new Map(rows.map((r) => [JSON.stringify([r.oracle_id, r.printing_id, r.finish, r.attrs, r.shown_id]), r.qty]));
 }
 
 /**
@@ -914,12 +928,12 @@ export async function stepLine(lab: Sql, id: string, bucket: Bucket, delta: 1 | 
   const [me] = await lab.select<{ type: AssetType }>("SELECT type FROM assets WHERE id = $1", [id]);
   if (!me || me.type === "list pool" || !TARGETABLE.has(me.type)) throw new AssetError("Only a place or checklist counts copies.");
   const key = [id, ...columns(bucket)];
-  const where = "asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5";
+  const where = BUCKET_WHERE;
   if (delta > 0) {
     await lab.execute(
-      `INSERT INTO lines (asset_id, oracle_id, printing_id, finish, attrs, qty, added_at)
-       VALUES ($1, $2, $3, $4, $5, 1, $6)
-       ON CONFLICT (asset_id, oracle_id, printing_id, finish, attrs) DO UPDATE SET qty = qty + 1`,
+      `INSERT INTO lines (asset_id, oracle_id, printing_id, finish, attrs, shown_id, qty, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, $7)
+       ON CONFLICT (asset_id, oracle_id, printing_id, finish, attrs, shown_id) DO UPDATE SET qty = qty + 1`,
       [...key, at],
     );
   } else {
@@ -971,8 +985,8 @@ export async function bucketsOf(
     ? await sumLines(lab, asset.id, oracleId)
     : await lab.select<Omit<LineRow, "oracle_id">>(
         asset.type === "list pool"
-          ? "SELECT printing_id, finish, attrs, 1 AS qty FROM pool_members WHERE asset_id = $1 AND oracle_id = $2"
-          : "SELECT printing_id, finish, attrs, qty FROM lines WHERE asset_id = $1 AND oracle_id = $2",
+          ? "SELECT printing_id, finish, attrs, shown_id, 1 AS qty FROM pool_members WHERE asset_id = $1 AND oracle_id = $2"
+          : "SELECT printing_id, finish, attrs, shown_id, qty FROM lines WHERE asset_id = $1 AND oracle_id = $2",
         [asset.id, oracleId],
       );
   const order = (r: { bucket: Bucket; place?: Place }) => `${r.place?.name ?? ""}\u0000${bucketKey(r.bucket)}`;
@@ -983,6 +997,7 @@ export async function bucketsOf(
         ...(r.printing_id !== "" && { printingId: r.printing_id }),
         ...(r.finish !== "" && { finish: r.finish }),
         attrs: JSON.parse(r.attrs) as Record<string, unknown>,
+        ...(r.shown_id !== "" && { shownId: r.shown_id }),
       },
       qty: r.qty,
       ...(r.place && { place: r.place }),
@@ -1010,6 +1025,12 @@ async function declareAttributes(lab: Sql, attrs: Record<string, unknown>): Prom
 
 /** Refuse a printing that is not of the card, or a finish it does not come in. */
 async function checkPrinting(store: Sql, b: Bucket): Promise<void> {
+  if (b.shownId) {
+    if (b.printingId) throw new AssetError("A bucket names its printing or suggests one, not both.");
+    const [row] = await store.select<CardRow>("SELECT * FROM cards WHERE id = $1", [b.shownId]);
+    if (!row) throw new AssetError("That printing is not in the card store.");
+    if (row.oracle_id !== b.oracleId) throw new AssetError(`${row.name} is another card.`);
+  }
   if (!b.printingId) return;
   const [row] = await store.select<CardRow>("SELECT * FROM cards WHERE id = $1", [b.printingId]);
   if (!row) throw new AssetError("That printing is not in the card store.");
@@ -1062,8 +1083,7 @@ export async function moveLines(
 
   if (t === "list pool") {
     const [has] = await lab.select<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM pool_members
-        WHERE asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5`,
+      `SELECT COUNT(*) AS n FROM pool_members WHERE ${BUCKET_WHERE}`,
       [from.assetId, ...columns(from.bucket)],
     );
     if (!has.n) throw new AssetError("There is none of that to change.");
@@ -1072,7 +1092,7 @@ export async function moveLines(
     return;
   }
 
-  const where = "asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5";
+  const where = BUCKET_WHERE;
   const key = [from.assetId, ...columns(from.bucket)];
   const [line] = await lab.select<{ qty: number }>(`SELECT qty FROM lines WHERE ${where}`, key);
   if (!line || line.qty < n) throw new AssetError(line ? `There are only ${line.qty} of that.` : "There is none of that to take away.");
@@ -1082,9 +1102,9 @@ export async function moveLines(
   );
   try {
     await lab.execute(
-      `INSERT INTO lines (asset_id, oracle_id, printing_id, finish, attrs, qty, added_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (asset_id, oracle_id, printing_id, finish, attrs) DO UPDATE SET qty = qty + excluded.qty`,
+      `INSERT INTO lines (asset_id, oracle_id, printing_id, finish, attrs, shown_id, qty, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (asset_id, oracle_id, printing_id, finish, attrs, shown_id) DO UPDATE SET qty = qty + excluded.qty`,
       [to.assetId, ...columns(to.bucket), n, at],
     );
   } catch (e) {
