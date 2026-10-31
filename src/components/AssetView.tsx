@@ -489,6 +489,7 @@ export function AssetView({
         selectedId === t.card.id && "selected",
         t.standIn && "stand-in",
         t.state === "missing" && "dim",
+        t.state === "missing" && "lacking",
       ]
         .filter(Boolean)
         .join(" ")}

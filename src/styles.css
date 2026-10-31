@@ -1609,6 +1609,17 @@ a.external:hover {
   filter: none;
 }
 
+/* A deck's missing copies recede further: the list asks, the deck has none. */
+.card-tile.dim.lacking img {
+  opacity: 0.2;
+  filter: grayscale(0.75);
+}
+
+.card-tile.dim.lacking:hover img {
+  opacity: 0.75;
+  filter: none;
+}
+
 .check {
   display: inline-flex;
   align-items: center;
