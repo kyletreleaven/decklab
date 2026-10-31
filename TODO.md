@@ -395,7 +395,10 @@ checklist*). Local only, no requests.
 - ⬜ **Fill a slot, for any collection checking a checklist**: *from* a
       chosen collection, never one counting toward the one filled; *into*
       a place where the copy would count, chosen for a sum, fixed for a
-      place or zone.
+      place or zone. Built for decks as the pull sheet (*Pull…*,
+      `PullSheet.tsx`, `pullSheet` in `assets.ts`): generalise it to any
+      view with a checklist behind it, once `checks` lands. Need not ship
+      with it.
 
 **Then: `:` references**, the anchored case first (*Card-set algebra*,
 Campaign 3). `:ramp` or `:/Binders/Red` in a query names an asset's cards,
