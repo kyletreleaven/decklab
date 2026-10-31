@@ -135,6 +135,14 @@ Early: one route so far. Design and reasoning in
   *New Token* revokes the old one. It is never shown on screen and every
   route requires it
 - `GET /decks` — every deck, most recently updated first, as JSON
+- `GET /guide` — how to use the API, for an agent with no copy of the repo
+  ([`docs/agents/using-the-api.md`](docs/agents/using-the-api.md))
+- **Lab routes**, in lab mode only, assets by path as the library file's
+  JSON: `GET /lab/tree`, `GET /lab/assets/<path>`, and `PUT
+  /lab/assets/<path>` to create or replace a list pool (JSON, or a
+  decklist as plain text) or a query pool. Cards come from the card store
+  only: one it has never had is refused by name, never fetched. The open
+  lab redraws after a write
 
 ## The lab: the new model, in progress
 

@@ -153,3 +153,49 @@ Window. Starting from the default matters: replacing it would lose Edit, and
 with it ⌘C/⌘V in text fields. Tauri sets no menu on other platforms, and text
 editing works without one there, so the in-window menu bar holds only Tools.
 That branch has not been compiled on Linux yet.
+
+## Lab routes
+
+For an agent designing a deck with you — `cmdr`'s, say — to work on the
+lab's assets beside you. **Lab mode only**: under `npm run lab` the routes
+read and write `lab.db`; otherwise they answer 404. Built a step at a time:
+reading first, then pools.
+
+- **Assets by path, as in the library file.** No ids: a path is what a
+  person and an agent both say (`inventory/README.md` → *The asset tree*).
+  A URL's segments are the path's names, percent-encoded, with no quoting.
+- **The library format, as JSON.** An asset is the object `readLab` gives
+  and [`library-format-5.md`](library-format-5.md) describes: one format,
+  read and written, with no second schema to drift.
+- **No Scryfall.** A card is resolved from the card store — by name, oracle
+  id, or set and number — and one the store has never seen is refused and
+  named, never fetched. Fetching would go through the scheduler, with a
+  request count first; not yet.
+- **A write tells the app.** The routes call back after each write, and the
+  app reads the tree and any open view again, so the screen is never stale.
+
+| Route | |
+| --- | --- |
+| `GET /guide` | how to use the API, for an agent: [`agents/using-the-api.md`](agents/using-the-api.md), bundled, so it matches the running app. Any mode |
+| `GET /lab/tree` | every asset: name, path, type, a query pool's query, children |
+| `GET /lab/assets/<path>` | one asset, as the library file's object |
+| `PUT /lab/assets/<path>` | create or replace a **pool**: a list pool's members (`cards`) or a query pool's `query`. Missing folders above it are made. A different type at the path is refused (409) |
+
+A list pool's members can also be sent as text: `PUT` with `Content-Type:
+text/plain` and a decklist — one card per line, counts ignored, `(SET) 123`
+pinning a printing — parsed as an import is.
+
+```bash
+TOKEN=…   # Tools → Agent API → Copy Token
+curl -s -H "Authorization: Bearer $TOKEN" localhost:47474/lab/tree
+curl -s -H "Authorization: Bearer $TOKEN" localhost:47474/lab/assets/Decks/Golbez
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain" \
+  --data-binary $'1 Sol Ring\n1 Arcane Signet (C21) 263' localhost:47474/lab/assets/Pools/Golbez/ramp
+curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"type":"query pool","query":"o:proliferate id<=ub"}' localhost:47474/lab/assets/Pools/Golbez/proliferate
+```
+
+A `PUT` answers `201` with `{ "created": true, "members": n }` for a new
+pool, `200` for a replaced one; a refusal is `{ "error": … }`, with `400`
+for a bad body or a card the store lacks, `409` for another type at the
+path.

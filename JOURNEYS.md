@@ -262,3 +262,25 @@ to settle it.
 **Not card tags.** A tag is on an *asset*. Grouping *cards* — "my ramp
 package" — is an ω set, searched as `:ramp`.
 
+
+---
+
+## H. Design a deck with an agent, in the lab
+
+> I design decks with an agent in the `cmdr` toolchain. I want it working
+> in DeckLab beside me: reading what I have built, and leaving its findings
+> where I can see them and build from them.
+
+1. 🧪 The agent reads the lab's tree and any asset — a decklist, a
+   collection, a pool — through the agent API, by path.
+2. 🧪 It writes a pool: a role it evaluated in `cmdr` (*ramp*, *counter
+   sources*) becomes a list pool, or a search a query pool. The lab shows
+   it at once.
+3. 🧪 I open the pool and build from it: target the deck, and `+` on a tile.
+4. 🧪 The agent changes the pool as we talk; I see the change without
+   reloading.
+5. ⬜ Later: the agent edits decklists and checklists too, and the lab
+   evaluates `cmdr`'s roles itself, through `:` references.
+
+**Gap:** step 5, and anything beyond pools — *Lab routes* in `TODO.md`. No Scryfall: a card
+the store has never seen is refused and named, not fetched.

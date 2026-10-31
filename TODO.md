@@ -82,6 +82,12 @@ have to be right before the first write.
       page event and `App.tsx` bumps on it — one place, every write route.
       The real fix is the `bump()` item under *Known debt*. Needed before the
       first write route.
+- 🚧 **Lab routes**, lab mode only, so an agent designing a deck works on
+      the lab's assets beside you (journey H; design in
+      [`docs/agent-api.md`](docs/agent-api.md) → *Lab routes*). Assets by
+      path, as the library format's JSON; cards from the store only, no
+      requests. First: read the tree and an asset, and `PUT` a pool. Then
+      what the agent asks for — other types, rename, move, delete.
 - ⬜ **A CLI lane in the scheduler, last.** Below `background`: the UI's
       responsiveness comes first, and an agent can wait. Needed before the
       first route that reaches Scryfall.
