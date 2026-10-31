@@ -21,3 +21,16 @@ They are backup and restore, and must put rows back exactly as they were:
 timestamps, defaults, and rows the domain functions would merge. So they
 live with their schema, as a triplet, not with the operations
 ([`lab.md`](lab.md) → *The library file*).
+
+## A choice of one is shown, not offered
+
+**A combo box with a single option is disabled.** It still shows its
+value, so the reader sees what will be used, but it does not invite a
+click that can change nothing. The pull sheet's source menu is the first:
+a card found in one bucket shows that bucket greyed out, and ← still pulls
+from it.
+
+Why: an enabled control says "you can choose here". When there is nothing
+to choose, that is a small lie, and a reader who opens it to find one item
+has spent a click learning nothing. Disabled, the control answers the
+question at a glance. Applied as controls are touched, not in one sweep.

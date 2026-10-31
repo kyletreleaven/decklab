@@ -148,7 +148,8 @@ export function PullSheet({ deck, onClose, onChanged }: { deck: AssetNode; onClo
                 </span>
                 <select
                   value={chosen.get(key(r)) ?? 0}
-                  disabled={busy}
+                  // One source is no choice: shown, but not offered.
+                  disabled={busy || r.sources.length === 1}
                   onChange={(e) => setChosen((m) => new Map(m).set(key(r), Number(e.target.value)))}
                 >
                   {r.sources.map((s, i) => (
