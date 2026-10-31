@@ -145,6 +145,9 @@ Early. Design and reasoning in
   are recorded. A card the store has never had is fetched through the
   app's rate-limited channel, at most 150 a call; one Scryfall does not
   know is refused by name. The open lab redraws after a write
+- **`decklab assets tree | get | put | rm`** on the command line: assets as
+  files through the API — a decklist out to a `.txt`, edited, back in zone
+  by zone ([`docs/cli.md`](docs/cli.md))
 
 ## The lab: the new model, in progress
 

@@ -279,8 +279,11 @@ package" — is an ω set, searched as `:ramp`.
 3. 🧪 I open the pool and build from it: target the deck, and `+` on a tile.
 4. 🧪 The agent changes the pool as we talk; I see the change without
    reloading.
-5. ⬜ Later: the agent edits decklists and checklists too, and the lab
+5. 🧪 The agent writes decklists too, zone by zone, and we pass one back
+   and forth as a file (`decklab assets get` / `put`).
+6. ⬜ Later: the agent edits checklists and places too, and the lab
    evaluates `cmdr`'s roles itself, through `:` references.
 
-**Gap:** step 5, and anything beyond pools — *Lab routes* in `TODO.md`. No Scryfall: a card
-the store has never seen is refused and named, not fetched.
+**Gap:** step 6 — *Lab routes* in `TODO.md`. A card the store has never
+had is fetched through the app's channel, at most 150 a call; one Scryfall
+does not know is refused by name.

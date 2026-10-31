@@ -10,13 +10,15 @@ logic rather than a second implementation of it. What is left to build is in
 
 The CLI does not open the database or call Scryfall itself. Exactly one process
 owns the SQLite file and the `scheduledFetch` queue, and the app's UI and the
-CLI are both clients of it. (The library tool in [`cli.md`](cli.md) is a
-separate tool: it reads a database file directly, under the dump/load
-exception in [`principles.md`](principles.md), and never writes.) That single
-decision settles the hard parts:
+CLI are both clients of it. The CLI is `decklab assets` ([`cli.md`](cli.md)),
+in the same executable as the library tool — whose `dump` and `convert`
+read a database file directly, under the dump/load exception in
+[`principles.md`](principles.md), and never write. That single decision
+settles the hard parts:
 
-- **Rate limit.** CLI traffic goes through the same queue, in a lane of its
-  own, ranked last. One pipe, one 429 pause, one client as far as Scryfall can
+- **Rate limit.** CLI traffic goes through the same queue — on the
+  `background` lane for now, and a lane of its own, ranked last, if it is
+  ever seen to hold up the UI (`TODO.md`). One pipe, one 429 pause, one client as far as Scryfall can
   tell. Two processes each with their own queue would be two clients,
   whatever their spacing.
 - **UI freshness.** Every write goes through the owner, so the owner can tell
@@ -182,7 +184,7 @@ reading first, then pools, then decklists and deleting.
 | Route | |
 | --- | --- |
 | `GET /guide` | how to use the API, for an agent: [`agents/using-the-api.md`](agents/using-the-api.md), bundled, so it matches the running app. Any mode |
-| `GET /lab/tree` | every asset: name, path, type, a query pool's query, children |
+| `GET /lab/tree` | every asset: name, path, type, a query pool's query and filters, children |
 | `GET /lab/assets/<path>` | one asset, as the library file's object |
 | `GET /lab/assets/<path>` with `Accept: text/plain` | a decklist as text, zone by zone, the way `PUT` takes it |
 | `PUT /lab/assets/<path>` | create or replace a **pool** — a list pool's members (`cards`), a query pool's `query` and `filters` — or a **decklist**, zone by zone. Missing folders above it are made. A different type at the path is refused (409) |

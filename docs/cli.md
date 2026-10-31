@@ -1,7 +1,8 @@
 # The command line
 
-A `decklab` executable for working with a library without opening the app:
-first a dump, later conversions between library file formats. See
+A `decklab` executable for working with a library: a dump and conversions
+between library file formats without opening the app, and assets as files
+through the running app's agent API. See
 [`lab.md`](lab.md) → *The library file* for the format and why each schema
 has its own (schema, dump, load).
 
@@ -48,7 +49,34 @@ The database path must agree with the app's: the SQL plugin resolves
 No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
 → *Lab mode*), and nothing writes to a database the app has open.
 
+- **`decklab assets tree | get | put | rm`**: assets as files, for you or an
+  agent working beside the app (`cmdr`'s, say). A thin client of the agent
+  API ([`agents/using-the-api.md`](agents/using-the-api.md)), so the app must
+  be open with the API enabled; the token comes from `$DECKLAB_TOKEN` or
+  `--token`, the port from `--port`, `$DECKLAB_API_PORT`, else 47474.
+  - `tree`: every asset, a line each, path and type.
+  - `get <path> [file]`: an asset to a file or standard output — as text
+    for a `.txt` file or `--text` (a decklist, zone headings and all), as
+    JSON otherwise.
+  - `put <path> <file>`: create or replace from a `.txt` file — a decklist
+    or list pool, as what is at the path says; `--type decklist` for a new
+    decklist — or a `.json` file, any body the API takes. A decklist is
+    replaced zone by zone, the zones the file names.
+  - `rm <path>`: delete, as the tree does.
+
+  A path is written as in the library file, the leading `/` optional. The
+  API's refusal goes to standard error, exit 1; a command-line mistake,
+  exit 2. Nothing here opens a database or reaches Scryfall itself: a card
+  the store lacks is fetched by the app, through its channel. On the real
+  lab, a 100-card decklist went out to a file, back in as a new decklist,
+  and out again byte for byte. The routes are the lab's for now; the
+  command is named for what it works on, so it outlives that.
+
 ## Read-only, and safe beside the app
+
+The commands that open a database (`dump`, `convert`) only read it.
+`assets` writes, but through the app, which owns its database.
+
 
 - **One transaction per dump.** `readV4` runs several queries; inside one
   `BEGIN … COMMIT` they see one snapshot, so an edit committed in the app
@@ -99,10 +127,7 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
   through Rust.
 - **A CLI in Rust.** Small and fast, but a second implementation of the
   format and its checks, in a second language, to drift from the first.
-
-## Open
-
-- **One executable or two.** The Agent API plans a `decklab` CLI too
-  ([`agent-api.md`](agent-api.md)), of a different kind: it only talks to the
-  running app, and never opens the database. Whether that and this become one
-  executable is undecided; until then `decklab` is this tool's working name.
+- **Two executables**, one opening databases and one talking to the app's
+  API, as `agent-api.md` once planned. One is less to install and explain:
+  the API's commands are the `assets` group, and say so when the app is
+  not answering.

@@ -476,8 +476,10 @@ Design in [`docs/lab.md`](docs/lab.md).
       overlap, a request needing a slot on every channel it falls in.
       Proposal in [`docs/rate-channels.md`](docs/rate-channels.md).
 - 🚧 **The `decklab` CLI:** the app's TypeScript compiled into a standalone
-      executable (Bun first), read-only. `dump` and `convert` (v4 → 5)
-      built, not yet checked by you. Design in [`docs/cli.md`](docs/cli.md).
+      executable (Bun first), read-only on the databases. `dump` and
+      `convert` (v4 → 5) built, not yet checked by you; `assets tree | get |
+      put | rm`, through the running app's agent API, built and tried on the
+      real lab. Design in [`docs/cli.md`](docs/cli.md).
 - 🚧 **The lab on library file version 5**
       ([`docs/library-format-5.md`](docs/library-format-5.md)): the lab
       schema (`lab/1000_assets.sql`), its load and dump (`labdb.ts`), and

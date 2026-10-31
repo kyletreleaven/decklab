@@ -34,7 +34,7 @@ cards, no counts); `query pool` (a saved search); `decklist`, `deck`,
 | | |
 | --- | --- |
 | `GET /guide` | this guide |
-| `GET /lab/tree` | every asset: `name`, `path`, `type`, a query pool's `query`, `children` |
+| `GET /lab/tree` | every asset: `name`, `path`, `type`, a query pool's `query` and `filters`, `children` |
 | `GET /lab/assets/<path>` | one asset, with its cards |
 | `GET /lab/assets/<path>` + `Accept: text/plain` | a decklist as text |
 | `PUT /lab/assets/<path>` | create or replace a **pool** or a **decklist** |
@@ -42,6 +42,11 @@ cards, no counts); `query pool` (a saved search); `decklist`, `deck`,
 
 Paths go in the URL segment by segment, percent-encoded:
 `/lab/assets/Decklists/Golbez%20Proliferate/main`.
+
+With DeckLab's `decklab` command installed, `decklab assets tree | get |
+put | rm` does the same with files — `decklab assets get /Decklists/Golbez
+golbez.txt`, edit, `decklab assets put /Decklists/Golbez golbez.txt` — the
+token in `$DECKLAB_TOKEN`. Its errors are the API's.
 
 **Writing a list pool** — as a decklist, one card per line (counts are
 ignored: a pool has none; `(SET) 123` pins a printing):
