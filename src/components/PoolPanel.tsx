@@ -810,7 +810,7 @@ export function PoolPanel({
         </div>
       )}
 
-      <div className="toolbar">
+      <div className="toolbar toolbar-search">
         <input
           className="search-input"
           // The same syntax either way now: passed to Scryfall for the
@@ -925,7 +925,11 @@ export function PoolPanel({
             Clear
           </button>
         </span>
+      </div>
 
+      {/* Two rows: what you are searching for, then how it is drawn — so the
+          search keeps the width, however many view controls there are. */}
+      <div className="toolbar toolbar-view">
         {offersGrain && (
           <div className="segmented">
             <button

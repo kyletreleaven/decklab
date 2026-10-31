@@ -295,6 +295,21 @@ textarea:focus {
   min-width: 120px;
 }
 
+/* A search row and a view row read as one toolbar: no rule between them. */
+.toolbar-search:has(+ .toolbar-view) {
+  border-bottom: none;
+  padding-bottom: 6px;
+}
+
+.toolbar-view {
+  padding-top: 0;
+}
+
+/* The match count at the end of the view row. */
+.toolbar-view > .hint:last-child {
+  margin-left: auto;
+}
+
 .scroll {
   flex: 1;
   overflow-y: auto;
