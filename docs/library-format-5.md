@@ -106,7 +106,7 @@ recorded*. Nothing is filled in on load.
 | `oracle` | the card's Scryfall oracle id. Names change; this does not |
 | `set`, `number`, `lang` | the printing, which also says which card: all or none. `lang` only when not English |
 | `finish` | `nonfoil`, `foil`, `etched`, … Can be known without the printing |
-| `binds` | `true`: in a pattern, only this printing will do. Left out, the printing is a suggestion. Refused without a printing, and on a place. **Not built yet** |
+| `shown` | a suggested printing, `{ set, number, lang? }`: how the line is drawn: part of its bucket, but never matched (`inventory/buckets.md` → *Suggested printings*). Refused beside `set`. A file says it outright, where decklist text infers it. **Not built yet** |
 | `attrs` | user attributes, sparse |
 | `qty` | the count; what it means depends on the asset (below) |
 | `added` | when, optional, as for assets |

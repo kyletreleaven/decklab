@@ -11,6 +11,9 @@ A **bucket** is:
 - **finish**: first-class, a value or `absent`. It can be known when the
   printing is not: *a foil Sol Ring, printing unknown*.
 - **user attributes**: key-value pairs, sparse, `absent` when not given
+- **a suggested printing**: a value or `absent`, never beside a printing.
+  How the copies are drawn, and the one attribute that **never matches**:
+  every order and comparison below ignores it. See *Suggested printings*.
 
 A bucket is a **value**, a description, not a stored thing of its own. The
 same bucket can appear in many locations.
@@ -112,29 +115,73 @@ both.
   make the readings explicit but split the bucket into two types, for no
   guarantee the context does not already give.
 
-### Suggested and binding printings
+### Suggested printings
 
-In a pattern, a printing is either **binding** (only it will do) or
-**suggested** (any printing will do, and this one is how the line is
-drawn). Three states per line, then: printing absent, suggested, binding.
+A bucket can carry a **suggested printing**: how its copies are drawn, and
+nothing more. It is part of the bucket, so two buckets can differ only in
+it, but it never matches: residuals and populations, containment, what
+satisfies a goal all read a bucket *without* its suggestion, its
+**match**. So a printing on a line is one of two things:
+
+| | in a pattern | in a location |
+| --- | --- | --- |
+| **the bucket's printing** | binding: only it will do | recorded: known to be it |
+| **a suggestion** | any printing will do, drawn as this | printing not recorded, drawn as this: a guess |
+
+Three states per line, then: printing absent, suggested, or the bucket's.
 Most decklists name a printing on every line, and most of those printings
-are arbitrary (whatever the deckbuilding site chose), so suggested is the
-default and binding is the one that is marked.
+are arbitrary (whatever the deckbuilding site chose). An app's collection
+export often does the same. As suggestions they keep the familiar art and
+leave the counts honest: *2 × Sol Ring, printing not recorded*, drawn as
+the C21.
 
-- **Both are in the line's key**: a printing and a `binds` flag. Ten
-  Islands can suggest five arts as five lines.
-- **What satisfies a line ignores suggestions.** A line counts as its
-  binding keys alone, so lines that differ only in a suggestion group
-  together: five suggested Islands of 2 each ask for 10 Islands, any art.
+- **A column of its own**, `shown_id`, in the key with the rest of the
+  bucket, so the key is still the bucket. `printing_id` keeps one
+  meaning, the bucket's printing, and SQL that does the algebra simply
+  never reads `shown_id`. A line sets one or the other, never both
+  (a `CHECK`).
+- **Several per match where there are copies to draw.** Ten Islands can
+  be five lines of 2, five arts. What a goal asks is summed by match, so
+  those five ask for 10 Islands, any art. A pool has no copies to split:
+  at most one suggestion per match.
+- **The stepper picks a row**: `+` adds to the row being drawn, or to the
+  one without a suggestion. The same question as a card's printings at
+  printing grain (bug 002).
+- **Drawing at a coarser grain** — a deck's Islands as one tile — takes
+  any of the match's suggestions.
 - **Per line, in storage.** One decklist can mix all three states: imported
   loosely, then two cards bound for their art.
-- **Import suggests.** A `(SET) 123` in imported text is a suggestion,
-  unless the import's *Force printings* box is checked. The box is an
-  import choice and is not stored. Our own text marks a binding line with
-  `!` after the printing, `1 Sol Ring (C21) 263 !`, so the common format
-  stays the suggested default and round-trips.
-- **In a location, a printing is a fact**, recorded or not; there is
-  nothing to suggest, and `binds` is refused.
+- **A finish, once given, is the bucket's**, never a suggestion: no one
+  marks a foil by accident. **It makes the printing the bucket's too**,
+  since a foil marked in an export is almost always *that* foil, the one
+  picked on the site.
+- **Import reads it that way**, unless the import's *Force printings* box
+  is checked, which makes every printing given the bucket's. The box is an
+  import choice and is not stored.
+
+**In text**, a `!` or `?` straight after the printing says how to read it,
+overriding the default; a finish, `*F*` or `*E*`, comes after that:
+
+| | finish absent | finish given |
+| --- | --- | --- |
+| **printing suggested** | `1 Sol Ring (C21) 263` | `1 Sol Ring (C21) 263 ? *F*`: any foil Sol Ring, drawn as the C21 |
+| **printing the bucket's** | `1 Sol Ring (C21) 263 !` | `1 Sol Ring (C21) 263 *F*` |
+
+- **The common format is the suggested default**, so other sites'
+  exports read as they mean, and only two cells need a marker.
+- **Redundant markers are accepted** (`(C21) 263 ?`, `(C21) 263 ! *F*`),
+  and so is a marker after the finish. Our text writes the shortest form,
+  marker before the finish.
+- **With no printing**, `?` is accepted, as *any printing* already;
+  `!` is refused, since it names a printing the line does not give.
+  `1 Sol Ring *F*` is any foil Sol Ring, nothing suggested.
+- **An export without markings** is an option, for another site: the
+  standard form, which reads back with the defaults, so a `!` without a
+  finish and a `?` with one are lost.
+- **A suggested printing without the finish asked for** (`? *F*` on a
+  printing never made in foil) is drawn as it is, and the stand-in says it
+  does not match; the line is not refused. As the bucket's it is refused:
+  it names a card that does not exist.
 
 A pattern is the simplest filter: attribute equalities joined by *and*, with
 `absent` as a wildcard. General queries — Scryfall syntax, inequalities,
@@ -143,10 +190,10 @@ A pattern is the simplest filter: attribute equalities joined by *and*, with
 ### Rendering an `absent` printing or finish
 
 The printing drawn is a display choice, never stored, and **not decided**.
-A suggested printing (above) *is* stored, and comes first; a binding one is
-simply drawn. Factors that could go into it:
+A suggested printing (above) *is* stored, on the line, and comes first,
+for any asset. Factors that could go into it:
 
-- a printing the bucket's goal suggests or binds (a refined decklist)
+- a printing the bucket's goal names (a refined decklist)
 - the most common known printing of this card in the same collection
 - a per-card preference ("my art for Sol Ring")
 - a default: Scryfall's own default printing, or the newest
