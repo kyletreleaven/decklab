@@ -19,6 +19,11 @@ function store() {
   insert.run("sol-c21", "sol", "Sol Ring", "c21", "263", "2021-04-23");
   insert.run("sol-cmr", "sol", "Sol Ring", "cmr", "472", "2020-11-20");
   insert.run("bolt-m10", "bolt", "Lightning Bolt", "m10", "146", "2009-07-17");
+  db.prepare(
+    `INSERT INTO cards (id, oracle_id, name, set_code, set_name, collector_number, released_at, rarity, layout, data, cached_at)
+     VALUES ('slime-tmc', 'slime', 'Acidic Slime', 'tmc', 'Set', '99', '2026-03-06', 'uncommon', 'normal',
+             '{"lang":"en","flavor_name":"Marauding Mutagen"}', '2020-01-01')`,
+  ).run();
   return db;
 }
 
@@ -203,6 +208,19 @@ describe("agent API, lab routes", () => {
     expect(me.cards).toContainEqual(
       expect.objectContaining({ bucket: expect.objectContaining({ shown: { set: "c21", number: "263", lang: "en" } }), qty: 1 }),
     );
+  });
+
+  it("reads a printing's own name as its card, suggesting that printing unless `!` binds it", async () => {
+    expect((await put("/lab/assets/D?type=decklist", "Deck\n1 Marauding Mutagen\n1 marauding mutagen !", "text/plain")).status).toBe(201);
+    expect(db.prepare("SELECT oracle_id, printing_id, shown_id FROM lines WHERE oracle_id = 'slime' ORDER BY printing_id").all()).toEqual([
+      { oracle_id: "slime", printing_id: "", shown_id: "slime-tmc" },
+      { oracle_id: "slime", printing_id: "slime-tmc", shown_id: "" },
+    ]);
+    // Written back as the card's own name.
+    const text = await (await app.request("/lab/assets/D", { headers: { ...auth, Accept: "text/plain" } })).text();
+    expect(text).toMatch(/1 Acidic Slime \(TMC\) 99\n/);
+    // A printing's own name beside that printing is no conflict.
+    expect((await put("/lab/assets/D", "Deck\n1 Marauding Mutagen (TMC) 99", "text/plain")).status).toBe(200);
   });
 
   it("refuses a `!` with no printing, and `set` beside `shown`; a pool keeps one suggestion a card", async () => {

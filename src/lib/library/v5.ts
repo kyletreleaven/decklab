@@ -61,6 +61,11 @@ export interface Bucket {
    * never matched, and never beside `printing`.
    */
   shown?: Printing;
+  /**
+   * Text only, never written: the line's `!` without a printing. Its name
+   * must then be a printing's own (Scryfall's flavour name), which it binds.
+   */
+  bindsAlias?: true;
 }
 
 /**

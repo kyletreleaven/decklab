@@ -438,8 +438,32 @@ export async function resolveIdentifiers(
     }
   }
 
-  return { found, notFound };
+  // A name no card has may be a printing's own (its flavour name), which
+  // the collection endpoint does not match but search does: the misses,
+  // ORed, one page a chunk.
+  const unnamed = notFound.flatMap((i) => ("name" in i ? [i.name] : []));
+  const aliased = new Set<string>();
+  for (let i = 0; i < unnamed.length; i += ALIASES_A_SEARCH) {
+    const chunk = unnamed.slice(i, i + ALIASES_A_SEARCH);
+    const q = chunk.map((n) => `!"${n.replace(/"/g, "")}"`).join(" or ");
+    let list: ScryfallList;
+    try {
+      list = await request<ScryfallList>(`/cards/search?${new URLSearchParams({ q, unique: "prints" })}`, { lane: "background" });
+    } catch (error) {
+      if (error instanceof ScryfallError && error.status === 404) continue;
+      throw error;
+    }
+    const cards = list.data.map(normalize);
+    await keep(cards);
+    found.push(...cards);
+    for (const c of list.data) if (typeof c.flavor_name === "string") aliased.add(nameKey(c.flavor_name));
+  }
+
+  return { found, notFound: notFound.filter((i) => !("name" in i && aliased.has(nameKey(i.name)))) };
 }
+
+/** Names to a flavour-name search: short enough a query, few enough requests. */
+const ALIASES_A_SEARCH = 20;
 
 export interface ResolveResult {
   found: Card[];

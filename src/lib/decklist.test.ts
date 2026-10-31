@@ -135,6 +135,10 @@ describe("parseLine", () => {
     // Only on its own: a name's own punctuation stays.
     expect(parseLine("1 Kaboom!", "main")).toMatchObject({ name: "Kaboom!" });
     expect(parseLine("1 Kaboom!", "main")).not.toHaveProperty("marker");
+    // A card's halves, however a list writes them, as Scryfall spells them.
+    for (const n of ["Double Jump/Flying Kick", "Double Jump / Flying Kick", "Double Jump /// Flying Kick", "Double Jump // Flying Kick"]) {
+      expect(parseLine(`1 ${n}`, "main")).toMatchObject({ name: "Double Jump // Flying Kick" });
+    }
   });
 
   it("leaves parenthesised card names alone", () => {

@@ -208,12 +208,13 @@ export function bodyFromJson(json: unknown): PutBody {
  */
 function textBucket(l: ParsedLine): Bucket {
   const given = l.setCode && l.collectorNumber ? { set: l.setCode.toLowerCase(), number: l.collectorNumber, lang: "en" } : undefined;
-  if (!given && l.marker === "!") throw new LabApiError(`${l.raw.trim()}: \`!\` binds a printing, and the line gives none.`, 400);
   const finish = l.finish ?? (l.foil ? "foil" : undefined);
   const binds = l.marker === "!" || (l.marker !== "?" && finish !== undefined);
   return {
     card: l.name,
     ...(given && (binds ? { printing: given } : { shown: given })),
+    // No printing given: the name must be a printing's own, checked as it resolves.
+    ...(!given && l.marker === "!" && { bindsAlias: true as const }),
     ...(finish && { finish }),
     attrs: {},
   };

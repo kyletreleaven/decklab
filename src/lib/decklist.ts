@@ -78,6 +78,14 @@ const SET_SUFFIX = /[([]([A-Za-z0-9]{2,6})[)\]]\s*([A-Za-z0-9★-]+)?\s*$/;
 const LEADING_QTY = /^(\d+)\s*[xX]?[\s.)]+(.*)$/;
 const TRAILING_QTY = /^(.*?)\s+[xX](\d+)\s*$/;
 
+/**
+ * A card's halves as Scryfall spells them, ` // `, however a list wrote
+ * them: `/`, ` / `, Arena's `///`. No card's name has a bare slash.
+ */
+export function facesSpelled(name: string): string {
+  return name.replace(/\s*\/{1,3}\s*/g, " // ");
+}
+
 export function parseLine(raw: string, section: Section): ParsedLine | null {
   let text = raw.trim();
   if (!text) return null;
@@ -131,7 +139,7 @@ export function parseLine(raw: string, section: Section): ParsedLine | null {
   return {
     raw,
     quantity,
-    name: text,
+    name: facesSpelled(text),
     setCode,
     collectorNumber,
     foil: finish !== undefined || undefined,
@@ -276,7 +284,7 @@ function parseCsv(
 
   for (const row of rows.slice(1)) {
     const fields = splitCsvRow(row);
-    const name = fields[index.name]?.replace(/^"|"$/g, "").trim();
+    const name = facesSpelled(fields[index.name]?.replace(/^"|"$/g, "").trim() ?? "");
     if (!name) {
       if (row.trim()) skipped.push(row);
       continue;

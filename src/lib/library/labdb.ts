@@ -64,6 +64,8 @@ interface PrintingRow {
   set_code: string;
   collector_number: string;
   lang: string;
+  /** The printing's own name, where it has one: Scryfall's flavour name. */
+  alias: string | null;
 }
 
 const CHUNK = 400;
@@ -80,7 +82,8 @@ async function printingsByKey(cards: Sql, keys: string[]): Promise<Map<string, P
   const rows = await inChunks(keys, (chunk) =>
     cards.select<PrintingRow>(
       `SELECT id, oracle_id, name, set_code, collector_number,
-              COALESCE(json_extract(data, '$.lang'), 'en') AS lang
+              COALESCE(json_extract(data, '$.lang'), 'en') AS lang,
+              json_extract(data, '$.flavor_name') AS alias
          FROM cards
         WHERE set_code || '|' || collector_number IN (${holes(chunk.length)})`,
       chunk.map((k) => k.split("|").slice(0, 2).join("|")),
@@ -98,6 +101,32 @@ async function namesByOracle(cards: Sql, oracles: string[]): Promise<Map<string,
     ),
   );
   return new Map(rows.map((r) => [r.oracle_id, r.name]));
+}
+
+/**
+ * The printings a name is the own name of — Scryfall's flavour name, as on
+ * *Marauding Mutagen*, TMC's Acidic Slime — plainest first: the lowest
+ * collector number. Asked only for names no card has.
+ */
+async function printingsByAlias(cards: Sql, names: string[]): Promise<Map<string, PrintingRow[]>> {
+  const folded = [...new Set(names.map(fold))];
+  const rows = await inChunks(folded, (chunk) =>
+    cards.select<PrintingRow>(
+      `SELECT id, oracle_id, name, set_code, collector_number,
+              COALESCE(json_extract(data, '$.lang'), 'en') AS lang,
+              json_extract(data, '$.flavor_name') AS alias
+         FROM cards
+        WHERE lower(json_extract(data, '$.flavor_name')) IN (${holes(chunk.length)})
+        ORDER BY CAST(collector_number AS INTEGER), collector_number`,
+      chunk,
+    ),
+  );
+  const out = new Map<string, PrintingRow[]>();
+  for (const r of rows) {
+    const k = fold(r.alias!);
+    out.set(k, [...(out.get(k) ?? []), r]);
+  }
+  return out;
 }
 
 /** Every card a name could mean, by full name or front face. */
@@ -154,6 +183,9 @@ async function resolveBuckets(
 
   let printings = await printingsByKey(cards, printed);
   let byName = await oraclesByName(cards, named.map((b) => b.card!));
+  // A name no card has may be a printing's own: those, from the store.
+  const unnamed = () => [...byName].filter(([, o]) => o.size === 0).map(([n]) => n);
+  let byAlias = await printingsByAlias(cards, unnamed());
 
   // What the store has never had: fetched once, through the channel, then
   // read back from the store.
@@ -164,7 +196,7 @@ async function resolveBuckets(
       `Not in the card store, and only English printings can be fetched yet:\n${foreign.join("\n")}`,
     );
   }
-  const missingNames = [...byName].filter(([, o]) => o.size === 0).map(([n]) => n);
+  const missingNames = unnamed().filter((n) => !byAlias.has(n));
   const wanted: Identifier[] = [
     ...missingPrintings.map((k) => {
       const [set, collector_number] = k.split("|");
@@ -183,12 +215,13 @@ async function resolveBuckets(
     fetched = (await fetchMissing(wanted)).found.length;
     printings = await printingsByKey(cards, printed);
     byName = await oraclesByName(cards, named.map((b) => b.card!));
+    byAlias = await printingsByAlias(cards, unnamed());
   }
-
   const oracles = new Set<string>();
   for (const b of buckets) if (b.oracle !== undefined) oracles.add(b.oracle);
   for (const p of printings.values()) oracles.add(p.oracle_id);
   for (const found of byName.values()) for (const o of found) oracles.add(o);
+  for (const ps of byAlias.values()) for (const p of ps) oracles.add(p.oracle_id);
   const names = await namesByOracle(cards, [...oracles]);
 
   const problems: string[] = [];
@@ -197,6 +230,8 @@ async function resolveBuckets(
     const label = `${b.card ?? b.oracle ?? ""}${b.printing ? ` (${b.printing.set}) ${b.printing.number}` : ""}`;
     let oracle = b.oracle;
     let printingId = "";
+    // The printing the line's name is the own name of, if that is what it gives.
+    let aliased: PrintingRow | undefined;
     if (b.printing) {
       const p = printings.get(keyOf(b.printing));
       if (!p) {
@@ -209,24 +244,41 @@ async function resolveBuckets(
       }
       oracle = p.oracle_id;
       printingId = p.id;
+      if (p.alias && b.card !== undefined && fold(p.alias) === fold(b.card)) aliased = p;
     } else if (oracle === undefined) {
       const found = byName.get(fold(b.card!)) ?? new Set();
-      if (found.size !== 1) {
-        problems.push(`${label}: ${found.size ? "more than one card has that name" : "no card has that name"}`);
+      const own = found.size ? [] : (byAlias.get(fold(b.card!)) ?? []);
+      const ownCards = new Set(own.map((p) => p.oracle_id));
+      if (found.size > 1 || ownCards.size > 1) {
+        problems.push(`${label}: more than one card has that name`);
         continue;
       }
-      oracle = [...found][0];
+      if (!found.size && !own.length) {
+        problems.push(`${label}: no card has that name`);
+        continue;
+      }
+      aliased = own[0];
+      oracle = aliased?.oracle_id ?? [...found][0];
+    }
+    if (b.bindsAlias && !aliased) {
+      problems.push(`${label}: \`!\` binds a printing, and the line gives none.`);
+      continue;
     }
     const name = names.get(oracle!);
     if (name === undefined) {
       problems.push(`${label}: no card in the store has that oracle id`);
       continue;
     }
-    if (b.card !== undefined && !nameFits(b.card, name)) {
+    if (b.card !== undefined && !aliased && !nameFits(b.card, name)) {
       problems.push(`${label}: that card is ${name}`);
       continue;
     }
+    // A printing's own name says which printing: suggested, unless the line binds it.
     let shownId = "";
+    if (aliased && !b.printing) {
+      if (b.bindsAlias) printingId = aliased.id;
+      else if (!b.shown) shownId = aliased.id;
+    }
     if (b.shown) {
       const s = printings.get(keyOf(b.shown));
       const as = `${b.card ?? name} suggested as (${b.shown.set}) ${b.shown.number}`;
