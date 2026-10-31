@@ -252,7 +252,7 @@ export interface LabWriteSummary {
 }
 
 /** Multi-row INSERTs, chunked under SQLite's variable limit. */
-async function insertRows(sql: Sql, table: string, columns: readonly string[], rows: unknown[][]) {
+export async function insertRows(sql: Sql, table: string, columns: readonly string[], rows: unknown[][]) {
   const perChunk = Math.floor(900 / columns.length);
   for (let start = 0; start < rows.length; start += perChunk) {
     const chunk = rows.slice(start, start + perChunk);

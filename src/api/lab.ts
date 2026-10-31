@@ -1,6 +1,6 @@
 import { assetTree, createAsset, createQueryPool, setPoolQuery, type AssetNode } from "../lib/assets";
 import { parseDecklist } from "../lib/decklist";
-import { readLab, resolveLocally } from "../lib/library/labdb";
+import { insertRows, readLab, resolveLocally } from "../lib/library/labdb";
 import type { Asset, Bucket } from "../lib/library/v5";
 import { badName, formatPath } from "../lib/paths";
 import type { Sql } from "../lib/sql";
@@ -173,21 +173,25 @@ export async function putPool(
     "SELECT oracle_id, printing_id, finish, attrs FROM pool_members WHERE asset_id = $1",
     [id],
   );
-  for (const h of had) {
-    // Kept: no longer to insert. Gone: deleted.
-    if (wanted.delete(key(h))) continue;
+  // Kept: no longer to insert. Gone: deleted. A few statements, not one a
+  // member: the plugin holds no transaction, so fewer is a shorter window
+  // for a failure to leave the pool half replaced.
+  const gone = had.filter((h) => !wanted.delete(key(h)));
+  for (let i = 0; i < gone.length; i += 200) {
+    const chunk = gone.slice(i, i + 200);
     await lab.execute(
-      "DELETE FROM pool_members WHERE asset_id = $1 AND oracle_id = $2 AND printing_id = $3 AND finish = $4 AND attrs = $5",
-      [id, h.oracle_id, h.printing_id, h.finish, h.attrs],
+      `DELETE FROM pool_members WHERE asset_id = $1 AND (oracle_id, printing_id, finish, attrs) IN (VALUES ${chunk
+        .map((_, j) => `($${4 * j + 2}, $${4 * j + 3}, $${4 * j + 4}, $${4 * j + 5})`)
+        .join(", ")})`,
+      [id, ...chunk.flatMap((h) => [h.oracle_id, h.printing_id, h.finish, h.attrs])],
     );
   }
-  for (const s of wanted.values()) {
-    await lab.execute(
-      `INSERT INTO pool_members (asset_id, oracle_id, printing_id, finish, attrs, added_at)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [id, s.oracle_id, s.printing_id, s.finish, s.attrs, at],
-    );
-  }
+  await insertRows(
+    lab,
+    "pool_members",
+    ["asset_id", "oracle_id", "printing_id", "finish", "attrs", "added_at"],
+    [...wanted.values()].map((s) => [id, s.oracle_id, s.printing_id, s.finish, s.attrs, at]),
+  );
   await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [id, at]);
   const [{ n }] = await lab.select<{ n: number }>("SELECT COUNT(*) AS n FROM pool_members WHERE asset_id = $1", [id]);
   return { created: !existing, members: n };

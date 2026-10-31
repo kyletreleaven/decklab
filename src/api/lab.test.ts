@@ -110,6 +110,19 @@ describe("agent API, lab routes", () => {
     expect(members().find((m) => m.oracle_id === "sol")!.added_at).toBe(sol.added_at);
   });
 
+  it("replaces a big pool in chunks: hundreds in, hundreds out", async () => {
+    const insert = cards.prepare(
+      `INSERT INTO cards (id, oracle_id, name, set_code, set_name, collector_number, released_at, rarity, layout, data, cached_at)
+       VALUES (?, ?, ?, 'tst', 'Set', ?, '2020-01-01', 'common', 'normal', '{"lang":"en"}', '2020-01-01')`,
+    );
+    for (let i = 0; i < 250; i++) insert.run(`c${i}`, `o${i}`, `Card ${i}`, String(i));
+    const deck = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => `1 Card ${from + i}`).join("\n");
+    expect(await (await put("/lab/assets/Big", deck(0, 250), "text/plain")).json()).toEqual({ created: true, members: 250 });
+    expect(await (await put("/lab/assets/Big", deck(240, 250), "text/plain")).json()).toEqual({ created: false, members: 10 });
+    const left = db.prepare("SELECT oracle_id FROM pool_members ORDER BY oracle_id").all() as { oracle_id: string }[];
+    expect(left.map((m) => m.oracle_id)).toEqual(Array.from({ length: 10 }, (_, i) => `o${240 + i}`));
+  });
+
   it("puts a query pool, and saves a new query into it", async () => {
     expect((await put("/lab/assets/Searches/cheap", JSON.stringify({ type: "query pool", query: "mv<=2" }))).status).toBe(201);
     expect((await put("/lab/assets/Searches/cheap", JSON.stringify({ type: "query pool", query: "mv<=1" }))).status).toBe(200);
