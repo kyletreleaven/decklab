@@ -77,6 +77,13 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
 The commands that open a database (`dump`, `convert`) only read it.
 `assets` writes, but through the app, which owns its database.
 
+- **No file written over.** `dump`, `convert` and `assets get` refuse a
+  file that exists, unless `--force`. A dump is often the only copy of a
+  lab, and one written over the last one lost five hours of work
+  (2026-10-31). A lab dump is also loaded back before it is written, as
+  `convert`'s result is, so a dump that would not reseed is never taken
+  for a backup ([`bugs/010`](../bugs/010-dump-of-a-color-search-does-not-load.md)).
+
 
 - **One transaction per dump.** `readV4` runs several queries; inside one
   `BEGIN … COMMIT` they see one snapshot, so an edit committed in the app

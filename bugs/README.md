@@ -20,6 +20,7 @@ digging, then read *Traps* for the patterns that have produced bugs before.
 | [007](007-printing-picker-flashes-and-fetches.md) | open · jump fix applied, awaiting repro | The detail's image flashes while moving through the printing picker; each highlight may fetch an image |
 | [008](008-sol-ring-by-name-is-ambiguous.md) | fixed, not yet committed | "Sol Ring" by name is refused as naming more than one card |
 | [009](009-a-name-fetched-once-a-line.md) | fixed, not yet committed | A card named on several lines is asked of Scryfall once a line |
+| [010](010-dump-of-a-color-search-does-not-load.md) | fixed, not yet committed | A dump with a saved color search does not load |
 
 ## Writing a report
 
