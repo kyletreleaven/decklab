@@ -24,7 +24,8 @@ import {
 } from "../lib/assets";
 import { QueryError } from "../lib/collections";
 import { countActiveFilters, toScryfallQuery, type CardFilter } from "../lib/filters";
-import { useRetained } from "../lib/panelState";
+import { retained, useRetained } from "../lib/panelState";
+import { availableSorts, comparator, DEFAULT_SORT, direction, type SortKey } from "../lib/sort";
 import { CardFilters } from "./CardFilters";
 import type { Behind } from "./PoolPanel";
 import { cardStore, execute, select } from "../lib/db";
@@ -78,6 +79,20 @@ function bounds(t: Tile, atLeast: boolean | undefined): string {
  * within; anything else as one run. A deck's extras — held, not asked for —
  * come last, as their own group.
  */
+/**
+ * A wall's tiles in the view's sort — the one All Magic behind it uses, so
+ * the two agree. Quantity is the asset's own copies: most first, then by
+ * name, and only ever offered with no Scryfall stream drawn.
+ */
+export function sortTiles(tiles: Tile[], key: SortKey, flipped: boolean): Tile[] {
+  if (key === "quantity") {
+    const sign = direction(key, flipped) === "desc" ? -1 : 1;
+    return [...tiles].sort((a, b) => sign * (a.count - b.count) || a.card.name.localeCompare(b.card.name));
+  }
+  const by = comparator(key, flipped);
+  return [...tiles].sort((a, b) => by(a.card, b.card));
+}
+
 function groups(
   s: Section,
   limit: number,
@@ -368,6 +383,9 @@ export function AssetView({
   const stateKey = `asset:${node.id}`;
   const [filter, setFilter] = useRetained<CardFilter>(stateKey, "filter", {});
   const [showFilters, setShowFilters] = useRetained(stateKey, "showFilters", false);
+  // The sort, too: the same fields All Magic behind reads, so both layers keep one order.
+  const [sort, setSort] = useRetained<SortKey>(stateKey, "sort", DEFAULT_SORT);
+  const [sortFlipped, setSortFlipped] = useRetained(stateKey, "sortFlipped", false);
   const activeFilters = countActiveFilters(filter);
   const query = toScryfallQuery(filter).trim();
   // Half-typed: said, and the last answer kept.
@@ -566,6 +584,14 @@ export function AssetView({
   };
   const canBehind = behindable(node.type);
   const behindNow = canBehind && behindShown && !!renderBehind;
+  // All Magic behind sets the sort while it is drawn: back alone, take it up.
+  useEffect(() => {
+    if (behindNow) return;
+    const slot = retained(stateKey);
+    if (typeof slot.sort === "string") setSort(slot.sort as SortKey);
+    if (typeof slot.sortFlipped === "boolean") setSortFlipped(slot.sortFlipped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [behindNow]);
 
   const header = (
     <div className="toolbar">
@@ -705,6 +731,24 @@ export function AssetView({
             >
               More filters{activeFilters ? ` (${activeFilters})` : ""}
             </button>
+            <label className="toggle" title={`Order ${node.name}`}>
+              Sort
+              {/* Alone, no Scryfall stream: every sort, quantity too. */}
+              <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                {availableSorts(false).map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="ghost"
+                onClick={() => setSortFlipped((f) => !f)}
+                title={`${direction(sort, sortFlipped) === "asc" ? "Ascending" : "Descending"} — click to reverse`}
+              >
+                {direction(sort, sortFlipped) === "asc" ? "↑" : "↓"}
+              </button>
+            </label>
             {canBehind && onBehind && renderBehind && (
               <label
                 className="toggle"
@@ -782,7 +826,9 @@ export function AssetView({
       <div className="scroll">
         {!sections && !error && <div className="empty">Loading…</div>}
         {sections?.length === 0 && <div className="empty">No zones.</div>}
-        {sections?.map((s) => {
+        {sections?.map((unsorted) => {
+          // A flat wall in the view's sort; a deck or decklist keeps its own order.
+          const s = flat ? { ...unsorted, tiles: sortTiles(unsorted.tiles, sort, sortFlipped) } : unsorted;
           const key = s.zone ?? "";
           const limit = shown[key] ?? PAGE;
           return (
