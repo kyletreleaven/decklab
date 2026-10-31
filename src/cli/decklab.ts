@@ -8,27 +8,36 @@ import { readV4 } from "../lib/library/v4db";
 import { readLab } from "../lib/library/labdb";
 import { dumpV5, loadV5 } from "../lib/library/v5";
 import type { Sql } from "../lib/sql";
+import { assets, AssetsError, AssetsUsageError, ASSETS_USAGE } from "./assets";
 import { sqlOver } from "../lib/sqlOver";
 
 /**
  * `decklab`, the command line: the app's own TypeScript over Bun's SQLite,
- * compiled into one executable (`npm run cli:build`). Read-only. See
+ * compiled into one executable (`npm run cli:build`). Read-only on the
+ * databases; `assets` writes only through the running app's agent API. See
  * docs/cli.md.
  */
 
 const USAGE = `usage: decklab <command> [options]
 
 commands:
-  dump [file]           write the library as a library file, to file or standard output:
-                        schema 4 for the app's database, version 5 for the lab's
-  convert <in> [out]    convert a schema 4 library file to version 5, to out or
-                        standard output; what was lost goes to standard error
-
+  dump [file]                     the library as a library file, to file or standard
+                                  output: schema 4 for the app's database, 5 for the lab's
+  convert <in> [out]              a schema 4 library file as version 5, to out or
+                                  standard output; what was lost goes to standard error
+${ASSETS_USAGE}
 options:
-  --db <path>       the database to read (default: the app's decklab.db;
-                    the lab's is lab.db, beside it)
-  --store <path>    the card store, which says what cards are, for convert
-                    and a lab dump (default: the app's card-cache.db)
+  --db <path>                     the database to read (default: the app's decklab.db;
+                                  the lab's is lab.db, beside it)
+  --store <path>                  the card store, which says what cards are, for
+                                  convert and a lab dump (default: card-cache.db)
+
+assets options (the app must be open, with Tools → Agent API → Enable):
+  --token <token>                 the API's token (default: \$DECKLAB_TOKEN)
+  --port <port>                   the API's port (default: \$DECKLAB_API_PORT, else 47474)
+  --text                          get: as text, whatever the file
+  --type <type>                   put: what a new asset from a .txt file is
+                                  (decklist, list pool)
 `;
 
 /** Thrown for a mistake in the command line itself: exit 2, with usage. */
@@ -153,17 +162,33 @@ function convert(input: string, out: string | undefined, store: string): void {
   }
 }
 
-function parse(argv: string[]): { command: string; args: string[]; db: string; store: string } {
+interface Parsed {
+  command: string;
+  args: string[];
+  db: string;
+  store: string;
+  token?: string;
+  port?: string;
+  text: boolean;
+  type?: string;
+}
+
+function parse(argv: string[]): Parsed {
   const args: string[] = [];
   let db = appDatabase();
   let store = appDatabase("card-cache.db");
+  const given: Record<string, string> = {};
+  let text = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--db" || arg === "--store") {
+    if (arg === "--db" || arg === "--store" || arg === "--token" || arg === "--port" || arg === "--type") {
       const value = argv[++i];
-      if (value === undefined) throw new UsageError(`${arg} needs a path`);
+      if (value === undefined) throw new UsageError(`${arg} needs a value`);
       if (arg === "--db") db = value;
-      else store = value;
+      else if (arg === "--store") store = value;
+      else given[arg.slice(2)] = value;
+    } else if (arg === "--text") {
+      text = true;
     } else if (arg === "-h" || arg === "--help") {
       args.unshift("help");
     } else if (arg.startsWith("-")) {
@@ -173,11 +198,22 @@ function parse(argv: string[]): { command: string; args: string[]; db: string; s
     }
   }
   const [command = "help", ...rest] = args;
-  return { command, args: rest, db, store };
+  return { command, args: rest, db, store, text, ...given };
+}
+
+/**
+ * The CLI's one way onto the network: the running app's agent API, on this
+ * machine. Never Scryfall — the app fetches cards, through its channel
+ * (`scheduler.ts`); `channel-only.test.ts` holds this to loopback.
+ */
+const LOOPBACK = "http://127.0.0.1:";
+function toTheApp(url: string, init?: RequestInit): Promise<Response> {
+  if (!url.startsWith(LOOPBACK)) throw new Error(`the CLI talks only to the app, on ${LOOPBACK}…, not ${url}`);
+  return fetch(url, init);
 }
 
 async function main(argv: string[]): Promise<number> {
-  const { command, args, db, store } = parse(argv);
+  const { command, args, db, store, token, port, text, type } = parse(argv);
   switch (command) {
     case "help":
       process.stdout.write(USAGE);
@@ -190,6 +226,29 @@ async function main(argv: string[]): Promise<number> {
       if (args.length < 1 || args.length > 2) throw new UsageError("convert takes a file, and optionally where to write");
       convert(args[0], args[1], store);
       return 0;
+    case "assets": {
+      const [sub, ...rest] = args;
+      try {
+        await assets(
+          sub,
+          rest,
+          { text, type },
+          {
+            fetch: toTheApp,
+            base: `${LOOPBACK}${port ?? process.env.DECKLAB_API_PORT ?? 47474}`,
+            token: token ?? process.env.DECKLAB_TOKEN,
+            readFile: (path) => readFileSync(path, "utf8"),
+            writeFile: (path, text) => writeFileSync(path, text),
+            out: (text) => process.stdout.write(text),
+          },
+        );
+      } catch (e) {
+        if (e instanceof AssetsUsageError) throw new UsageError(e.message);
+        if (e instanceof AssetsError) throw new Error(e.message);
+        throw e;
+      }
+      return 0;
+    }
     default:
       throw new UsageError(`unknown command ${command}`);
   }

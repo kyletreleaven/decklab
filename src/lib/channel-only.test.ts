@@ -55,10 +55,23 @@ describe("every way out to Scryfall goes through the channel", () => {
 
   it("makes no request with the webview's own network APIs", () => {
     const offenders = frontend
-      .filter((f) => f.path !== "src/lib/urlimport.ts")
+      .filter((f) => f.path !== "src/lib/urlimport.ts" && f.path !== "src/cli/decklab.ts")
       .filter((f) => /(?<![\w.])fetch\(|XMLHttpRequest|new WebSocket|new EventSource/.test(code(f.text)))
       .map((f) => f.path);
     expect(offenders).toEqual([]);
+  });
+
+  it("lets the CLI reach only the app on this machine, which fetches cards itself", () => {
+    const source = frontend.find((f) => f.path === "src/cli/decklab.ts")!.text;
+    const cli = code(source);
+    // One fetch, inside the function that refuses anything but loopback.
+    expect(cli.match(/(?<![\w.])fetch\(/g) ?? []).toHaveLength(1);
+    // From the source as written: `code` would take `//` in the URL for a comment.
+    expect(source).toContain('const LOOPBACK = "http://127.0.0.1:";');
+    const guard = cli.indexOf("if (!url.startsWith(LOOPBACK)) throw");
+    expect(guard).toBeGreaterThan(-1);
+    expect(cli.indexOf("return fetch(url, init);")).toBeGreaterThan(guard);
+    expect(cli).not.toMatch(/scryfall/i);
   });
 
   it("downloads images only from inside scheduledCall", () => {
