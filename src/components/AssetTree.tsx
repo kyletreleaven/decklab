@@ -1,6 +1,8 @@
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CREATABLE, TARGETABLE, type AssetNode, type Creatable } from "../lib/assets";
 import type { AssetType } from "../lib/ontology";
+import { formatPath } from "../lib/paths";
 
 /**
  * A glyph per type, so a place and a deck tell apart at a glance. A
@@ -423,6 +425,17 @@ export function AssetTree({
           {menu.node && (
             <>
               <div className="context-menu-divider" />
+              <button
+                role="menuitem"
+                onClick={() => {
+                  // As the library file and the agent API write it, quoting and all.
+                  const path = formatPath(menu.node!.path);
+                  setMenu(null);
+                  void writeText(path);
+                }}
+              >
+                Copy path
+              </button>
               <button
                 role="menuitem"
                 onClick={() => {
