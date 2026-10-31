@@ -85,6 +85,19 @@ describe("decklab assets, against the API itself", () => {
     expect(JSON.parse(printed)).toMatchObject({ path: ["Pools", "St. Louis"], type: "list pool" });
   });
 
+  it("reads what a collection holds, as a decklist or as JSON with places", async () => {
+    await assets("held", ["/Binders/Red", "red.txt"], {}, io);
+    expect(files.get("red.txt")).toBe("2 Lightning Bolt\n");
+    await assets("held", ["/Binders/Red"], { cards: ["Lightning Bolt", "Sol Ring"], byPlace: true }, io);
+    expect(JSON.parse(printed)).toEqual({
+      path: ["Binders", "Red"],
+      type: "place",
+      cards: [{ card: "Lightning Bolt", oracle: "bolt", qty: 2, places: [{ path: "/Binders/Red", qty: 2 }] }],
+    });
+    await expect(assets("held", ["/Binders/Red"], { text: true, byPlace: true }, io)).rejects.toThrow(/--by-place is JSON only/);
+    await expect(assets("held", ["/Binders"], {}, io)).rejects.toThrow(/400: \/Binders is a folder, not a collection/);
+  });
+
   it("says what is wrong with the command line, and what the API refused", async () => {
     await expect(assets("put", ["/P", "p.toml"], {}, io)).rejects.toThrow(AssetsUsageError);
     await expect(assets("put", ["/P", "p.json"], { type: "decklist" }, io)).rejects.toThrow(/--type is for a .txt file/);

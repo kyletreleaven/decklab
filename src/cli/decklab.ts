@@ -38,6 +38,8 @@ assets options (the app must be open, with Tools → Agent API → Enable):
   --text                          get: as text, whatever the file
   --type <type>                   put: what a new asset from a .txt file is
                                   (decklist, list pool)
+  --card <name>                   held: only this card; repeat for more
+  --by-place                      held: each card's count in each place
 
   --force                         write over a file that exists. Without it, dump,
                                   convert and assets get refuse to
@@ -193,6 +195,8 @@ interface Parsed {
   text: boolean;
   force: boolean;
   type?: string;
+  cards: string[];
+  byPlace: boolean;
 }
 
 function parse(argv: string[]): Parsed {
@@ -202,9 +206,17 @@ function parse(argv: string[]): Parsed {
   const given: Record<string, string> = {};
   let text = false;
   let force = false;
+  let byPlace = false;
+  const cards: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--db" || arg === "--store" || arg === "--token" || arg === "--port" || arg === "--type") {
+    if (arg === "--card") {
+      const value = argv[++i];
+      if (value === undefined) throw new UsageError("--card needs a value");
+      cards.push(value);
+    } else if (arg === "--by-place") {
+      byPlace = true;
+    } else if (arg === "--db" || arg === "--store" || arg === "--token" || arg === "--port" || arg === "--type") {
       const value = argv[++i];
       if (value === undefined) throw new UsageError(`${arg} needs a value`);
       if (arg === "--db") db = value;
@@ -223,7 +235,7 @@ function parse(argv: string[]): Parsed {
     }
   }
   const [command = "help", ...rest] = args;
-  return { command, args: rest, db, store, text, force, ...given };
+  return { command, args: rest, db, store, text, force, cards, byPlace, ...given };
 }
 
 /**
@@ -238,7 +250,7 @@ function toTheApp(url: string, init?: RequestInit): Promise<Response> {
 }
 
 async function main(argv: string[]): Promise<number> {
-  const { command, args, db, store, token, port, text, force, type } = parse(argv);
+  const { command, args, db, store, token, port, text, force, type, cards, byPlace } = parse(argv);
   switch (command) {
     case "help":
       process.stdout.write(USAGE);
@@ -257,7 +269,7 @@ async function main(argv: string[]): Promise<number> {
         await assets(
           sub,
           rest,
-          { text, type },
+          { text, type, cards, byPlace },
           {
             fetch: toTheApp,
             base: `${LOOPBACK}${port ?? process.env.DECKLAB_API_PORT ?? 47474}`,

@@ -6,8 +6,10 @@ import {
   createQueryPool,
   deleteAsset,
   setPoolQuery,
+  sumPlaces,
   type AssetNode,
 } from "../lib/assets";
+import { isA, type AssetType } from "../lib/ontology";
 import { asSection, parseDecklist, type ParsedLine, type Section } from "../lib/decklist";
 import { parseSavedFilters, type SavedFilters } from "../lib/filters";
 import { insertRows, readLab, resolveForApi, type LabWriteOptions, type StoredBucket } from "../lib/library/labdb";
@@ -77,6 +79,100 @@ async function nodeAt(lab: Sql, names: string[]): Promise<{ id: string; type: st
     at = next;
   }
   return at;
+}
+
+/* ---------- collections ---------- */
+
+/** A card in a collection: how many copies, and with `byPlace` how many in each place. */
+export interface HeldCard {
+  card: string;
+  oracle: string;
+  qty: number;
+  places?: { path: string; qty: number }[];
+}
+
+/**
+ * What the collection at `names` holds — a place's cards, or a sum's (a
+ * deck's) added up over the places below it, as the app adds them
+ * (`sumPlaces`). `cards`, names, narrows it to those; one the card store has
+ * never had is refused by name, never fetched. `byPlace` says where each is
+ * (docs/agent-api.md → *Each route is a named query*).
+ */
+export async function collectionAt(
+  lab: Sql,
+  cards: Sql,
+  names: string[],
+  { cards: only, byPlace = false }: { cards?: string[]; byPlace?: boolean } = {},
+): Promise<{ path: string[]; type: string; cards: HeldCard[] }> {
+  if (!names.length) throw new LabApiError("The root is not an asset: read /lab/tree.", 400);
+  const node = await nodeAt(lab, names);
+  if (!node) throw new LabApiError(`Nothing at ${formatPath(names)}.`, 404);
+  const type = node.type as AssetType;
+  if (type !== "place" && !isA(type, "sum")) {
+    throw new LabApiError(`${formatPath(names)} is a ${type}, not a collection: a place, a sum or a deck.`, 400);
+  }
+
+  let oracles: string[] | undefined;
+  if (only) {
+    const asked: Bucket[] = only.map((card) => ({ card, attrs: {} }));
+    const resolve = await resolveForApi(asked, cards, null).catch(refuse);
+    oracles = [...new Set(asked.map((b) => resolve(b).oracle_id))];
+    if (!oracles.length) return { path: names, type, cards: [] };
+  }
+
+  const places = type === "place" ? [{ id: node.id }] : await sumPlaces(lab, node.id);
+  const held = new Map<string, { qty: number; byPlace: Map<string, number> }>();
+  for (let i = 0; i < places.length; i += 400) {
+    const chunk = places.slice(i, i + 400);
+    const filter = oracles ? `AND oracle_id IN (${oracles.map((_, j) => `$${chunk.length + j + 1}`).join(", ")})` : "";
+    const rows = await lab.select<{ asset_id: string; oracle_id: string; qty: number }>(
+      `SELECT asset_id, oracle_id, SUM(qty) AS qty FROM lines
+        WHERE asset_id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")}) ${filter}
+        GROUP BY asset_id, oracle_id`,
+      [...chunk.map((p) => p.id), ...(oracles ?? [])],
+    );
+    for (const r of rows) {
+      const h = held.get(r.oracle_id) ?? { qty: 0, byPlace: new Map<string, number>() };
+      h.qty += Number(r.qty);
+      h.byPlace.set(r.asset_id, Number(r.qty));
+      held.set(r.oracle_id, h);
+    }
+  }
+
+  const ids = [...held.keys()];
+  const nameOf = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    const rows = await cards.select<{ oracle_id: string; name: string }>(
+      `SELECT oracle_id, MIN(name) AS name FROM cards WHERE oracle_id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")}) GROUP BY oracle_id`,
+      chunk,
+    );
+    for (const r of rows) nameOf.set(r.oracle_id, r.name);
+  }
+
+  // Places in the order the app lists them; each by its full path.
+  let pathOf = new Map<string, string>();
+  if (byPlace) {
+    const walk = (ns: AssetNode[]): [string, string][] => ns.flatMap((n) => [[n.id, formatPath(n.path)], ...walk(n.children)]);
+    pathOf = new Map(walk(await assetTree(lab)));
+  }
+  const rank = new Map(places.map((p, i) => [p.id, i]));
+
+  const out: HeldCard[] = ids.map((oracle) => {
+    const h = held.get(oracle)!;
+    return {
+      card: nameOf.get(oracle) ?? oracle,
+      oracle,
+      qty: h.qty,
+      ...(byPlace && {
+        places: [...h.byPlace]
+          .sort(([a], [b]) => rank.get(a)! - rank.get(b)!)
+          .map(([id, qty]) => ({ path: pathOf.get(id) ?? id, qty })),
+      }),
+    };
+  });
+  out.sort((a, b) => a.card.localeCompare(b.card));
+  return { path: names, type, cards: out };
 }
 
 /** The type of what is at `names`, or null: what a text body is read as. */

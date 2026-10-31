@@ -16,6 +16,10 @@ export const ASSETS_USAGE = `  assets tree                     every asset: its 
                                   or list pool (what is there says which; --type
                                   for a new one), .json any body the API takes
   assets rm <path>                delete an asset and what is below it
+  assets held <path> [file]       what a collection (place, sum, deck) holds, to file
+                                  or standard output: as a decklist for a .txt file or
+                                  --text, else JSON; --card for only those, --by-place
+                                  for where (JSON only)
 `;
 
 /** What `assets` needs from outside, so a test can give it the API itself. */
@@ -31,6 +35,10 @@ export interface AssetsIo {
 export interface AssetsOptions {
   text?: boolean;
   type?: string;
+  /** held: only these cards, by name. */
+  cards?: string[];
+  /** held: each card's count in each place. */
+  byPlace?: boolean;
 }
 
 /** A mistake in the command line: exit 2, with usage. */
@@ -39,9 +47,7 @@ export class AssetsUsageError extends Error {}
 /** The API said no, or did not answer: exit 1, with what it said. */
 export class AssetsError extends Error {}
 
-const ROUTE = "/lab/assets";
-
-function pathUrl(base: string, text: string): string {
+function pathUrl(base: string, text: string, route = "/lab/assets"): string {
   let names: string[];
   try {
     names = parsePath(text.startsWith("/") ? text : `/${text}`);
@@ -49,7 +55,7 @@ function pathUrl(base: string, text: string): string {
     if (e instanceof PathError) throw new AssetsUsageError(e.message);
     throw e;
   }
-  return `${base}${ROUTE}/${names.map(encodeURIComponent).join("/")}`;
+  return `${base}${route}/${names.map(encodeURIComponent).join("/")}`;
 }
 
 interface TreeNode {
@@ -139,7 +145,29 @@ export async function assets(sub: string | undefined, args: string[], opts: Asse
       await call(pathUrl(io.base, args[0]), { method: "DELETE" });
       return;
     }
+    case "held": {
+      arity(1, 2, "a path, and optionally a file");
+      const [path, file] = args;
+      const asText = opts.text || (file?.endsWith(".txt") ?? false);
+      // A decklist has nowhere to say where: places come as JSON.
+      if (asText && opts.byPlace) throw new AssetsUsageError("--by-place is JSON only: a decklist has no places");
+      const query = new URLSearchParams();
+      for (const card of opts.cards ?? []) query.append("cards", card);
+      if (opts.byPlace) query.set("by_place", "true");
+      const qs = query.size ? `?${query}` : "";
+      const held = (await (await call(`${pathUrl(io.base, path, "/lab/collections")}${qs}`)).json()) as {
+        cards: { card: string; qty: number }[];
+      };
+      const text = asText
+        ? held.cards.map((c) => `${c.qty} ${c.card}\n`).join("")
+        : `${JSON.stringify(held, null, 2)}\n`;
+      if (file === undefined) io.out(text);
+      else io.writeFile(file, text);
+      return;
+    }
     default:
-      throw new AssetsUsageError(sub === undefined ? "assets needs a command: tree, get, put or rm" : `unknown assets command ${sub}`);
+      throw new AssetsUsageError(
+        sub === undefined ? "assets needs a command: tree, get, put, rm or held" : `unknown assets command ${sub}`,
+      );
   }
 }

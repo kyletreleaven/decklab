@@ -7,6 +7,7 @@ import guide from "../../docs/agents/using-the-api.md?raw";
 import {
   assetAt,
   bodyFromJson,
+  collectionAt,
   decklistFromText,
   decklistText,
   deleteAt,
@@ -72,10 +73,10 @@ export function createApp(token: () => Promise<string | null>, labAccess?: LabAc
     if (!open) throw new LabApiError("The lab routes answer only when the app runs in lab mode (npm run lab).", 404);
     return open;
   };
-  /** The asset path a `/lab/assets/…` URL names: its segments, decoded. */
-  const pathOf = (c: Context) =>
+  /** The asset path a `/lab/assets/…` (or `/lab/collections/…`) URL names: its segments, decoded. */
+  const pathOf = (c: Context, route = "/lab/assets") =>
     c.req
-      .path.slice("/lab/assets".length)
+      .path.slice(route.length)
       .split("/")
       .filter((s) => s !== "")
       .map((s) => decodeURIComponent(s));
@@ -90,6 +91,17 @@ export function createApp(token: () => Promise<string | null>, labAccess?: LabAc
       return c.text(await decklistText(sql, cards, pathOf(c), { marks: c.req.query("marks") !== "no" }));
     }
     return c.json(await assetAt(sql, cards, pathOf(c)));
+  });
+
+  // What a collection holds: its variables are `cards`, repeated, and `by_place`.
+  app.get("/lab/collections/*", async (c) => {
+    const { lab: sql, cards } = await lab();
+    const byPlace = c.req.query("by_place");
+    if (byPlace !== undefined && byPlace !== "true" && byPlace !== "false") {
+      throw new LabApiError("`by_place` is `true` or `false`.", 400);
+    }
+    const only = c.req.queries("cards");
+    return c.json(await collectionAt(sql, cards, pathOf(c, "/lab/collections"), { cards: only, byPlace: byPlace === "true" }));
   });
 
   app.put("/lab/assets/*", async (c) => {

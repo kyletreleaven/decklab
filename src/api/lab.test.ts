@@ -289,6 +289,71 @@ describe("agent API, lab routes", () => {
     expect(onWrite).not.toHaveBeenCalled();
   });
 
+  describe("collections", () => {
+    // A sum: Box and Binder count; a folder's place and a checklist under it do not.
+    beforeEach(() => {
+      db.exec(`INSERT INTO assets (id, parent_id, name, type) VALUES
+        ('mine', 'root', 'Mine', 'sum'),
+        ('box', 'mine', 'Box', 'place'),
+        ('binder', 'mine', 'Binder', 'place'),
+        ('wants', 'mine', 'Wants', 'checklist'),
+        ('trade', 'mine', 'Trade', 'folder'),
+        ('loose', 'trade', 'Loose', 'place')`);
+      db.exec(`INSERT INTO lines (asset_id, oracle_id, printing_id, qty) VALUES
+        ('box', 'bolt', '', 2), ('box', 'bolt', 'bolt-m10', 1), ('box', 'sol', '', 1),
+        ('binder', 'bolt', '', 1),
+        ('wants', 'sol', '', 4),
+        ('loose', 'sol', '', 9)`);
+    });
+    const get = async (path: string) => {
+      const res = await app.request(path, { headers: auth });
+      return { status: res.status, body: await res.json() };
+    };
+
+    it("adds a sum up over the places below it, printings together", async () => {
+      expect((await get("/lab/collections/Mine")).body).toEqual({
+        path: ["Mine"],
+        type: "sum",
+        cards: [
+          { card: "Lightning Bolt", oracle: "bolt", qty: 4 },
+          { card: "Sol Ring", oracle: "sol", qty: 1 },
+        ],
+      });
+    });
+
+    it("says where, with by_place, and narrows to the cards asked for", async () => {
+      const { body } = await get("/lab/collections/Mine?by_place=true&cards=lightning%20bolt&cards=Acidic%20Slime");
+      expect(body.cards).toEqual([
+        {
+          card: "Lightning Bolt",
+          oracle: "bolt",
+          qty: 4,
+          places: [
+            { path: "/Mine/Binder", qty: 1 },
+            { path: "/Mine/Box", qty: 3 },
+          ],
+        },
+      ]);
+    });
+
+    it("reads a place as itself", async () => {
+      const { body } = await get("/lab/collections/Mine/Box?by_place=true&cards=Sol%20Ring");
+      expect(body).toEqual({ path: ["Mine", "Box"], type: "place", cards: [{ card: "Sol Ring", oracle: "sol", qty: 1, places: [{ path: "/Mine/Box", qty: 1 }] }] });
+    });
+
+    it("refuses what is not a collection, a card no one knows, and a bad by_place", async () => {
+      const refused = async (path: string, status: number, why: RegExp) => {
+        const { status: s, body } = await get(path);
+        expect(s).toBe(status);
+        expect(body.error).toMatch(why);
+      };
+      await refused("/lab/collections/Mine/Wants", 400, /is a checklist, not a collection/);
+      await refused("/lab/collections/Mine/Nope", 404, /Nothing at/);
+      await refused("/lab/collections/Mine?cards=Mana%20Crypt", 400, /Not in the card store:\nMana Crypt/);
+      await refused("/lab/collections/Mine?by_place=yes", 400, /`by_place` is `true` or `false`/);
+    });
+  });
+
   describe("fetching what the store has never had", () => {
     // Stands in for the app's channel: answers from a known list, into the store, and counts.
     const KNOWN: Record<string, [id: string, oracle: string]> = { "Mana Crypt": ["crypt-2xm", "crypt"] };
