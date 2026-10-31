@@ -166,7 +166,13 @@ async function resolveBuckets(
       const [set, collector_number] = k.split("|");
       return { set, collector_number };
     }),
-    ...named.filter((b) => missingNames.includes(fold(b.card!))).map((b) => ({ name: b.card! })),
+    // Once a name, however many lines give it, as the first of them spells it.
+    ...[
+      ...named
+        .filter((b) => missingNames.includes(fold(b.card!)))
+        .reduce((once, b) => (once.has(fold(b.card!)) ? once : once.set(fold(b.card!), b.card!)), new Map<string, string>())
+        .values(),
+    ].map((name) => ({ name })),
   ];
   let fetched = 0;
   if (wanted.length) {
@@ -232,16 +238,29 @@ async function resolveBuckets(
 export type StoredBucket = Stored;
 
 /**
- * Which card every bucket means, from the card store alone: one the store
- * has never had is refused, named, and never fetched — the agent API's
- * case, which sends no requests (docs/agent-api.md → *Lab routes*).
+ * Which card every bucket means, for the agent API: from the card store,
+ * and what it has never had through `fetchMissing` — at most `most` cards a
+ * call, so one request from outside costs Scryfall a request or three, not
+ * a burst (docs/agent-api.md → *Lab routes*). Without `fetchMissing`, from
+ * the store alone, refusing the rest by name.
  */
-export async function resolveLocally(buckets: Bucket[], cards: Sql): Promise<(b: Bucket) => StoredBucket> {
+export async function resolveForApi(
+  buckets: Bucket[],
+  cards: Sql,
+  fetchMissing: LabWriteOptions["fetchMissing"] | null,
+  { most = 150 }: { most?: number } = {},
+): Promise<(b: Bucket) => StoredBucket> {
   const { resolve } = await resolveBuckets(buckets, cards, async (wanted) => {
     const named = wanted.map((w) =>
       "name" in w ? w.name : "set" in w ? `(${w.set.toUpperCase()}) ${w.collector_number}` : w.id,
     );
-    throw new LibraryFormatError(`Not in the card store, and the lab's API fetches nothing:\n${named.join("\n")}`);
+    if (!fetchMissing) throw new LibraryFormatError(`Not in the card store:\n${named.join("\n")}`);
+    if (wanted.length > most) {
+      throw new LibraryFormatError(
+        `${wanted.length} cards are not in the card store, and one request fetches at most ${most}: send fewer at a time.`,
+      );
+    }
+    return fetchMissing(wanted);
   });
   return resolve;
 }

@@ -51,7 +51,7 @@ const SECTIONS: Record<string, Section | "ignore"> = {
   about: "ignore",
 };
 
-function asSection(line: string): Section | "ignore" | null {
+export function asSection(line: string): Section | "ignore" | null {
   const cleaned = line
     .replace(/^[/#]+/, "")
     .replace(/[:：]\s*$/, "")

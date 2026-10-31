@@ -390,7 +390,7 @@ const DEFAULT_NAME: Record<Creatable | "deck", string> = {
 };
 
 /** A child of `parentId` called `zone`, of `type`, as its owner's zone. */
-async function addZone(lab: Sql, ownerId: string, zone: string, type: "place" | "exact checklist", at: string): Promise<void> {
+export async function addZone(lab: Sql, ownerId: string, zone: string, type: "place" | "exact checklist", at: string): Promise<void> {
   const id = crypto.randomUUID();
   await lab.execute(
     "INSERT INTO assets (id, parent_id, name, type, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $5)",

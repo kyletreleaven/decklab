@@ -4,14 +4,29 @@ import { HTTPException } from "hono/http-exception";
 import { listDecks } from "../lib/decks";
 import type { Sql } from "../lib/sql";
 import guide from "../../docs/agents/using-the-api.md?raw";
-import { assetAt, LabApiError, poolFromJson, poolFromText, putPool, tree } from "./lab";
+import {
+  assetAt,
+  bodyFromJson,
+  decklistFromText,
+  decklistText,
+  deleteAt,
+  LabApiError,
+  type Fetch,
+  poolFromText,
+  putDecklist,
+  putPool,
+  tree,
+  typeAt,
+} from "./lab";
 
 /**
  * The lab's databases, when the app runs in lab mode: the lab's own and the
- * card store. `onWrite` is told after every write, so the app can read again.
+ * card store, and `fetch` for what the store has never had — the app's own
+ * channel to Scryfall. `onWrite` is told after every write, so the app can
+ * read again.
  */
 export interface LabAccess {
-  open: () => Promise<{ lab: Sql; cards: Sql } | null>;
+  open: () => Promise<{ lab: Sql; cards: Sql; fetch?: Fetch } | null>;
   onWrite?: () => void;
 }
 
@@ -69,26 +84,47 @@ export function createApp(token: () => Promise<string | null>, labAccess?: LabAc
 
   app.get("/lab/assets/*", async (c) => {
     const { lab: sql, cards } = await lab();
+    // A decklist reads as text when asked: the zones, as `PUT` takes them.
+    if ((c.req.header("accept") ?? "").includes("text/plain")) {
+      return c.text(await decklistText(sql, cards, pathOf(c)));
+    }
     return c.json(await assetAt(sql, cards, pathOf(c)));
   });
 
   app.put("/lab/assets/*", async (c) => {
-    const { lab: sql, cards } = await lab();
+    const { lab: sql, cards, fetch } = await lab();
+    const names = pathOf(c);
     const text = await c.req.text();
     let body;
-    if ((c.req.header("content-type") ?? "").startsWith("text/plain")) body = poolFromText(text);
-    else {
+    if ((c.req.header("content-type") ?? "").startsWith("text/plain")) {
+      // Text is a decklist or a list pool: what is there says which, and
+      // `?type=decklist` where nothing is yet.
+      const asked = c.req.query("type");
+      if (asked !== undefined && asked !== "decklist" && asked !== "list pool") {
+        throw new LabApiError('Text is a decklist or a list pool: `?type=decklist` or `?type=list pool`.', 400);
+      }
+      const type = asked ?? (await typeAt(sql, names)) ?? "list pool";
+      body = type === "decklist" ? decklistFromText(text) : poolFromText(text);
+    } else {
       let json: unknown;
       try {
         json = JSON.parse(text);
       } catch {
         throw new LabApiError("The body is not JSON. Send a decklist as Content-Type: text/plain.", 400);
       }
-      body = poolFromJson(json);
+      body = bodyFromJson(json);
     }
-    const result = await putPool(sql, cards, pathOf(c), body);
+    const result =
+      body.type === "decklist" ? await putDecklist(sql, cards, names, body, { fetch }) : await putPool(sql, cards, names, body, { fetch });
     labAccess?.onWrite?.();
     return c.json(result, result.created ? 201 : 200);
+  });
+
+  app.delete("/lab/assets/*", async (c) => {
+    const { lab: sql } = await lab();
+    await deleteAt(sql, pathOf(c));
+    labAccess?.onWrite?.();
+    return c.body(null, 204);
   });
 
   return app;

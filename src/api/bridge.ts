@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cardStore, execute, processKind, select } from "../lib/db";
+import { resolveIdentifiers } from "../lib/scryfall";
 import { createApp } from "./app";
 
 /** The page event an API write to the lab fires. */
@@ -25,7 +26,15 @@ interface ApiRequest {
 export async function startApiBridge(): Promise<void> {
   const app = createApp(() => invoke<string | null>("api_token"), {
     // The lab routes, in lab mode only: then `db()` is `lab.db`.
-    open: async () => ((await processKind()) === "lab" ? { lab: { select, execute }, cards: await cardStore() } : null),
+    open: async () =>
+      (await processKind()) === "lab"
+        ? {
+            lab: { select, execute },
+            cards: await cardStore(),
+            // Import's own: through the scheduler, background lane, 75 a request.
+            fetch: resolveIdentifiers,
+          }
+        : null,
     // The app reads its tree and open view again (`App.tsx`).
     onWrite: () => window.dispatchEvent(new Event(LAB_CHANGED)),
   });
