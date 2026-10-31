@@ -10,6 +10,7 @@ import {
   sumContents,
   changePrintings,
   decklistCards,
+  stepTarget,
   suggestPrintingsOf,
   type PrintingChange,
   type AssetNode,
@@ -34,6 +35,7 @@ import { CardImage } from "./CardImage";
 import { PullSheet } from "./PullSheet";
 import { plainestPrintings } from "../lib/printings";
 import { printingsInSet } from "../lib/scryfall";
+import { LAB_CHANGED } from "../api/bridge";
 
 /** Tiles a section shows at first, and adds per "Show more": as the pool pages. */
 const PAGE = 175;
@@ -61,7 +63,7 @@ interface Section {
   /** A pool's members: membership, no counts. */
   members?: boolean;
   /** The asset its tiles are lines of — the view's own, or a zone's — as a source for the target. */
-  source?: { id: string; type: AssetType };
+  source?: { id: string; type: AssetType; name: string };
   tiles: Tile[];
 }
 
@@ -141,6 +143,27 @@ export interface LabTarget {
   /** One copy between places: `to` the target from `fromId`, or back. */
   move: (fromId: string, bucket: Bucket, dir: "to" | "back") => void;
 }
+
+/**
+ * A checklist is only ever a destination, never a source: in its own view —
+ * a decklist's zones too — `−`/`+` ask for one fewer or one more of the
+ * line, whatever the target is. Every open view reads again after.
+ */
+export function selfTarget(
+  checklist: { id: string; type: AssetType; name: string },
+  countOf: (bucket: Bucket) => number,
+): LabTarget {
+  return {
+    ...checklist,
+    countOf,
+    step: (bucket, delta) =>
+      void stepTarget({ select, execute }, checklist, bucket, delta).then(() => window.dispatchEvent(new Event(LAB_CHANGED))),
+    move: () => {},
+  };
+}
+
+/** A goal: what is asked for, drawn but never drawn from. */
+export const isGoal = (type: AssetType) => isA(type, "checklist");
 
 /** The one bucket a tile stands for, whole; none when it covers several. */
 function bucketOf(t: Tile): Bucket | null {
@@ -258,7 +281,8 @@ export function BucketButtons({
           ];
   return (
     <span className={className} onClick={(e) => e.stopPropagation()}>
-      {target.type !== "list pool" && bucket && (
+      {/* Its own count is already on the tile or row. */}
+      {target.type !== "list pool" && target.id !== source.id && bucket && (
         <span
           className="target-count"
           title={`${has} in ${target.name}`}
@@ -381,14 +405,14 @@ export function AssetView({
               query,
             }),
             atLeast: node.type === "checklist",
-            source: { id: node.id, type: node.type },
+            source: { id: node.id, type: node.type, name: node.name },
           },
         ];
       if (node.type === "sum")
         return [
           {
             tiles: await sumContents(lab, store, node.id, { query }),
-            source: { id: node.id, type: node.type },
+            source: { id: node.id, type: node.type, name: node.name },
           },
         ];
       if (node.type === "list pool")
@@ -396,7 +420,7 @@ export function AssetView({
           {
             tiles: await memberContents(lab, store, node.id, { query }),
             members: true,
-            source: { id: node.id, type: node.type },
+            source: { id: node.id, type: node.type, name: node.name },
           },
         ];
       // A deck is drawn as the decklist it builds, missing copies dimmed.
@@ -417,7 +441,7 @@ export function AssetView({
             built: { asked: z.asked, held: z.held ?? 0, exact: !!z.exact },
           }),
           atLeast: z.target?.type === "checklist",
-          ...(z.target && { source: { id: z.target.id, type: z.target.type } }),
+          ...(z.target && { source: { id: z.target.id, type: z.target.type, name: z.target.path[z.target.path.length - 1] ?? z.zone } }),
           ...(at !== undefined &&
             at !== `${own}/${z.zone}` && { elsewhere: `/${at}` }),
           tiles: z.tiles,
@@ -515,8 +539,11 @@ export function AssetView({
       {!s.members && (
         <span className="qty-badge">{bounds(t, s.atLeast)}</span>
       )}
-      {target && s.source && t.state !== "missing" && (
-        <TileControls tile={t} source={s.source} target={target} />
+      {s.source && isGoal(s.source.type) ? (
+        // A checklist's own view edits it, whatever the target.
+        <TileControls tile={t} source={s.source} target={selfTarget(s.source, () => t.count)} />
+      ) : (
+        target && s.source && t.state !== "missing" && <TileControls tile={t} source={s.source} target={target} />
       )}
       {t.standIn && <span className="stand-in-badge">stand-in</span>}
     </div>
@@ -532,7 +559,7 @@ export function AssetView({
     node.type === "list pool";
   // The asset's tiles in front of All Magic, as a section says how to draw them.
   const frontSection: Section = {
-    source: { id: node.id, type: node.type },
+    source: { id: node.id, type: node.type, name: node.name },
     atLeast: node.type === "checklist",
     members: node.type === "list pool",
     tiles: [],

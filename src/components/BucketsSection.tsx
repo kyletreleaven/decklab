@@ -12,7 +12,7 @@ import type { AssetType } from "../lib/ontology";
 import { printingLabel } from "../lib/printings";
 import * as scryfall from "../lib/scryfall";
 import type { Card } from "../lib/types";
-import { BucketButtons, type LabTarget } from "./AssetView";
+import { BucketButtons, isGoal, selfTarget, type LabTarget } from "./AssetView";
 
 /** Finishes to offer when the printing is not known. */
 const ANY_FINISHES = ["nonfoil", "foil", "etched"];
@@ -125,11 +125,12 @@ export function BucketsSection({
               {place && <span className="bucket-place">{place.name}</span>}
               {!pool && <span className="bucket-qty">{qty}×</span>}
               <span className="bucket-label">{label(bucket)}</span>
-              {target && (
+              {(isGoal(from.type) || target) && (
                 <BucketButtons
                   bucket={bucket}
                   source={from}
-                  target={target}
+                  // A checklist is a destination only: here, its own line.
+                  target={isGoal(from.type) ? selfTarget(from, () => qty) : target!}
                   className="bucket-buttons"
                 />
               )}
