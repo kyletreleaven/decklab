@@ -881,27 +881,48 @@ export async function pullSheet(lab: Sql, store: Sql, deckId: string, fromId: st
   );
   if (!missing.length) return [];
 
-  // All Magic holds every card, any number: what the decklist line says, as it says it.
+  // All Magic holds every card, any number: what the decklist line says, as
+  // it says it, first. A line that binds no printing is filled by any, so
+  // each printing the store knows follows — known, not the whole run, since
+  // a sheet sends no requests — newest first, the suggested art leading.
   if (fromId === ALL_MAGIC) {
     const place = { id: ALL_MAGIC, name: "All Magic" };
-    return missing.map(({ zone, zoneId, tile }) => ({
-      zone,
-      ...(zoneId && { zoneId }),
-      oracleId: tile.oracleId,
-      card: tile.card,
-      missing: tile.count,
-      sources: tile.buckets.map((w) => ({
-        place,
-        qty: tile.count,
-        bucket: {
-          oracleId: tile.oracleId,
-          ...(w.printingId && { printingId: w.printingId }),
-          ...(w.finish && { finish: w.finish }),
-          attrs: w.attrs,
-          ...(w.shownId && { shownId: w.shownId }),
-        },
-      })),
-    }));
+    const oracles = [...new Set(missing.map((m) => m.tile.oracleId))];
+    const printings = new Map<string, { id: string; finishes: string[] }[]>();
+    for (let i = 0; i < oracles.length; i += 400) {
+      const chunk = oracles.slice(i, i + 400);
+      const rows = await store.select<{ id: string; oracle_id: string; finishes: string | null }>(
+        `SELECT id, oracle_id, json_extract(data, '$.finishes') AS finishes FROM cards
+          WHERE oracle_id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")})
+            AND COALESCE(json_extract(data, '$.lang'), 'en') = 'en'
+          ORDER BY released_at DESC, set_code, collector_number`,
+        chunk,
+      );
+      for (const r of rows) {
+        printings.set(r.oracle_id, [...(printings.get(r.oracle_id) ?? []), { id: r.id, finishes: r.finishes ? (JSON.parse(r.finishes) as string[]) : [] }]);
+      }
+    }
+    return missing.map(({ zone, zoneId, tile }) => {
+      const seen = new Set<string>();
+      const sources: PullSource[] = [];
+      const offer = (bucket: Bucket) => {
+        if (seen.has(bucketKey(bucket))) return;
+        seen.add(bucketKey(bucket));
+        sources.push({ place, qty: tile.count, bucket });
+      };
+      for (const w of tile.buckets) {
+        const base = { oracleId: tile.oracleId, ...(w.finish && { finish: w.finish }), attrs: w.attrs };
+        offer({ ...base, ...(w.printingId && { printingId: w.printingId }), ...(w.shownId && { shownId: w.shownId }) });
+      }
+      for (const w of tile.buckets) {
+        if (w.printingId) continue;
+        const base = { oracleId: tile.oracleId, ...(w.finish && { finish: w.finish }), attrs: w.attrs };
+        const run = (printings.get(tile.oracleId) ?? []).filter((p) => !w.finish || !p.finishes.length || p.finishes.includes(w.finish));
+        const lead = run.filter((p) => p.id === w.shownId);
+        for (const p of [...lead, ...run.filter((p) => p.id !== w.shownId)]) offer({ ...base, printingId: p.id });
+      }
+      return { zone, ...(zoneId && { zoneId }), oracleId: tile.oracleId, card: tile.card, missing: tile.count, sources };
+    });
   }
 
   const [from] = await lab.select<{ id: string; name: string; type: AssetType }>("SELECT id, name, type FROM assets WHERE id = $1", [fromId]);

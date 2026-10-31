@@ -469,6 +469,9 @@ describe("the lab's assets, for display", () => {
     db.exec(`UPDATE lines SET printing_id = 'bolt-m10' WHERE asset_id = '${await find("Decks/Burn/main")}'`);
     const bound = await pullSheet(sqlOver(db), sqlOver(cards), box, shoebox);
     expect(bound[0].sources.map((s) => s.bucket.printingId)).toEqual(["bolt-m10"]);
+    // All Magic too: a bound line is one choice.
+    const all = await pullSheet(sqlOver(db), sqlOver(cards), box, ALL_MAGIC);
+    expect(all[0].sources.map((s) => s.bucket.printingId)).toEqual(["bolt-m10"]);
 
     await moveLines(sqlOver(db), null, { assetId: shoebox, bucket: bound[0].sources[0].bucket }, { assetId: main, bucket: bound[0].sources[0].bucket }, 1);
     expect(await pullSheet(sqlOver(db), sqlOver(cards), box, shoebox)).toEqual([]);
@@ -479,8 +482,13 @@ describe("the lab's assets, for display", () => {
     const main = await find("Decks/Burn box/main");
     db.exec(`UPDATE lines SET printing_id = '', shown_id = 'bolt-2x2', qty = 6 WHERE asset_id = '${await find("Decks/Burn/main")}'`);
     const [row] = await pullSheet(sqlOver(db), sqlOver(cards), box, ALL_MAGIC);
-    expect([row.missing, row.sources.length, row.sources[0].place.name]).toEqual([3, 1, "All Magic"]);
-    expect(row.sources[0].bucket).toEqual({ oracleId: "bolt", attrs: {}, shownId: "bolt-2x2" });
+    expect([row.missing, row.sources[0].place.name]).toEqual([3, "All Magic"]);
+    // The line as it is first; then, since it binds none, each known printing, its suggestion leading.
+    expect(row.sources.map((s) => s.bucket)).toEqual([
+      { oracleId: "bolt", attrs: {}, shownId: "bolt-2x2" },
+      { oracleId: "bolt", attrs: {}, printingId: "bolt-2x2" },
+      { oracleId: "bolt", attrs: {}, printingId: "bolt-m10" },
+    ]);
     await addCopies(sqlOver(db), main, row.sources[0].bucket, row.missing);
     expect(db.prepare(`SELECT printing_id, shown_id, qty FROM lines WHERE asset_id = ? ORDER BY printing_id`).all(main)).toEqual([
       { printing_id: "", shown_id: "bolt-2x2", qty: 3 },
