@@ -85,12 +85,16 @@ have to be right before the first write.
 - 🚧 **Lab routes**, lab mode only, so an agent designing a deck works on
       the lab's assets beside you (journey H; design in
       [`docs/agent-api.md`](docs/agent-api.md) → *Lab routes*). Assets by
-      path, as the library format's JSON; cards from the store only, no
-      requests. First: read the tree and an asset, and `PUT` a pool. Then
-      what the agent asks for — other types, rename, move, delete.
-- ⬜ **A CLI lane in the scheduler, last.** Below `background`: the UI's
-      responsiveness comes first, and an agent can wait. Needed before the
-      first route that reaches Scryfall.
+      path, as the library format's JSON; unknown cards fetched through the
+      channel, at most 150 a call. Built: read the tree and an asset, `PUT`
+      a pool or a decklist, `DELETE`. Next, what the agent asks for —
+      checklists and places, rename, move.
+- ⬜ **An agent lane in the scheduler, if needed.** The lab routes fetch
+      unknown cards on `background`, beside images and import — at most 150
+      cards, two or three requests, a call. Watch whether an agent's fetches
+      hold up images; if they do, a lane below `background` (FIFO, never
+      evicted), since the UI's responsiveness comes first and an agent can
+      wait.
 - ⬜ **Routes**, JSON, each a few lines over existing `src/lib/` code:
       - decks: `GET /decks/:id` (with entries), add, remove, import, export
       - collections: list, show, add, remove, import, export

@@ -125,7 +125,7 @@ hardcoded to Commander in practice.
 
 ## Agent API
 
-Early: one route so far. Design and reasoning in
+Early. Design and reasoning in
 [`docs/agent-api.md`](docs/agent-api.md).
 
 - **Tools → Agent API** turns on a localhost HTTP API for agents and scripts.
@@ -138,11 +138,13 @@ Early: one route so far. Design and reasoning in
 - `GET /guide` — how to use the API, for an agent with no copy of the repo
   ([`docs/agents/using-the-api.md`](docs/agents/using-the-api.md))
 - **Lab routes**, in lab mode only, assets by path as the library file's
-  JSON: `GET /lab/tree`, `GET /lab/assets/<path>`, and `PUT
-  /lab/assets/<path>` to create or replace a list pool (JSON, or a
-  decklist as plain text) or a query pool. Cards come from the card store
-  only: one it has never had is refused by name, never fetched. The open
-  lab redraws after a write
+  JSON: `GET /lab/tree`, `GET /lab/assets/<path>` (a decklist also as
+  text), `PUT /lab/assets/<path>` to create or replace a list pool, a
+  query pool with its filters, or a decklist zone by zone (JSON, or text
+  with zone headings), and `DELETE`, refused while pinned or where copies
+  are recorded. A card the store has never had is fetched through the
+  app's rate-limited channel, at most 150 a call; one Scryfall does not
+  know is refused by name. The open lab redraws after a write
 
 ## The lab: the new model, in progress
 

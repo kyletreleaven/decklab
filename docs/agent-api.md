@@ -159,7 +159,7 @@ That branch has not been compiled on Linux yet.
 For an agent designing a deck with you — `cmdr`'s, say — to work on the
 lab's assets beside you. **Lab mode only**: under `npm run lab` the routes
 read and write `lab.db`; otherwise they answer 404. Built a step at a time:
-reading first, then pools.
+reading first, then pools, then decklists and deleting.
 
 - **Assets by path, as in the library file.** No ids: a path is what a
   person and an agent both say (`inventory/README.md` → *The asset tree*).
@@ -167,10 +167,15 @@ reading first, then pools.
 - **The library format, as JSON.** An asset is the object `readLab` gives
   and [`library-format-5.md`](library-format-5.md) describes: one format,
   read and written, with no second schema to drift.
-- **No Scryfall.** A card is resolved from the card store — by name, oracle
-  id, or set and number — and one the store has never seen is refused and
-  named, never fetched. Fetching would go through the scheduler, with a
-  request count first; not yet.
+- **Scryfall only through the app's channel.** A card is resolved from the
+  card store — by name, oracle id, or set and number — and one the store
+  has never had is fetched as an import fetches it: `resolveIdentifiers`,
+  through the scheduler's background lane, 75 to a `/cards/collection`
+  request, each name or printing once however many lines give it. **At most
+  150 a call**, so one call is at most a few requests; more is refused
+  before anything is sent. What Scryfall does not know either is refused by
+  name, nothing written; Scryfall not answering is a `503`, never retried.
+  A card given only by oracle id is not fetched.
 - **A write tells the app.** The routes call back after each write, and the
   app reads the tree and any open view again, so the screen is never stale.
 
@@ -179,11 +184,25 @@ reading first, then pools.
 | `GET /guide` | how to use the API, for an agent: [`agents/using-the-api.md`](agents/using-the-api.md), bundled, so it matches the running app. Any mode |
 | `GET /lab/tree` | every asset: name, path, type, a query pool's query, children |
 | `GET /lab/assets/<path>` | one asset, as the library file's object |
-| `PUT /lab/assets/<path>` | create or replace a **pool**: a list pool's members (`cards`) or a query pool's `query`. Missing folders above it are made. A different type at the path is refused (409) |
+| `GET /lab/assets/<path>` with `Accept: text/plain` | a decklist as text, zone by zone, the way `PUT` takes it |
+| `PUT /lab/assets/<path>` | create or replace a **pool** — a list pool's members (`cards`), a query pool's `query` and `filters` — or a **decklist**, zone by zone. Missing folders above it are made. A different type at the path is refused (409) |
+| `DELETE /lab/assets/<path>` | delete an asset and what is below it, as the tree does: refused (409) while something outside pins it, and where copies are recorded below it — those are the user's to drop |
 
 A list pool's members can also be sent as text: `PUT` with `Content-Type:
 text/plain` and a decklist — one card per line, counts ignored, `(SET) 123`
 pinning a printing — parsed as an import is.
+
+**A decklist** is written zone by zone: each zone the body names is made
+exactly its lines (a line kept keeps its `added` date), and a zone it does
+not name is left alone. As JSON, `{ type: "decklist", format?, zones: {
+commander, main, side, maybe } }`, a line a card's keys plus `qty`; as text,
+with `Commander`, `Deck`, `Sideboard` and `Maybeboard` headings, an empty
+heading emptying its zone. Text says which by what is at the path, and
+`?type=decklist` where nothing is yet (otherwise a list pool). The
+maybeboard is not a zone but the decklist's `maybe` checklist, made where
+missing. A zone is written only where it is the decklist's own — its
+inline child, named after it; one shared with another decklist is refused
+(409), to be changed in the app.
 
 ```bash
 TOKEN=…   # Tools → Agent API → Copy Token
@@ -196,6 +215,7 @@ curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/j
 ```
 
 A `PUT` answers `201` with `{ "created": true, "members": n }` for a new
-pool, `200` for a replaced one; a refusal is `{ "error": … }`, with `400`
-for a bad body or a card the store lacks, `409` for another type at the
-path.
+pool (`"zones": { "main": n, … }`, counts summed, for a decklist), `200`
+for a replaced one; a `DELETE`, `204`. A refusal is `{ "error": … }`, with
+`400` for a bad body or a card no one knows, `409` for another type at the
+path or something in the way, `503` when Scryfall did not answer.

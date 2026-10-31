@@ -1,7 +1,7 @@
 # Using DeckLab's agent API
 
 For an agent working with a DeckLab user: reading their decks, collections
-and pools, and writing pools they can build from. This is the whole guide;
+and pools, and writing pools and decklists they can build from. This is the whole guide;
 the API serves it at `GET /guide`, so it always matches the running app.
 (How the API is built is in `docs/agent-api.md`, and you do not need it.)
 
@@ -36,7 +36,9 @@ cards, no counts); `query pool` (a saved search); `decklist`, `deck`,
 | `GET /guide` | this guide |
 | `GET /lab/tree` | every asset: `name`, `path`, `type`, a query pool's `query`, `children` |
 | `GET /lab/assets/<path>` | one asset, with its cards |
-| `PUT /lab/assets/<path>` | create or replace a **pool** |
+| `GET /lab/assets/<path>` + `Accept: text/plain` | a decklist as text |
+| `PUT /lab/assets/<path>` | create or replace a **pool** or a **decklist** |
+| `DELETE /lab/assets/<path>` | delete an asset and everything below it |
 
 Paths go in the URL segment by segment, percent-encoded:
 `/lab/assets/Decklists/Golbez%20Proliferate/main`.
@@ -67,16 +69,46 @@ A `PUT` replaces the pool's members with what you send, makes any folders
 missing above it, and answers `201 {"created": true, "members": n}` for a
 new pool, `200` for a replaced one. The user's screen updates by itself.
 
+**Writing a decklist** — as text, with zone headings:
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain" \
+  --data-binary $'Commander\n1 Golbez, Crystal Collector\n\nDeck\n1 Sol Ring\n1 Arcane Signet\n\nMaybeboard\n1 Mana Crypt' \
+  "http://127.0.0.1:47474/lab/assets/Decklists/Golbez?type=decklist"
+```
+
+Headings: `Commander`, `Deck` (lines before any heading are the deck too),
+`Sideboard`, `Maybeboard`. `?type=decklist` is needed only to make a new
+one: text sent to an existing decklist is read as one. Or as JSON:
+`{"type": "decklist", "format": "commander", "zones": {"commander":
+[{"card": "Golbez, Crystal Collector"}], "main": [{"card": "Sol Ring",
+"qty": 1}]}}` — zones `commander`, `main`, `side`, `maybe`, each line a
+card's keys plus `qty` (default 1).
+
+**Zone by zone:** each zone you send replaces that zone; a zone you leave
+out is left alone, so `Deck` alone changes the main deck only. An empty
+heading (or `[]`) empties its zone. Answers `{"created": …, "zones":
+{"main": 99, …}}`, the copies in each zone written. Read it back as text
+with `Accept: text/plain`, in the same shape. A zone the decklist shares
+with another (the user set that up) is refused, `409`.
+
+**Deleting:** `DELETE /lab/assets/<path>` answers `204`. Refused (`409`)
+while something else depends on it — a deck building that decklist — and
+where it or anything below it records copies the user holds.
+
 ## Rules
 
 - **Put your work where the user expects it.** Ask, or use a folder the
   user names; a pool per role (`Pools/<deck>/ramp`) is easy to build from.
-- **Do not overwrite what you did not make** without asking: a `PUT`
-  replaces. Read first (`GET`) if unsure.
-- **Cards come from the user's card store, never the internet.** A card it
-  has never seen is refused by name (`400`, *Not in the card store*). Do
-  not retry: tell the user, who can look the card up in DeckLab once, or
-  send a printing it already knows.
+- **Do not overwrite or delete what you did not make** without asking: a
+  `PUT` replaces. Read first (`GET`) if unsure.
+- **Cards you name are looked up for you**, in the user's card store and, if
+  it has never had one, on Scryfall, through DeckLab's own rate-limited
+  channel. Up to **150 unknown cards a request**; more is refused before
+  anything is sent, so split a long list. A card Scryfall does not know
+  either is refused by name (`400`, *no card has that name*, *no such
+  printing*): fix the name, do not resend it unchanged.
 - **Errors** are `{"error": "…"}`, meant to be read: `400` your request (it
-  says what), `404` nothing at that path, `409` another type at that path,
-  `401` the token.
+  says what), `404` nothing at that path, `409` another type at that path
+  or something in the way, `401` the token, `503` Scryfall did not answer —
+  wait before trying again, never at once. A refused write writes nothing.
