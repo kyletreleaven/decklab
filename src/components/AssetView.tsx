@@ -1,3 +1,4 @@
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   builtContents,
@@ -7,6 +8,10 @@ import {
   lineContents,
   memberContents,
   sumContents,
+  changePrintings,
+  decklistCards,
+  suggestPrintingsOf,
+  type PrintingChange,
   type AssetNode,
   type Bucket,
   type BuiltZone,
@@ -26,6 +31,8 @@ import { isA, type AssetType } from "../lib/ontology";
 import type { Card } from "../lib/types";
 import { CATEGORY_ORDER, categoryOf } from "../lib/deckstats";
 import { CardImage } from "./CardImage";
+import { plainestPrintings } from "../lib/printings";
+import { printingsInSet } from "../lib/scryfall";
 
 /** Tiles a section shows at first, and adds per "Show more": as the pool pages. */
 const PAGE = 175;
@@ -578,6 +585,13 @@ export function AssetView({
             ))}
           </div>
         )}
+        {node.type === "decklist" && (
+          <PrintingsMenu
+            node={node}
+            onChanged={() => setVersion((v) => v + 1)}
+            onError={setError}
+          />
+        )}
         {node.type === "deck" && (
           <label className="asset-builds" title="The decklist this deck builds">
             Builds
@@ -796,5 +810,135 @@ export function AssetView({
         })}
       </div>
     </div>
+  );
+}
+
+/** What each of the *Printings* menu's changes says, before and after. */
+const PRINTING_CHANGES: Record<PrintingChange, { label: string; ask: (name: string) => string }> = {
+  bind: {
+    label: "Bind",
+    ask: (n) => `Bind every suggested printing in “${n}”? The deck then asks for exactly those printings.`,
+  },
+  unbind: {
+    label: "Unbind",
+    ask: (n) => `Unbind every printing in “${n}”? Each stays as the art shown, but any printing will do.`,
+  },
+  drop: {
+    label: "Drop",
+    ask: (n) => `Drop every printing in “${n}”, bound or suggested? Any printing will do, and Scryfall's is shown.`,
+  },
+};
+
+/**
+ * A decklist's printings, all at once, across its own zones
+ * (docs/inventory/buckets.md → *Suggested printings*): bind, unbind or drop
+ * them, or suggest each card's printing from a set. Each asks first, since
+ * none can be undone.
+ */
+function PrintingsMenu({
+  node,
+  onChanged,
+  onError,
+}: {
+  node: AssetNode;
+  onChanged: () => void;
+  onError: (message: string) => void;
+}) {
+  const [askingSet, setAskingSet] = useState(false);
+  const [set, setSet] = useState("");
+  const [busy, setBusy] = useState(false);
+  const lab = { select, execute };
+  const run = async (work: () => Promise<number>) => {
+    setBusy(true);
+    try {
+      const n = await work();
+      onChanged();
+      return n;
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const change = async (c: PrintingChange) => {
+    const yes = await ask(`${PRINTING_CHANGES[c].ask(node.name)} This cannot be undone.`, {
+      title: `${PRINTING_CHANGES[c].label} printings`,
+      kind: "warning",
+      okLabel: PRINTING_CHANGES[c].label,
+      cancelLabel: "Cancel",
+    });
+    if (yes) await run(() => changePrintings(lab, node.id, c));
+  };
+  const fromSet = async () => {
+    const code = set.trim();
+    if (!code) return;
+    const store = await cardStore();
+    const cards = await decklistCards(lab, store, node.id);
+    let picks: Map<string, string> | null = null;
+    await run(async () => {
+      const wanted = new Set(cards.map((c) => c.oracleId));
+      picks = new Map([...plainestPrintings(await printingsInSet(code))].filter(([o]) => wanted.has(o)));
+      return 0;
+    });
+    if (!picks) return;
+    const found: Map<string, string> = picks;
+    const yes = await ask(
+      `${code.toUpperCase()} has ${found.size} of the ${cards.length} cards in “${node.name}”. Suggest its printing for each, on every line not bound? This cannot be undone.`,
+      { title: "Suggest from set", kind: "warning", okLabel: "Suggest", cancelLabel: "Cancel" },
+    );
+    if (!yes) return;
+    if ((await run(() => suggestPrintingsOf(lab, node.id, found))) !== null) {
+      setAskingSet(false);
+      setSet("");
+    }
+  };
+
+  return (
+    <span className="printings-menu">
+      <select
+        value=""
+        disabled={busy}
+        title="Change every printing in this decklist at once"
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "set") setAskingSet(true);
+          else if (v) void change(v as PrintingChange);
+        }}
+      >
+        <option value="">Printings…</option>
+        {(Object.keys(PRINTING_CHANGES) as PrintingChange[]).map((c) => (
+          <option key={c} value={c}>
+            {PRINTING_CHANGES[c].label}
+          </option>
+        ))}
+        <option value="set">Suggest from set…</option>
+      </select>
+      {askingSet && (
+        <form
+          className="printings-set"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void fromSet();
+          }}
+        >
+          <input
+            autoFocus
+            value={set}
+            placeholder="Set code, e.g. C21"
+            size={14}
+            disabled={busy}
+            onChange={(e) => setSet(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setAskingSet(false)}
+          />
+          <button type="submit" disabled={busy || !set.trim()}>
+            {busy ? "Fetching…" : "Suggest"}
+          </button>
+          <button type="button" className="ghost" onClick={() => setAskingSet(false)}>
+            Cancel
+          </button>
+        </form>
+      )}
+    </span>
   );
 }

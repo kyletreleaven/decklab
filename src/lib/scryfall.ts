@@ -446,6 +446,44 @@ export interface ResolveResult {
   notFound: string[];
 }
 
+/**
+ * Every printing in a set, for *Suggest from set…*: one search, a page of
+ * 175 a request, on the background lane so pages queue rather than evict one
+ * another. A set of more than `SET_PAGES_AT_MOST` pages — The List, Secret
+ * Lair — is refused after its first page, so one click is never a burst.
+ * Kept in the store as any search is, and in memory for the session.
+ */
+export const SET_PAGES_AT_MOST = 4;
+const setMemo = new Map<string, Card[]>();
+
+export async function printingsInSet(set: string): Promise<Card[]> {
+  const code = set.trim().toLowerCase();
+  if (!/^[a-z0-9]{2,6}$/.test(code)) throw new ScryfallError(`“${set}” is not a set code.`, 400);
+  const memo = setMemo.get(code);
+  if (memo) return memo;
+  const cards: Card[] = [];
+  for (let page = 1; ; page++) {
+    const params = new URLSearchParams({ q: `e:${code}`, unique: "prints", order: "set", dir: "asc", page: String(page) });
+    let list: ScryfallList;
+    try {
+      list = await request<ScryfallList>(`/cards/search?${params}`, { lane: "background" });
+    } catch (error) {
+      if (error instanceof ScryfallError && error.status === 404) throw new ScryfallError(`Scryfall has no set “${code}”.`, 404);
+      throw error;
+    }
+    const total = list.total_cards ?? 0;
+    if (page === 1 && total > 175 * SET_PAGES_AT_MOST) {
+      throw new ScryfallError(`${code.toUpperCase()} has ${total} printings: too many to fetch at once.`, 400);
+    }
+    const got = list.data.map(normalize);
+    await keep(got);
+    cards.push(...got);
+    if (!list.has_more) break;
+  }
+  setMemo.set(code, cards);
+  return cards;
+}
+
 /** Batch name lookup: `resolveIdentifiers` with bare names only. */
 export async function resolveNames(names: string[]): Promise<ResolveResult> {
   const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];

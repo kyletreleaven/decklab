@@ -1892,3 +1892,18 @@ a.external:hover {
 .asset-builds select {
   max-width: 280px;
 }
+
+/* A decklist's Printings… menu, and the set code it asks for. */
+.printings-menu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.printings-set {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

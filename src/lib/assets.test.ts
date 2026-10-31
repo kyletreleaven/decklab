@@ -31,9 +31,12 @@ import {
   stepTarget,
   sumContents,
   sumPlaces,
+  changePrintings,
+  suggestPrintingsOf,
   targetCounts,
 } from "./assets";
 import { readLab } from "./library/labdb";
+import { plainestPrintings } from "./printings";
 import { writeLab } from "./library/labdb";
 import { dumpV5, loadV5 } from "./library/v5";
 import { sqlOver } from "./sqlOver";
@@ -377,6 +380,66 @@ describe("the lab's assets, for display", () => {
     await expect(moveLines(sqlOver(db), sqlOver(cards), { assetId: box, bucket: suggested }, { assetId: box, bucket: { ...suggested, shownId: "bolt-m10" } }, 1)).rejects.toThrow(
       /another card/,
     );
+  });
+
+  it("makes a decklist's bound printings suggestions, its own zones only, joining any already there", async () => {
+    const burn = await find("Decks/Burn");
+    const main = await find("Decks/Burn/main");
+    db.exec(`DELETE FROM lines WHERE asset_id = '${main}'`);
+    db.exec(`INSERT INTO lines (asset_id, oracle_id, printing_id, shown_id, finish, qty) VALUES
+      ('${main}', 'bolt', 'bolt-m10', '', '', 2),
+      ('${main}', 'bolt', '', 'bolt-m10', '', 1),
+      ('${main}', 'bolt', 'bolt-2x2', '', 'foil', 1),
+      ('${main}', 'sol', '', '', '', 1)`);
+    // Its side is shared, not its own: left alone.
+    const side = await find("Sideboards/Burn");
+    db.exec(`UPDATE lines SET printing_id = 'sol-c21' WHERE asset_id = '${side}'`);
+
+    expect(await changePrintings(sqlOver(db), burn, "unbind")).toBe(2);
+    expect(db.prepare(`SELECT oracle_id, printing_id, shown_id, finish, qty FROM lines WHERE asset_id = ? ORDER BY oracle_id, shown_id`).all(main)).toEqual([
+      { oracle_id: "bolt", printing_id: "", shown_id: "bolt-2x2", finish: "foil", qty: 1 },
+      { oracle_id: "bolt", printing_id: "", shown_id: "bolt-m10", finish: "", qty: 3 },
+      { oracle_id: "sol", printing_id: "", shown_id: "", finish: "", qty: 1 },
+    ]);
+    expect(db.prepare(`SELECT printing_id FROM lines WHERE asset_id = ?`).all(side)).toEqual([{ printing_id: "sol-c21" }]);
+    expect(await changePrintings(sqlOver(db), burn, "unbind")).toBe(0);
+
+    const rows = () => db.prepare(`SELECT oracle_id, printing_id, shown_id, finish, qty FROM lines WHERE asset_id = ? ORDER BY oracle_id, printing_id, shown_id`).all(main);
+    // From a set: suggested and bare lines take its printing; a bound one would be left alone.
+    db.exec(`UPDATE lines SET printing_id = shown_id, shown_id = '' WHERE asset_id = '${main}' AND finish = 'foil'`);
+    expect(await suggestPrintingsOf(sqlOver(db), burn, new Map([["bolt", "bolt-2x2"], ["sol", "sol-c21"]]))).toBe(2);
+    expect(rows()).toEqual([
+      { oracle_id: "bolt", printing_id: "", shown_id: "bolt-2x2", finish: "", qty: 3 },
+      { oracle_id: "bolt", printing_id: "bolt-2x2", shown_id: "", finish: "foil", qty: 1 },
+      { oracle_id: "sol", printing_id: "", shown_id: "sol-c21", finish: "", qty: 1 },
+    ]);
+    // Bind every suggestion; then drop them all.
+    expect(await changePrintings(sqlOver(db), burn, "bind")).toBe(2);
+    expect(rows().map((r) => [r.printing_id, r.shown_id])).toEqual([
+      ["bolt-2x2", ""],
+      ["bolt-2x2", ""],
+      ["sol-c21", ""],
+    ]);
+    expect(await changePrintings(sqlOver(db), burn, "drop")).toBe(3);
+    expect(rows()).toEqual([
+      { oracle_id: "bolt", printing_id: "", shown_id: "", finish: "", qty: 3 },
+      { oracle_id: "bolt", printing_id: "", shown_id: "", finish: "foil", qty: 1 },
+      { oracle_id: "sol", printing_id: "", shown_id: "", finish: "", qty: 1 },
+    ]);
+  });
+
+  it("picks each card's plainest printing in a set: no variant where a normal one is, then the lowest number", () => {
+    const card = (id: string, oracleId: string, collectorNumber: string, data: object = {}) =>
+      ({ id, oracleId, collectorNumber, data }) as never;
+    const picks = plainestPrintings([
+      card("bolt-showcase", "bolt", "300", { frame_effects: ["showcase"] }),
+      card("bolt-200", "bolt", "200"),
+      card("bolt-117", "bolt", "117"),
+      card("sol-borderless", "sol", "5", { border_color: "borderless" }),
+      card("sol-263", "sol", "263"),
+      card("only-promo", "x", "1", { promo: true }),
+    ]);
+    expect(Object.fromEntries(picks)).toEqual({ bolt: "bolt-117", sol: "sol-263", x: "only-promo" });
   });
 
   it("steps a target's line, as its type takes it", async () => {

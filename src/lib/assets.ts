@@ -1112,3 +1112,130 @@ export async function moveLines(
   }
   await lab.execute("UPDATE assets SET updated_at = $2 WHERE id IN ($1, $3)", [from.assetId, at, to.assetId]);
 }
+
+/* ---------- a decklist's printings, all at once ---------- */
+
+/** A decklist's own zones: its inline ones, named after it, and its `maybe`; never one shared with another. */
+async function ownZones(lab: Sql, decklistId: string): Promise<string[]> {
+  const rows = await lab.select<{ id: string }>(
+    `SELECT a.id FROM assets a
+      WHERE a.parent_id = $1
+        AND (a.name = 'maybe' OR a.id IN (SELECT target_id FROM asset_refs WHERE asset_id = $1 AND role IN ('commander', 'main', 'side')))`,
+    [decklistId],
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * A change to lines' printings, as SQL over each line's own columns
+ * (`lines.…`, from `$2` for `params`): which lines, and what their
+ * `printing_id` and `shown_id` become.
+ */
+interface Rebucket {
+  where: string;
+  printing: string;
+  shown: string;
+  params?: unknown[];
+}
+
+/**
+ * Apply `r` to every line of a decklist's own zones. Lines with nothing to
+ * join change in one statement each zone, so no window for a failure; the
+ * few that become a line already there move into it, counts added, as any
+ * change of bucket does. Finishes and attributes stay. Returns how many
+ * lines changed.
+ */
+async function rebucket(lab: Sql, decklistId: string, r: Rebucket, at: string): Promise<number> {
+  const params = r.params ?? [];
+  const changes = `${r.where} AND NOT (${r.printing} = lines.printing_id AND ${r.shown} = lines.shown_id)`;
+  let changed = 0;
+  for (const id of await ownZones(lab, decklistId)) {
+    const [{ n }] = await lab.select<{ n: number }>(`SELECT COUNT(*) AS n FROM lines WHERE asset_id = $1 AND ${changes}`, [id, ...params]);
+    if (!n) continue;
+    await lab.execute(
+      `UPDATE lines SET printing_id = ${r.printing}, shown_id = ${r.shown}
+        WHERE asset_id = $1 AND ${changes}
+          AND NOT EXISTS (SELECT 1 FROM lines o
+                           WHERE o.asset_id = lines.asset_id AND o.oracle_id = lines.oracle_id AND o.finish = lines.finish
+                             AND o.attrs = lines.attrs AND o.printing_id = ${r.printing} AND o.shown_id = ${r.shown})`,
+      [id, ...params],
+    );
+    const rest = await lab.select<LineRow & { to_printing: string; to_shown: string }>(
+      `SELECT oracle_id, printing_id, finish, attrs, shown_id, qty, ${r.printing} AS to_printing, ${r.shown} AS to_shown
+         FROM lines WHERE asset_id = $1 AND ${changes}`,
+      [id, ...params],
+    );
+    for (const l of rest) {
+      const bucket = { oracleId: l.oracle_id, finish: l.finish || undefined, attrs: JSON.parse(l.attrs) as Record<string, unknown> };
+      const as = (printingId: string, shownId: string): Bucket => ({
+        ...bucket,
+        ...(printingId && { printingId }),
+        ...(shownId && { shownId }),
+      });
+      await moveLines(lab, null, { assetId: id, bucket: as(l.printing_id, l.shown_id) }, { assetId: id, bucket: as(l.to_printing, l.to_shown) }, l.qty, at);
+    }
+    await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [id, at]);
+    changed += n;
+  }
+  return changed;
+}
+
+/**
+ * What a decklist's *Printings* menu does to every line
+ * (docs/inventory/buckets.md → *Suggested printings*): **bind** makes each
+ * suggestion the line's own printing, **unbind** each bound printing a
+ * suggestion, drawn as before, and **drop** clears both, so any printing
+ * will do and the stand-in is drawn.
+ */
+export type PrintingChange = "bind" | "unbind" | "drop";
+
+const PRINTING_CHANGES: Record<PrintingChange, Rebucket> = {
+  bind: { where: "lines.shown_id <> ''", printing: "lines.shown_id", shown: "''" },
+  unbind: { where: "lines.printing_id <> ''", printing: "''", shown: "lines.printing_id" },
+  drop: { where: "(lines.printing_id <> '' OR lines.shown_id <> '')", printing: "''", shown: "''" },
+};
+
+export async function changePrintings(lab: Sql, decklistId: string, change: PrintingChange, at = new Date().toISOString()): Promise<number> {
+  return rebucket(lab, decklistId, PRINTING_CHANGES[change], at);
+}
+
+/** Every card a decklist's own zones name: what to look for in a set. */
+export async function decklistCards(lab: Sql, store: Sql, decklistId: string): Promise<{ oracleId: string; name: string }[]> {
+  const zones = await ownZones(lab, decklistId);
+  if (!zones.length) return [];
+  const rows = await lab.select<{ oracle_id: string }>(
+    `SELECT DISTINCT oracle_id FROM lines WHERE asset_id IN (${zones.map((_, i) => `$${i + 1}`).join(", ")})`,
+    zones,
+  );
+  const out: { oracleId: string; name: string }[] = [];
+  for (let i = 0; i < rows.length; i += 400) {
+    const chunk = rows.slice(i, i + 400).map((r) => r.oracle_id);
+    const names = await store.select<{ oracle_id: string; name: string }>(
+      `SELECT oracle_id, MIN(name) AS name FROM cards WHERE oracle_id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")}) GROUP BY oracle_id`,
+      chunk,
+    );
+    out.push(...names.map((n) => ({ oracleId: n.oracle_id, name: n.name })));
+  }
+  return out;
+}
+
+/**
+ * Suggest, for every line not bound, the printing `printings` gives its
+ * card — one from a set, say. A bound line is left alone: someone meant it.
+ * Returns how many lines changed.
+ */
+export async function suggestPrintingsOf(
+  lab: Sql,
+  decklistId: string,
+  printings: Map<string, string>,
+  at = new Date().toISOString(),
+): Promise<number> {
+  if (!printings.size) return 0;
+  const pick = `json_extract($2, '$."' || lines.oracle_id || '"')`;
+  return rebucket(
+    lab,
+    decklistId,
+    { where: `lines.printing_id = '' AND ${pick} IS NOT NULL`, printing: "''", shown: pick, params: [JSON.stringify(Object.fromEntries(printings))] },
+    at,
+  );
+}

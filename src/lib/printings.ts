@@ -27,6 +27,30 @@ export function variantTraits(card: Card): string[] {
 }
 
 /**
+ * Each card's plainest printing among `cards` (a set's, say): fewest variant
+ * traits — no showcase, borderless, extended art or promo where the set has
+ * a normal one — then the lowest collector number. By oracle id.
+ */
+export function plainestPrintings(cards: Card[]): Map<string, string> {
+  const rank = (c: Card): [number, number, string] => [
+    variantTraits(c).length,
+    Number.parseInt(c.collectorNumber, 10) || Number.MAX_SAFE_INTEGER,
+    c.collectorNumber,
+  ];
+  const best = new Map<string, Card>();
+  for (const c of cards) {
+    const had = best.get(c.oracleId);
+    if (!had) {
+      best.set(c.oracleId, c);
+      continue;
+    }
+    const [a, b] = [rank(c), rank(had)];
+    if (a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] < b[2])))) best.set(c.oracleId, c);
+  }
+  return new Map([...best].map(([oracle, c]) => [oracle, c.id]));
+}
+
+/**
  * A label that actually distinguishes printings.
  *
  * Set name alone is not enough: Sol Ring has 30 Secret Lair printings, so
