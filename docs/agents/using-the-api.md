@@ -37,6 +37,7 @@ cards, no counts); `query pool` (a saved search); `decklist`, `deck`,
 | `GET /lab/tree` | every asset: `name`, `path`, `type`, a query pool's `query` and `filters`, `children` |
 | `GET /lab/assets/<path>` | one asset, with its cards |
 | `GET /lab/assets/<path>` + `Accept: text/plain` | a decklist as text |
+| `GET /lab/collections/<path>` | what a collection (place, sum, deck) holds: `{ card, oracle, qty }` per card; `?cards=Sol%20Ring&cards=…` for only those, `?by_place=true` to add `places: [{ path, qty }]` |
 | `PUT /lab/assets/<path>` | create or replace a **pool** or a **decklist** |
 | `DELETE /lab/assets/<path>` | delete an asset and everything below it |
 

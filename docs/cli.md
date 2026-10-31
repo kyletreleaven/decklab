@@ -63,6 +63,11 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
     decklist — or a `.json` file, any body the API takes. A decklist is
     replaced zone by zone, the zones the file names.
   - `rm <path>`: delete, as the tree does.
+  - `held <path> [file]`: what a collection — a place, a sum, a deck —
+    holds, through `/lab/collections`: as a decklist (`qty name` a line)
+    for a `.txt` file or `--text`, as JSON otherwise. `--card <name>`,
+    repeated, for only those; `--by-place` for each card's count in each
+    place, JSON only, since a decklist has nowhere to say where.
 
   A path is written as in the library file, the leading `/` optional. The
   API's refusal goes to standard error, exit 1; a command-line mistake,

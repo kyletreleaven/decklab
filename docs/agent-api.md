@@ -181,12 +181,71 @@ reading first, then pools, then decklists and deleting.
 - **A write tells the app.** The routes call back after each write, and the
   app reads the tree and any open view again, so the screen is never stale.
 
+### Each route is a named query
+
+Not GraphQL, but shaped as if it were: each route is one fixed query, and its
+parameters are that query's variables. Moving to GraphQL later is then
+mechanical — each route becomes a persisted query — and until then the rule
+is a test for any new parameter:
+
+- **A parameter filters, or switches a field on; it never reshapes.** The
+  result's shape is the query's; a parameter only narrows it (`cards`) or
+  includes a field (`by_place`, as GraphQL's `@include(if: $by_place)`).
+- **Parameters are typed, nullable variables.** A list where a list makes
+  sense; a missing parameter is the variable's default, never a different
+  query.
+- **The path is a variable too**, in the URL only for readability.
+
+**A definition is local; contents are derived.** `/lab/assets/<path>` is
+what an asset *is*, as the library file holds it: a place's or list pool's
+members, a query pool's query, a sum's type and nothing more. What it
+*holds* is another query, over assets that resolve to cards. Only contents
+take filters, and only definitions are written.
+
+### Contents, one route per kind
+
+What an agent building a deck from a collection needs: `/lab/assets/my
+cards` answers `{"type": "sum"}`, so without a contents route it walks the
+tree and adds the places up itself — the sum computed twice, once outside
+the app.
+
+Contents differ by kind, so each kind gets its own route rather than one
+route whose answer changes shape with the asset:
+
+| Route | For | Variables | Answers |
+| --- | --- | --- | --- |
+| `GET /lab/collections/<path>` — built | place, sum, deck | `path`; `cards`, optional and repeated (`?cards=Sol%20Ring&cards=…`); `by_place`, `true` or `false` (default) | each card and its count; with `by_place`, the count in each place, by full path |
+| `GET /lab/pools/<path>` — not built | list pool, query pool | `path`; `cards`, optional | each member, no counts — with `cards`, which of those are members |
+
+Any other type at the path is a `400`.
+
+- **Collections count copies**, so adding up the places below a sum is
+  right, and `by_place` answers *where*: a card in a built deck is in the
+  collection but not free for a new one.
+- **Pools hold membership only**: no counts, and no places to break them
+  down by. A list pool's contents are its definition; a query pool's are its
+  query evaluated over the card store, refused until the app can.
+- **Goals wait.** Checklists and decklists count what is wanted, not copies:
+  two checklists each wanting a Sol Ring might want one or two. Whether goals
+  get a route of their own, or join one of these, is decided when that is.
+
+A sum is added up by `sumPlaces`, the app's own: its children that are
+collections, a child sum by its own, so a folder's places and a checklist's
+lines count for nothing. A name in `cards` the card store has never had is
+refused by name, never fetched — no copy of it can be recorded.
+
+The variables are the query's bind parameters, in `collectionAt`
+(`src/api/lab.ts`): the path resolved to an id, the names to oracle ids
+through the card store — a separate database — and `by_place` the one
+field it includes.
+
 | Route | |
 | --- | --- |
 | `GET /guide` | how to use the API, for an agent: [`agents/using-the-api.md`](agents/using-the-api.md), bundled, so it matches the running app. Any mode |
 | `GET /lab/tree` | every asset: name, path, type, a query pool's query and filters, children |
 | `GET /lab/assets/<path>` | one asset, as the library file's object |
 | `GET /lab/assets/<path>` with `Accept: text/plain` | a decklist as text, zone by zone, the way `PUT` takes it |
+| `GET /lab/collections/<path>` | what a place, sum or deck holds: each card and its count; `?cards=` (repeated) narrows it, `?by_place=true` says where. Anything else at the path is a `400` |
 | `PUT /lab/assets/<path>` | create or replace a **pool** — a list pool's members (`cards`), a query pool's `query` and `filters` — or a **decklist**, zone by zone. Missing folders above it are made. A different type at the path is refused (409) |
 | `DELETE /lab/assets/<path>` | delete an asset and what is below it, as the tree does: refused (409) while something outside pins it, and where copies are recorded below it — those are the user's to drop |
 
