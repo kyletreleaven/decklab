@@ -112,16 +112,41 @@ both.
   make the readings explicit but split the bucket into two types, for no
   guarantee the context does not already give.
 
+### Suggested and binding printings
+
+In a pattern, a printing is either **binding** (only it will do) or
+**suggested** (any printing will do, and this one is how the line is
+drawn). Three states per line, then: printing absent, suggested, binding.
+Most decklists name a printing on every line, and most of those printings
+are arbitrary (whatever the deckbuilding site chose), so suggested is the
+default and binding is the one that is marked.
+
+- **Both are in the line's key**: a printing and a `binds` flag. Ten
+  Islands can suggest five arts as five lines.
+- **What satisfies a line ignores suggestions.** A line counts as its
+  binding keys alone, so lines that differ only in a suggestion group
+  together: five suggested Islands of 2 each ask for 10 Islands, any art.
+- **Per line, in storage.** One decklist can mix all three states: imported
+  loosely, then two cards bound for their art.
+- **Import suggests.** A `(SET) 123` in imported text is a suggestion,
+  unless the import's *Force printings* box is checked. The box is an
+  import choice and is not stored. Our own text marks a binding line with
+  `!` after the printing, `1 Sol Ring (C21) 263 !`, so the common format
+  stays the suggested default and round-trips.
+- **In a location, a printing is a fact**, recorded or not; there is
+  nothing to suggest, and `binds` is refused.
+
 A pattern is the simplest filter: attribute equalities joined by *and*, with
 `absent` as a wildcard. General queries — Scryfall syntax, inequalities,
 *or* — are filters with richer predicates, and a pattern is the narrow case.
 
 ### Rendering an `absent` printing or finish
 
-A display choice, never stored, and **not decided**. Factors that could go
-into it:
+The printing drawn is a display choice, never stored, and **not decided**.
+A suggested printing (above) *is* stored, and comes first; a binding one is
+simply drawn. Factors that could go into it:
 
-- a printing the bucket's goal pins (a refined decklist)
+- a printing the bucket's goal suggests or binds (a refined decklist)
 - the most common known printing of this card in the same collection
 - a per-card preference ("my art for Sol Ring")
 - a default: Scryfall's own default printing, or the newest

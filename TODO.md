@@ -349,6 +349,12 @@ rebuild of real user data — back up first.
 **Code that follows:**
 - ⬜ **Import stops fabricating printings** (and conditions). A bare
       `4 Lightning Bolt` lands as *printing unknown*.
+- ⬜ **Suggested and binding printings**, per
+      [`docs/inventory/buckets.md`](docs/inventory/buckets.md) → *Suggested and binding
+      printings*: `binds` in the lab schema's line key and in the format
+      (`library-format-5.md`), satisfaction grouped on binding keys, `!`
+      in decklist text (parse, `decklistText`, the API docs), and a
+      *Force printings* box on import.
 - ⬜ Counts are populations: a tile's count at oracle grain sums every
       bucket of the card. Fixes [`bugs/002`](bugs/002-stepper-counts-printing-grain.md).
 - ⬜ Printings carousel gains an "unknown printing ×N" slot, and a way to
