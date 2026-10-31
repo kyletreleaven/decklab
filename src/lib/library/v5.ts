@@ -1,4 +1,5 @@
 import { parse } from "smol-toml";
+import { parseSavedFilters, savedFilters, type SavedFilters } from "../filters";
 import { facetType, isA, isType, type AssetType } from "../ontology";
 import {
   formatPath,
@@ -99,7 +100,8 @@ export type Asset = Common &
     /** Exactly its counts, and nothing it does not list. */
     | { type: "exact checklist"; on?: Ref; cards: PlaceLine[] }
     | { type: "list pool"; cards: MemberLine[] }
-    | { type: "query pool"; query: string }
+    /** A search kept: its text, and what *More filters* had set. */
+    | { type: "query pool"; query: string; filters?: SavedFilters }
     /** Zones name checklists: what a deck should hold. Commander and main are exact. */
     | { type: "decklist"; format?: string; zones: Partial<Record<Zone, Ref>>; shows?: Ref }
     /**
@@ -283,6 +285,16 @@ function line(b: Bucket, counts: Field[], added: string | undefined): string {
   return inline(fields);
 }
 
+/** A query pool's filters, in `savedFilters`' key order. */
+function filtersInline(f: SavedFilters): string {
+  return inline(
+    Object.entries(savedFilters(f)).map(([k, v]): Field => [
+      k,
+      Array.isArray(v) ? `[${v.map((x) => str(x)).join(", ")}]` : String(v),
+    ]),
+  );
+}
+
 function list(name: string, lines: string[]): string {
   if (!lines.length) return `${name} = []`;
   return `${name} = [\n${lines.map((l) => `  ${l},`).join("\n")}\n]`;
@@ -369,6 +381,7 @@ export function dumpV5(library: V5Library): string {
         break;
       case "query pool":
         head.push(["query", str(a.query)]);
+        if (a.filters && Object.keys(a.filters).length) head.push(["filters", filtersInline(a.filters)]);
         break;
       case "decklist":
       case "deck": {
@@ -721,12 +734,19 @@ export function loadV5(text: string): V5Library {
         throw new LibraryFormatError(`${where}: "collection" names what holds cards; an asset is a place`);
       case "list pool":
       case "query pool": {
-        const r = new Reader(table, where, [...ASSET_KEYS, "cards", "query"]);
+        const r = new Reader(table, where, [...ASSET_KEYS, "cards", "query", "filters"]);
         if (r.has("cards") && r.has("query")) r.fail("a pool has `cards` or `query`, not both");
         if (type === "list pool" && r.has("query")) r.fail("a list pool has `cards`, not `query`");
+        if (r.has("filters") && !r.has("query")) r.fail("only a query pool has `filters`");
         if (type === "query pool" && !r.has("query")) r.fail("a query pool needs `query`");
         if (kind === "query pool") {
-          assets.push({ ...common(r), type: "query pool", query: r.text("query") });
+          const filters = r.has("filters") ? parseSavedFilters(table.filters, (why) => r.fail(why)) : {};
+          assets.push({
+            ...common(r),
+            type: "query pool",
+            query: r.text("query"),
+            ...(Object.keys(filters).length > 0 && { filters }),
+          });
         } else {
           if (!r.has("cards")) r.fail("a pool needs `cards` or `query`");
           const cards = lines(r, "cards", []).map((l) =>

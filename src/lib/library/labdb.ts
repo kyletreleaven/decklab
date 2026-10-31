@@ -1,3 +1,4 @@
+import { filtersColumn, filtersOfColumn } from "../filters";
 import { formatRef, parseRef, pathKey, resolveNames, type Ref } from "../paths";
 import type { Identifier } from "../scryfall";
 import type { Sql } from "../sql";
@@ -320,7 +321,7 @@ export async function writeLab(
     assetRows.push([
       id, parent, path[path.length - 1],
       fields.type, fields.notes ?? null, fields.created ?? null, fields.updated ?? null,
-      fields.storage ?? null, fields.query ?? null, fields.format ?? null,
+      fields.storage ?? null, fields.query ?? null, fields.filters ?? null, fields.format ?? null,
     ]);
     return id;
   };
@@ -335,6 +336,7 @@ export async function writeLab(
       updated: a.updated ?? stamp,
       storage: a.type === "place" ? a.storage : undefined,
       query: a.type === "query pool" ? a.query : undefined,
+      filters: a.type === "query pool" ? filtersColumn(a.filters) : undefined,
       format: a.type === "decklist" ? a.format : undefined,
     });
   }
@@ -395,7 +397,7 @@ export async function writeLab(
   await insertRows(
     sql,
     "assets",
-    ["id", "parent_id", "name", "type", "notes", "created_at", "updated_at", "storage", "query", "format"],
+    ["id", "parent_id", "name", "type", "notes", "created_at", "updated_at", "storage", "query", "filters", "format"],
     assetRows,
   );
   await insertRows(sql, "asset_refs", ["asset_id", "role", "target_id", "path", "rooted", "facets"], refRows);
@@ -423,6 +425,7 @@ interface AssetRow {
   updated_at: string | null;
   storage: string | null;
   query: string | null;
+  filters: string | null;
   format: string | null;
 }
 
@@ -459,7 +462,7 @@ export async function readLab(sql: Sql, cards: Sql, { only }: { only?: string[] 
 
   const rows = await sql.select<AssetRow>(
     `SELECT id, parent_id, name, type, notes, created_at, updated_at,
-            storage, query, format
+            storage, query, filters, format
        FROM assets`,
   );
   const children = new Map<string, AssetRow[]>();
@@ -629,9 +632,11 @@ export async function readLab(sql: Sql, cards: Sql, { only }: { only?: string[] 
           cards: (poolBy.get(row.id) ?? []).map((l) => ({ bucket: bucketOf(l), ...added(l) })),
         });
         break;
-      case "query pool":
-        assets.push({ ...common, type: "query pool", query: row.query! });
+      case "query pool": {
+        const filters = filtersOfColumn(row.filters);
+        assets.push({ ...common, type: "query pool", query: row.query!, ...(Object.keys(filters).length > 0 && { filters }) });
         break;
+      }
       case "decklist":
       case "deck": {
         const zones: Partial<Record<Zone, Ref>> = {};

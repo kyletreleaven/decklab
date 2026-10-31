@@ -11,7 +11,7 @@ import { DeckView } from "./components/DeckView";
 import { ExportDialog } from "./components/ExportDialog";
 import { ImportDialog, type ImportTarget } from "./components/ImportDialog";
 import { ManaCost } from "./components/ManaCost";
-import { PoolPanel, type Scope } from "./components/PoolPanel";
+import { PoolPanel, type KeptSearch, type Scope } from "./components/PoolPanel";
 import { SplitPane } from "./components/SplitPane";
 import { AssetTree } from "./components/AssetTree";
 import { AssetView, type LabTarget } from "./components/AssetView";
@@ -32,6 +32,7 @@ import {
   stepTarget,
   targetCounts,
   TARGETABLE,
+  nameAfterSearch,
   renameAsset,
   setDeckList,
   setPoolQuery,
@@ -282,8 +283,8 @@ export default function App() {
     await editTree(() => convertAsset(labSql, node.id, to));
   };
   /** Keep a search as a new query pool under `parentId`, and open it. */
-  const saveQueryPool = async (parentId: string, query: string) => {
-    const id = await editTree(() => createQueryPool(labSql, parentId, query));
+  const saveQueryPool = async (parentId: string, { query, filters }: KeptSearch) => {
+    const id = await editTree(() => createQueryPool(labSql, parentId, query, { filters }));
     if (id) setView({ kind: "asset", id });
   };
   const decklists = useMemo(() => {
@@ -1113,7 +1114,7 @@ export default function App() {
             // In the lab a search is kept as a query pool — its query, not its
             // results — at the top of the tree.
             {...(lab
-              ? { queryPool: { onSaveAs: (query: string) => void saveQueryPool("root", query) } }
+              ? { queryPool: { onSaveAs: (search: KeptSearch) => void saveQueryPool("root", search) } }
               : {
                   onSaveSearch: (filter: CardFilter, sort: SortKey, flipped: boolean) =>
                     setSaving({
@@ -1133,7 +1134,7 @@ export default function App() {
           <PoolPanel
             key={`asset:${currentAsset.id}`}
             stateKey={`asset:${currentAsset.id}`}
-            initialFilter={{ query: currentAsset.query ?? "" }}
+            initialFilter={{ query: currentAsset.query ?? "", ...currentAsset.filters }}
             selectedId={selectedCard?.id ?? null}
             onSelect={setSelectedCard}
             onHoverCard={hoverCard}
@@ -1143,9 +1144,12 @@ export default function App() {
             grainToggle
             refreshKey={refreshKey}
             queryPool={{
-              saved: currentAsset.query ?? "",
-              onSave: (query) => void editTree(() => setPoolQuery(labSql, currentAsset.id, query)),
-              onSaveAs: (query) => void saveQueryPool(currentAsset.parentId, query),
+              saved: { query: currentAsset.query ?? "", filters: currentAsset.filters ?? {} },
+              name: currentAsset.name,
+              onNameAfterSearch: () => void editTree(() => nameAfterSearch(labSql, currentAsset.id)),
+              onSave: ({ query, filters }) =>
+                void editTree(() => setPoolQuery(labSql, currentAsset.id, query, { filters })),
+              onSaveAs: (search) => void saveQueryPool(currentAsset.parentId, search),
             }}
           />
         )}

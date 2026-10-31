@@ -6,6 +6,7 @@ import type { Card } from "./types";
 import { isA, TYPES, type AssetType } from "./ontology";
 import { QueryError } from "./collections";
 import { compileQuery } from "./query";
+import { filtersColumn, filtersOfColumn, searchName, type SavedFilters } from "./filters";
 
 /**
  * Reading the new model's tables (`src-tauri/migrations/lab/1000_assets.sql`)
@@ -26,13 +27,15 @@ export interface AssetNode {
   parentId: string;
   /** A query pool's query. */
   query?: string;
+  /** A query pool's *More filters*: with `query`, what it searches. */
+  filters?: SavedFilters;
 }
 
 /** The asset tree, below the root, siblings in order. */
 export async function assetTree(lab: Sql): Promise<AssetNode[]> {
-  const rows = await lab.select<{ id: string; parent_id: string | null; name: string; type: AssetType; query: string | null }>(
+  const rows = await lab.select<{ id: string; parent_id: string | null; name: string; type: AssetType; query: string | null; filters: string | null }>(
     // No order of their own: by name, as a reader expects.
-    "SELECT id, parent_id, name, type, query FROM assets WHERE id <> 'root' ORDER BY name COLLATE NOCASE, name",
+    "SELECT id, parent_id, name, type, query, filters FROM assets WHERE id <> 'root' ORDER BY name COLLATE NOCASE, name",
   );
   const byParent = new Map<string, typeof rows>();
   for (const r of rows) byParent.set(r.parent_id!, [...(byParent.get(r.parent_id!) ?? []), r]);
@@ -47,6 +50,7 @@ export async function assetTree(lab: Sql): Promise<AssetNode[]> {
         path: p,
         children: build(r.id, p),
         ...(r.query !== null && { query: r.query }),
+        ...(r.filters !== null && { filters: filtersOfColumn(r.filters) }),
       };
     });
   return build("root", []);
@@ -422,8 +426,11 @@ export async function createAsset(
 }
 
 /** `base`, numbered past any child of `parentId` already called that. */
-async function freeName(lab: Sql, parentId: string, base: string): Promise<string> {
-  const siblings = await lab.select<{ name: string }>("SELECT name FROM assets WHERE parent_id = $1", [parentId]);
+async function freeName(lab: Sql, parentId: string, base: string, except = ""): Promise<string> {
+  const siblings = await lab.select<{ name: string }>("SELECT name FROM assets WHERE parent_id = $1 AND id <> $2", [
+    parentId,
+    except,
+  ]);
   const taken = new Set(siblings.map((s) => s.name));
   let name = base;
   for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
@@ -432,31 +439,42 @@ async function freeName(lab: Sql, parentId: string, base: string): Promise<strin
 
 /**
  * A query pool: a search kept, as its query — Scryfall syntax, what the
- * pool panel runs — not its results, so saving one sends no requests. Named
- * after the query unless told otherwise. Returns its id.
+ * pool panel runs — and its *More filters*, not its results, so saving one
+ * sends no requests. Named after the whole search unless told otherwise.
+ * Returns its id.
  */
 export async function createQueryPool(
   lab: Sql,
   parentId: string,
   query: string,
-  { name, at = new Date().toISOString() }: { name?: string; at?: string } = {},
+  { name, at = new Date().toISOString(), filters }: { name?: string; at?: string; filters?: SavedFilters } = {},
 ): Promise<string> {
   const text = query.trim();
-  const base = (name ?? (text.length > 40 ? `${text.slice(0, 39).trimEnd()}…` : text)) || "Saved search";
+  const base = (name ?? searchName(text, filters)) || "Saved search";
   const id = crypto.randomUUID();
   await lab.execute(
-    `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at, query)
-     VALUES ($1, $2, $3, 'query pool', $4, $4, $5)`,
-    [id, parentId, await freeName(lab, parentId, base), at, text],
+    `INSERT INTO assets (id, parent_id, name, type, created_at, updated_at, query, filters)
+     VALUES ($1, $2, $3, 'query pool', $4, $4, $5, $6)`,
+    [id, parentId, await freeName(lab, parentId, base), at, text, filtersColumn(filters)],
   );
   return id;
 }
 
-/** Replace a query pool's query: its Save. */
-export async function setPoolQuery(lab: Sql, id: string, query: string, at = new Date().toISOString()): Promise<void> {
+/** Replace a query pool's search, its text and its filters: its Save. */
+export async function setPoolQuery(
+  lab: Sql,
+  id: string,
+  query: string,
+  { filters, at = new Date().toISOString() }: { filters?: SavedFilters; at?: string } = {},
+): Promise<void> {
   const [me] = await lab.select<{ type: string }>("SELECT type FROM assets WHERE id = $1", [id]);
   if (me?.type !== "query pool") throw new AssetError("Only a query pool has a query.");
-  await lab.execute("UPDATE assets SET query = $2, updated_at = $3 WHERE id = $1", [id, query.trim(), at]);
+  await lab.execute("UPDATE assets SET query = $2, filters = $3, updated_at = $4 WHERE id = $1", [
+    id,
+    query.trim(),
+    filtersColumn(filters),
+    at,
+  ]);
 }
 
 /**
@@ -521,6 +539,21 @@ export async function convertAsset(lab: Sql, id: string, to: AssetType, at = new
  * name, which is what *by name* means (docs/inventory/asset-tree.md → *Naming a set in
  * a query*).
  */
+/**
+ * Name a query pool after its saved search, as *Save as* would: numbered
+ * when a sibling has the name already. Returns the name it ends up with.
+ */
+export async function nameAfterSearch(lab: Sql, id: string, at = new Date().toISOString()): Promise<string> {
+  const [me] = await lab.select<{ type: string; parent_id: string; name: string; query: string; filters: string | null }>(
+    "SELECT type, parent_id, name, query, filters FROM assets WHERE id = $1",
+    [id],
+  );
+  if (me?.type !== "query pool") throw new AssetError("Only a query pool is named after its search.");
+  const name = await freeName(lab, me.parent_id, searchName(me.query, filtersOfColumn(me.filters)) || "Saved search", id);
+  if (name !== me.name) await lab.execute("UPDATE assets SET name = $2, updated_at = $3 WHERE id = $1", [id, name, at]);
+  return name;
+}
+
 export async function renameAsset(lab: Sql, id: string, name: string, at = new Date().toISOString()): Promise<void> {
   const bad = badName(name);
   if (bad) throw new AssetError(`Cannot rename: ${bad}.`);

@@ -129,6 +129,19 @@ describe("agent API, lab routes", () => {
     expect(db.prepare("SELECT query FROM assets WHERE name = 'cheap'").get()).toEqual({ query: "mv<=1" });
   });
 
+  it("keeps a query pool's filters apart from its text, and refuses bad ones", async () => {
+    const body = { type: "query pool", query: "o:proliferate", filters: { colors: ["U", "B"], colorField: "identity", colorOp: "containedBy" } };
+    expect((await put("/lab/assets/Searches/golbez", JSON.stringify(body))).status).toBe(201);
+    const got = await (await app.request("/lab/assets/Searches/golbez", { headers: auth })).json();
+    expect(got).toMatchObject({ query: "o:proliferate", filters: body.filters });
+    // Saving the text alone clears them.
+    await put("/lab/assets/Searches/golbez", JSON.stringify({ type: "query pool", query: "o:proliferate" }));
+    expect(db.prepare("SELECT filters FROM assets WHERE name = 'golbez'").get()).toEqual({ filters: null });
+    const res = await put("/lab/assets/Searches/golbez", JSON.stringify({ ...body, filters: { colours: ["U"] } }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/unknown key `colours`/);
+  });
+
   it("refuses what it cannot do, writing nothing", async () => {
     const refused = async (res: Response, status: number, why: RegExp) => {
       expect(res.status).toBe(status);

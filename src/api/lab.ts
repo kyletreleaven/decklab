@@ -1,5 +1,6 @@
 import { assetTree, createAsset, createQueryPool, setPoolQuery, type AssetNode } from "../lib/assets";
 import { parseDecklist } from "../lib/decklist";
+import { parseSavedFilters, type SavedFilters } from "../lib/filters";
 import { insertRows, readLab, resolveLocally } from "../lib/library/labdb";
 import type { Asset, Bucket } from "../lib/library/v5";
 import { badName, formatPath } from "../lib/paths";
@@ -29,6 +30,7 @@ export interface TreeNode {
   path: string;
   type: string;
   query?: string;
+  filters?: SavedFilters;
   children: TreeNode[];
 }
 
@@ -39,6 +41,7 @@ export async function tree(lab: Sql): Promise<TreeNode[]> {
       path: formatPath(n.path),
       type: n.type,
       ...(n.query !== undefined && { query: n.query }),
+      ...(n.filters !== undefined && { filters: n.filters }),
       children: out(n.children),
     }));
   return out(await assetTree(lab));
@@ -66,14 +69,15 @@ async function nodeAt(lab: Sql, names: string[]): Promise<{ id: string; type: st
 }
 
 /** A pool as a `PUT` gives it: members, or a query. */
-export type PoolBody = { type: "list pool"; cards: Bucket[] } | { type: "query pool"; query: string };
+export type PoolBody = { type: "list pool"; cards: Bucket[] } | { type: "query pool"; query: string; filters?: SavedFilters };
 
 const MEMBER_KEYS = new Set(["card", "oracle", "set", "number", "lang", "finish"]);
 
 /**
  * A pool from JSON: `{ type: "list pool", cards: [{ card, oracle, set,
  * number, lang, finish }] }`, any of the card's keys saying which, or `{
- * type: "query pool", query }`. Attributes are not taken yet.
+ * type: "query pool", query, filters? }` — `filters` as *More filters* sets
+ * them (`SavedFilters`). Attributes are not taken yet.
  */
 export function poolFromJson(json: unknown): PoolBody {
   const bad = (why: string): never => {
@@ -83,7 +87,12 @@ export function poolFromJson(json: unknown): PoolBody {
   const o = json as Record<string, unknown>;
   if (o.type === "query pool") {
     if (typeof o.query !== "string") return bad("A query pool needs `query`, a string.");
-    return { type: "query pool", query: o.query };
+    for (const k of Object.keys(o)) if (!["type", "query", "filters"].includes(k)) bad(`A query pool: unknown key \`${k}\`.`);
+    return {
+      type: "query pool",
+      query: o.query,
+      ...(o.filters !== undefined && { filters: parseSavedFilters(o.filters, bad) }),
+    };
   }
   if (o.type !== "list pool") return bad('`type` must be "list pool" or "query pool": only pools can be written yet.');
   if (!Array.isArray(o.cards)) return bad("A list pool needs `cards`, an array.");
@@ -158,10 +167,10 @@ export async function putPool(
     const name = names[names.length - 1];
     id =
       body.type === "query pool"
-        ? await createQueryPool(lab, parent, body.query, { name, at })
+        ? await createQueryPool(lab, parent, body.query, { name, at, filters: body.filters })
         : await createAsset(lab, parent, "list pool", { name, at });
   } else if (body.type === "query pool") {
-    await setPoolQuery(lab, id, body.query, at);
+    await setPoolQuery(lab, id, body.query, { filters: body.filters, at });
   }
   if (body.type === "query pool") return { created: !existing };
 

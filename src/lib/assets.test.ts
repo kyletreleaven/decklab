@@ -12,6 +12,7 @@ import {
   convertAsset,
   createAsset,
   createQueryPool,
+  nameAfterSearch,
   deckContents,
   deckList,
   deleteAsset,
@@ -309,6 +310,17 @@ describe("the lab's assets, for display", () => {
     await setPoolQuery(sqlOver(db), id, "t:creature o:proliferate c:g");
     expect((await assetTree(sqlOver(db))).find((n) => n.id === id)?.query).toBe("t:creature o:proliferate c:g");
     await expect(setPoolQuery(sqlOver(db), await find("Binders/Red"), "x")).rejects.toThrow(/Only a query pool/);
+  });
+
+  it("names a query pool after its whole saved search, filters and all, on asking", async () => {
+    const id = await createQueryPool(sqlOver(db), "root", "o:proliferate", { filters: { types: ["Creature"] }, name: "mine" });
+    await setPoolQuery(sqlOver(db), id, "o:proliferate", { filters: { types: ["Creature"], mvMax: 3 } });
+    expect(await nameAfterSearch(sqlOver(db), id)).toBe("o:proliferate t:creature mv<=3");
+    // Its own name is not a clash; a sibling's is.
+    expect(await nameAfterSearch(sqlOver(db), id)).toBe("o:proliferate t:creature mv<=3");
+    const twin = await createQueryPool(sqlOver(db), "root", "o:proliferate", { filters: { types: ["Creature"], mvMax: 3 }, name: "other" });
+    expect(await nameAfterSearch(sqlOver(db), twin)).toBe("o:proliferate t:creature mv<=3 2");
+    await expect(nameAfterSearch(sqlOver(db), await find("Binders/Red"))).rejects.toThrow(/Only a query pool/);
   });
 
   it("draws a checklist a tile per line: its lines overlap, so a card's total means nothing", async () => {

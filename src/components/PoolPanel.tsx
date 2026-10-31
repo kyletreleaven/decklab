@@ -7,9 +7,16 @@ import {
 } from "../lib/collections";
 import {
   countActiveFilters,
+  sameSearch,
+  searchName,
+  splitSearch,
   toScryfallQuery,
   type CardFilter,
+  type SavedFilters,
 } from "../lib/filters";
+
+/** A search as a query pool keeps it: its text, and its *More filters*. */
+export type KeptSearch = { query: string; filters: SavedFilters };
 import { fromArray, fromPages, take } from "../lib/merge";
 import { retained, useRetained } from "../lib/panelState";
 import { isDimmed } from "../lib/dimming";
@@ -229,15 +236,19 @@ export function PoolPanel({
    */
   onSaveSearch?: (filter: CardFilter, sort: SortKey, flipped: boolean) => void;
   /**
-   * Keeping the search as a query pool, in the lab: its query, not its
-   * results, so saving fetches nothing. `saved` is the open pool's query —
-   * Save writes back to it, enabled once the search differs — and absent
-   * where there is no pool open (All Magic), leaving only Save as.
+   * Keeping the search as a query pool, in the lab: its text and its *More
+   * filters* settings, apart (`splitSearch`), not its results, so saving
+   * fetches nothing. `saved` is the open pool's search — Save writes back to
+   * it, enabled once the search differs — and absent where there is no pool
+   * open (All Magic), leaving only Save as.
    */
   queryPool?: {
-    saved?: string;
-    onSave?: (query: string) => void;
-    onSaveAs: (query: string) => void;
+    saved?: KeptSearch;
+    /** The open pool's name, and naming it after its saved search. */
+    name?: string;
+    onNameAfterSearch?: () => void;
+    onSave?: (search: KeptSearch) => void;
+    onSaveAs: (search: KeptSearch) => void;
   };
   /** The search a panel starts with, before any is retained: a query pool's own. */
   initialFilter?: CardFilter;
@@ -363,8 +374,18 @@ export function PoolPanel({
     [filter, activeScopes],
   );
   const effectiveKey = JSON.stringify(effective);
-  /** The search as one query: what a query pool keeps. */
+  /** The search as one query. */
   const searchText = toScryfallQuery(effective).trim();
+  /** The search as a query pool keeps it, and whether that is what it has. */
+  const kept = useMemo(() => splitSearch(effective), [effectiveKey]);
+  const unchanged = queryPool?.saved !== undefined && sameSearch(kept, queryPool.saved);
+  // The saved search, not the one on screen: a name says what the pool keeps.
+  // "… 2" counts as named after it — a sibling had the name first.
+  const savedName = queryPool?.saved ? searchName(queryPool.saved.query, queryPool.saved.filters) || "Saved search" : "";
+  const namedAfterSearch =
+    queryPool?.name !== undefined &&
+    (queryPool.name === savedName ||
+      (queryPool.name.startsWith(`${savedName} `) && /^\d+$/.test(queryPool.name.slice(savedName.length + 1))));
   /**
    * Oracle ids in the lit set — everything else recedes.
    *
@@ -847,15 +868,15 @@ export function PoolPanel({
               <span
                 className="hint-wrap"
                 title={
-                  searchText === queryPool.saved
+                  unchanged
                     ? "Nothing changed since the pool was saved"
-                    : `Keep this search as the pool's query: ${searchText || "everything"}`
+                    : `Keep this search as the pool's: ${searchText || "everything"}`
                 }
               >
                 <button
                   className="ghost"
-                  onClick={() => queryPool.onSave!(searchText)}
-                  disabled={searchText === queryPool.saved}
+                  onClick={() => queryPool.onSave!(kept)}
+                  disabled={unchanged}
                 >
                   Save
                 </button>
@@ -865,25 +886,34 @@ export function PoolPanel({
               <span
                 className="hint-wrap"
                 title={
-                  searchText === queryPool.saved
+                  unchanged
                     ? "Nothing changed since the pool was saved"
-                    : `Back to the pool's saved query: ${queryPool.saved || "everything"}`
+                    : `Back to the pool's saved search: ${toScryfallQuery({ query: queryPool.saved.query, ...queryPool.saved.filters }) || "everything"}`
                 }
               >
                 <button
                   className="ghost"
-                  // The saved query as text: controls were baked into it on save.
-                  onClick={() => setFilter({ query: queryPool.saved })}
-                  disabled={searchText === queryPool.saved}
+                  onClick={() => setFilter({ query: queryPool.saved!.query, ...queryPool.saved!.filters })}
+                  disabled={unchanged}
                 >
                   Revert
                 </button>
               </span>
             )}
+            {queryPool.saved !== undefined && queryPool.onNameAfterSearch && (
+              <span
+                className="hint-wrap"
+                title={namedAfterSearch ? "Already named after its search" : `Name the pool after its saved search: ${savedName}`}
+              >
+                <button className="ghost" onClick={queryPool.onNameAfterSearch} disabled={namedAfterSearch}>
+                  Rename to search
+                </button>
+              </span>
+            )}
             <button
               className="ghost"
-              title="Keep this search as a new query pool: the query, not its results"
-              onClick={() => queryPool.onSaveAs(searchText)}
+              title="Keep this search as a new query pool: the search, not its results"
+              onClick={() => queryPool.onSaveAs(kept)}
             >
               {queryPool.saved !== undefined ? "Save as…" : "Save as pool"}
             </button>

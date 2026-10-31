@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS assets (
   -- the CHECKs keep each to its type.
   storage    TEXT,                        -- place: binder, box, … (a note)
   query      TEXT,                        -- query pool
+  filters    TEXT,                        -- query pool: its *More filters*, JSON
   format     TEXT,                        -- decklist
 
   -- Siblings are told apart by name, and have no order of their own: a
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS assets (
   CHECK (id = 'root' OR (parent_id IS NOT NULL AND name <> '' AND name NOT IN ('.', '..'))),
   CHECK (storage IS NULL OR type = 'place'),
   CHECK ((query IS NOT NULL) = (type = 'query pool')),
+  CHECK (filters IS NULL OR type = 'query pool'),
   CHECK (format IS NULL OR type = 'decklist')
 );
 

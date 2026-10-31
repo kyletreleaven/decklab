@@ -229,7 +229,127 @@ export function toScryfallQuery(filter: CardFilter): string {
   return clauses.join(" ");
 }
 
+/**
+ * What *More filters* sets, kept beside a query pool's text so that opening
+ * the pool gives the settings back rather than their query. The pool means
+ * the two together: `toScryfallQuery({ query, ...filters })`.
+ */
+export type SavedFilters = Pick<
+  CardFilter,
+  "colors" | "colorField" | "colorOp" | "colorCountMin" | "colorCountMax" | "types" | "rarities" | "mvMin" | "mvMax" | "paperOnly"
+>;
+
+const SAVED_KEYS = [
+  "colors",
+  "colorField",
+  "colorOp",
+  "colorCountMin",
+  "colorCountMax",
+  "types",
+  "rarities",
+  "mvMin",
+  "mvMax",
+  "paperOnly",
+] as const satisfies readonly (keyof SavedFilters)[];
+
+/** The order a list setting is kept in, whatever order it was clicked in. */
+const ORDER: Partial<Record<keyof SavedFilters, readonly string[]>> = {
+  colors: COLOR_KEYS,
+  types: FILTER_TYPES,
+  rarities: FILTER_RARITIES,
+};
+
+/** The saved part of a filter: only the keys that say something, lists in order. */
+export function savedFilters(filter: CardFilter): SavedFilters {
+  const out: Record<string, unknown> = {};
+  for (const k of SAVED_KEYS) {
+    const v = filter[k];
+    if (v === undefined || v === false || (Array.isArray(v) && !v.length)) continue;
+    const order = ORDER[k];
+    out[k] = Array.isArray(v) && order ? [...v].sort((a, b) => order.indexOf(a) - order.indexOf(b)) : v;
+  }
+  return out as SavedFilters;
+}
+
+/**
+ * Saved filters from outside — a library file, the agent API — checked key
+ * by key; `fail` says why not.
+ */
+export function parseSavedFilters(raw: unknown, fail: (why: string) => never): SavedFilters {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return fail("`filters` must be a table");
+  const o = raw as Record<string, unknown>;
+  const strings = (k: string, allowed: readonly string[]) => {
+    const v = o[k];
+    if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !allowed.includes(x))) {
+      fail(`\`filters.${k}\` must be a list of ${allowed.join(", ")}`);
+    }
+    return v as string[];
+  };
+  const whole = (k: string) => {
+    const v = o[k];
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0) fail(`\`filters.${k}\` must be a whole number`);
+    return v as number;
+  };
+  const one = <T extends string>(k: string, allowed: readonly T[]) => {
+    if (!allowed.includes(o[k] as T)) fail(`\`filters.${k}\` must be one of ${allowed.join(", ")}`);
+    return o[k] as T;
+  };
+  const out: SavedFilters = {};
+  for (const k of Object.keys(o)) {
+    if (!(SAVED_KEYS as readonly string[]).includes(k)) fail(`\`filters\`: unknown key \`${k}\``);
+  }
+  if (o.colors !== undefined) out.colors = strings("colors", COLOR_KEYS);
+  if (o.colorField !== undefined) out.colorField = one("colorField", ["colors", "identity"] as const);
+  if (o.colorOp !== undefined) out.colorOp = one("colorOp", ["contains", "containedBy"] as const);
+  if (o.colorCountMin !== undefined) out.colorCountMin = whole("colorCountMin");
+  if (o.colorCountMax !== undefined) out.colorCountMax = whole("colorCountMax");
+  if (o.types !== undefined) out.types = strings("types", FILTER_TYPES);
+  if (o.rarities !== undefined) out.rarities = strings("rarities", FILTER_RARITIES);
+  if (o.mvMin !== undefined) out.mvMin = whole("mvMin");
+  if (o.mvMax !== undefined) out.mvMax = whole("mvMax");
+  if (o.paperOnly !== undefined) {
+    if (typeof o.paperOnly !== "boolean") fail("`filters.paperOnly` must be true or false");
+    out.paperOnly = o.paperOnly as boolean;
+  }
+  return savedFilters(out);
+}
+
+/**
+ * A search split for keeping: the text box's query with whatever else is not
+ * a *More filters* setting (a deck's scopes) written into it, and the
+ * settings themselves. Together they search what `filter` does.
+ */
+export function splitSearch(filter: CardFilter): { query: string; filters: SavedFilters } {
+  const rest: CardFilter = { ...filter };
+  for (const k of SAVED_KEYS) delete rest[k];
+  return { query: toScryfallQuery(rest).trim(), filters: savedFilters(filter) };
+}
+
+/** Whether two kept searches are the same: what Save and Revert compare. */
+export function sameSearch(a: { query: string; filters?: SavedFilters }, b: { query: string; filters?: SavedFilters }): boolean {
+  return a.query.trim() === b.query.trim() && filtersColumn(a.filters) === filtersColumn(b.filters);
+}
+
+/** Saved filters as the lab's `filters` column holds them: NULL for none. */
+export function filtersColumn(f: SavedFilters | undefined): string | null {
+  const saved = savedFilters(f ?? {});
+  return Object.keys(saved).length ? JSON.stringify(saved) : null;
+}
+
+export function filtersOfColumn(text: string | null): SavedFilters {
+  return text === null ? {} : savedFilters(JSON.parse(text) as SavedFilters);
+}
+
 /** Whether a filter says anything a search backend could act on. */
 export function hasSearchableTerms(filter: CardFilter): boolean {
   return toScryfallQuery(filter).trim().length > 0;
+}
+
+/**
+ * The name a search is given: the whole of it, *More filters* written out
+ * as their query, shortened past 40 characters.
+ */
+export function searchName(query: string, filters: SavedFilters = {}): string {
+  const text = toScryfallQuery({ query, ...filters }).trim();
+  return text.length > 40 ? `${text.slice(0, 39).trimEnd()}…` : text;
 }

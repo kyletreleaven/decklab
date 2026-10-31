@@ -119,6 +119,7 @@ side = '/Binders/"St. Louis"'
 path = '/pools/cheap'
 type = "query pool"
 query = "usd<1"
+filters = { colors = ["U", "B"], colorField = "identity", colorOp = "containedBy", types = ["Creature"], mvMax = 3 }
 created = 2026-03-01T14:02:11.000Z
 updated = 2026-03-01T14:02:11.000Z
 `;

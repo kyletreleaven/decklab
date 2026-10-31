@@ -3,6 +3,9 @@ import {
   countActiveFilters,
   hasSearchableTerms,
   ownershipMode,
+  parseSavedFilters,
+  sameSearch,
+  splitSearch,
   toScryfallQuery,
 } from "./filters";
 
@@ -195,5 +198,31 @@ describe("countActiveFilters", () => {
 
   it("ignores whitespace-only names", () => {
     expect(countActiveFilters({ query: "   " })).toBe(0);
+  });
+});
+
+describe("keeping a search", () => {
+  it("splits it into the text box, with scopes written in, and the settings", () => {
+    const filter = { query: "o:proliferate", colors: ["B", "U"], colorField: "identity" as const, legalIn: "commander", showOwned: true };
+    expect(splitSearch(filter)).toEqual({
+      query: "o:proliferate f:commander",
+      filters: { colors: ["U", "B"], colorField: "identity" },
+    });
+  });
+
+  it("calls a search the same whatever order its chips were clicked in", () => {
+    expect(sameSearch({ query: "x", filters: { types: ["Land", "Creature"] } }, { query: " x", filters: { types: ["Creature", "Land"] } })).toBe(true);
+    expect(sameSearch({ query: "x", filters: {} }, { query: "x" })).toBe(true);
+    expect(sameSearch({ query: "x", filters: { mvMax: 3 } }, { query: "x" })).toBe(false);
+  });
+
+  it("refuses saved settings it does not know", () => {
+    const fail = (why: string): never => {
+      throw new Error(why);
+    };
+    expect(parseSavedFilters({ colors: ["U"], mvMax: 2 }, fail)).toEqual({ colors: ["U"], mvMax: 2 });
+    expect(() => parseSavedFilters({ colours: ["U"] }, fail)).toThrow(/unknown key `colours`/);
+    expect(() => parseSavedFilters({ colors: ["X"] }, fail)).toThrow(/filters.colors/);
+    expect(() => parseSavedFilters({ types: ["creature"] }, fail)).toThrow(/filters.types/);
   });
 });
