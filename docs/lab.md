@@ -45,9 +45,10 @@ The app opens a separate database, marked **LAB** in the window, which
 
 - **Schema can change freely.** The lab's data lives in a library file
   whose format changes far more slowly than the schema
-  ([`library-format-5.md`](library-format-5.md)). After editing an
-  experimental table, dump the lab, then relaunch with that dump as the
-  seed: a seeded launch starts a fresh `lab.db`, so the sqlx trap of an
+  ([`library-format-5.md`](library-format-5.md)). *Before* editing an
+  experimental table, dump the lab — a dump read by the edited code may
+  ask for a column the old `lab.db` lacks — then relaunch with that dump
+  as the seed: a seeded launch starts a fresh `lab.db`, so the sqlx trap of an
   edited applied migration cannot happen. Without the reseed, the lab
   refuses to open.
 - **Experiments carry their own migrations.** Lab mode runs the real

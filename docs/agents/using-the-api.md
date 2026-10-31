@@ -52,7 +52,16 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain" \
 
 or as JSON: `{"type": "list pool", "cards": [{"card": "Sol Ring"}, {"set":
 "fin", "number": "225"}]}`. A **query pool**: `{"type": "query pool",
-"query": "o:proliferate id<=ub"}`, in Scryfall's syntax.
+"query": "o:proliferate id<=ub"}`, in Scryfall's syntax. It may add
+`filters`, the settings the user sees under *More filters* rather than in
+the search box, e.g. `{"colors": ["U", "B"], "colorField": "identity",
+"colorOp": "containedBy", "types": ["Creature"], "mvMax": 3}`; the pool
+searches query and filters together. Reading a query pool gives both back.
+The keys, each optional: `colors` (of W U B R G), `colorField` (`colors` or
+`identity`), `colorOp` (`contains` or `containedBy`), `colorCountMin`,
+`colorCountMax`, `types` (of Creature Instant Sorcery Artifact Enchantment
+Planeswalker Land), `rarities` (of common uncommon rare mythic), `mvMin`,
+`mvMax`, `paperOnly`. Sending only `query` clears any filters.
 
 A `PUT` replaces the pool's members with what you send, makes any folders
 missing above it, and answers `201 {"created": true, "members": n}` for a

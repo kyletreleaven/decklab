@@ -173,7 +173,9 @@ a library file ([`docs/lab.md`](docs/lab.md)); the model is
 - **List pools** hold cards or printings as members. **Query pools** keep a
   search: *Save as pool* from All Magic, then *Save*, *Save as…* and
   *Revert* in the pool; opening one runs it, with the Cards | Printings
-  toggle
+  toggle. The search box's text and the *More filters* settings are kept
+  apart, so opening one gives the filters back as filters. *Rename to
+  search* names the pool after its saved search, as *Save as* would
 - **The target** — a list pool, checklist or place — is what a tile's
   buttons act on, from whatever view you are in. A list pool takes the
   card or printing in or out (`+`, `×`); a checklist or place counts it

@@ -198,6 +198,25 @@ type = "pool"
 query = "c:u usd<1"
 ```
 
+A query pool may also carry **`filters`**, what *More filters* had set when
+it was saved, kept apart from `query` so that opening the pool gives the
+settings back rather than their query. The pool searches the two together.
+Keys, each optional: `colors` (of W U B R G), `colorField` (`colors` or
+`identity`), `colorOp` (`contains` or `containedBy`), `colorCountMin`,
+`colorCountMax`, `types` (of Creature Instant Sorcery Artifact Enchantment
+Planeswalker Land), `rarities` (of common uncommon rare mythic), `mvMin`,
+`mvMax`, `paperOnly`. An unknown key or value is refused. A dump writes
+them in that order, lists in that order too, and leaves `filters` out when
+none is set.
+
+```toml
+[[asset]]
+path = "/Searches/Golbez"
+type = "query pool"
+query = "o:proliferate"
+filters = { colors = ["U", "B"], colorField = "identity", colorOp = "containedBy" }
+```
+
 **A decklist and a deck** are two types, as a list and a built deck are two
 things (`inventory/goals.md` → *Every decklist has an oracle projection*):
 
