@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { cardStore, execute, processKind, select } from "../lib/db";
 import { createApp } from "./app";
+
+/** The page event an API write to the lab fires. */
+export const LAB_CHANGED = "decklab:lab-changed";
 
 /** One HTTP request as Rust forwards it (`ApiRequest` in `api.rs`). */
 interface ApiRequest {
@@ -19,7 +23,12 @@ interface ApiRequest {
  * first reply per id — but it does every request twice.
  */
 export async function startApiBridge(): Promise<void> {
-  const app = createApp(() => invoke<string | null>("api_token"));
+  const app = createApp(() => invoke<string | null>("api_token"), {
+    // The lab routes, in lab mode only: then `db()` is `lab.db`.
+    open: async () => ((await processKind()) === "lab" ? { lab: { select, execute }, cards: await cardStore() } : null),
+    // The app reads its tree and open view again (`App.tsx`).
+    onWrite: () => window.dispatchEvent(new Event(LAB_CHANGED)),
+  });
 
   await listen<ApiRequest>("api-request", async ({ payload: req }) => {
     // The host is irrelevant: the router only reads path and query.

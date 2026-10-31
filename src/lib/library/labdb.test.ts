@@ -137,6 +137,16 @@ describe("the lab database, against library file version 5", () => {
     expect(dumpV5(await readLab(sqlOver(db), sqlOver(cards)))).toBe(dumpV5(loadV5(FILE)));
   });
 
+  it("reads one asset as the whole dump has it, an implied folder included", async () => {
+    await writeLab(sqlOver(db), sqlOver(cards), loadV5(FILE), { fetchMissing: noFetch });
+    const whole = await readLab(sqlOver(db), sqlOver(cards));
+    for (const a of whole.assets) {
+      expect((await readLab(sqlOver(db), sqlOver(cards), { only: a.path })).assets).toEqual([a]);
+    }
+    expect((await readLab(sqlOver(db), sqlOver(cards), { only: ["Binders"] })).assets).toEqual([{ path: ["Binders"], type: "folder" }]);
+    expect((await readLab(sqlOver(db), sqlOver(cards), { only: ["Nowhere"] })).assets).toEqual([]);
+  });
+
   it("stores absent as '' and '{}', never NULL, and implied folders as rows", async () => {
     await writeLab(sqlOver(db), sqlOver(cards), loadV5(FILE), { fetchMissing: noFetch });
     const sol = db
@@ -177,6 +187,29 @@ cards = [
       { card: "Lightning Bolt", oracle: BOLT, attrs: {} },
       { card: "Sol Ring", oracle: SOL, printing: { set: "c21", number: "263", lang: "en" }, attrs: {} },
     ]);
+  });
+
+  it("takes a whole name over a front face (bug 008)", async () => {
+    // Secret Lair's reversible Sol Ring: a card of its own, its front face "Sol Ring".
+    cards
+      .prepare(
+        `INSERT INTO cards (id, oracle_id, name, set_code, set_name, collector_number, rarity, layout, data, cached_at)
+         VALUES ('sol-rev', 'oracle-sol-rev', 'Sol Ring // Sol Ring', 'sld', 'Set', '1512', 'rare', 'reversible_card', '{"lang":"en"}', '2026-01-01')`,
+      )
+      .run();
+    const lib = loadV5(`format = "decklab-library"
+version = 5
+
+[[asset]]
+path = '/Box'
+type = "place"
+cards = [ { card = "Sol Ring", qty = 1 }, { card = "Delver of Secrets", qty = 1 } ]
+`);
+    await writeLab(sqlOver(db), sqlOver(cards), lib, { fetchMissing: noFetch });
+    const box = (await readLab(sqlOver(db), sqlOver(cards))).assets[0];
+    if (box.type !== "place") throw new Error("not a place");
+    // The front face still names a card no other has whole.
+    expect(box.cards.map((l) => l.bucket.oracle).sort()).toEqual([DELVER, SOL]);
   });
 
   it("refuses a line whose parts disagree, before writing anything", async () => {

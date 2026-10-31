@@ -107,12 +107,21 @@ async function oraclesByName(cards: Sql, names: string[]): Promise<Map<string, S
       [...chunk, ...chunk],
     ),
   );
-  const out = new Map<string, Set<string>>();
-  for (const name of folded) out.set(name, new Set());
-  for (const r of rows) {
-    for (const name of folded) if (nameFits(name, r.name)) out.get(name)!.add(r.oracle_id);
+  // A whole name wins over a front face: "Sol Ring" is Sol Ring, not also
+  // Secret Lair's reversible *Sol Ring // Sol Ring* (bug 008).
+  const whole = new Map<string, Set<string>>();
+  const face = new Map<string, Set<string>>();
+  for (const name of folded) {
+    whole.set(name, new Set());
+    face.set(name, new Set());
   }
-  return out;
+  for (const r of rows) {
+    for (const name of folded) {
+      if (fold(r.name) === name) whole.get(name)!.add(r.oracle_id);
+      else if (nameFits(name, r.name)) face.get(name)!.add(r.oracle_id);
+    }
+  }
+  return new Map(folded.map((name) => [name, whole.get(name)!.size ? whole.get(name)! : face.get(name)!]));
 }
 
 export interface LabWriteOptions {
@@ -217,6 +226,24 @@ async function resolveBuckets(
 }
 
 /* ---------- write ---------- */
+
+/** A bucket as the lab stores it: oracle id, printing id, finish, attributes as JSON; `''` for absent. */
+export type StoredBucket = Stored;
+
+/**
+ * Which card every bucket means, from the card store alone: one the store
+ * has never had is refused, named, and never fetched — the agent API's
+ * case, which sends no requests (docs/agent-api.md → *Lab routes*).
+ */
+export async function resolveLocally(buckets: Bucket[], cards: Sql): Promise<(b: Bucket) => StoredBucket> {
+  const { resolve } = await resolveBuckets(buckets, cards, async (wanted) => {
+    const named = wanted.map((w) =>
+      "name" in w ? w.name : "set" in w ? `(${w.set.toUpperCase()}) ${w.collector_number}` : w.id,
+    );
+    throw new LibraryFormatError(`Not in the card store, and the lab's API fetches nothing:\n${named.join("\n")}`);
+  });
+  return resolve;
+}
 
 export interface LabWriteSummary {
   assets: number;
@@ -417,8 +444,12 @@ const isUnder = (path: string[], ancestor: string[]) =>
  * Read the lab database as a library. Lossless or nothing: what the file
  * cannot carry — a broken reference, a printing the store has lost — stops
  * the dump rather than being left out.
+ *
+ * `only`, the one asset at that path: as the whole dump would write it, but
+ * reading only its own lines and references — the tree is still read whole,
+ * for the paths its references name. Nothing there, no assets.
  */
-export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
+export async function readLab(sql: Sql, cards: Sql, { only }: { only?: string[] } = {}): Promise<V5Library> {
   const problems: string[] = [];
 
   const attributes: Record<string, AttributeType> = {};
@@ -450,11 +481,29 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
   };
   walk("root", []);
 
+  // One asset: the rest of the tree only lends its paths.
+  let scope: string | null = null;
+  if (only) {
+    const at = ordered.find((o) => pathKey(o.path) === pathKey(only));
+    if (!at) return { attributes, assets: [] };
+    scope = at.row.id;
+    ordered.splice(0, ordered.length, at);
+  }
+  const owned = (column: string) => (scope === null ? "" : ` WHERE ${column} = $1`);
+  const scoped = scope === null ? [] : [scope];
+
   const lines = async (table: string, extra: string) =>
     sql.select<LineRow & Record<string, unknown>>(
       `SELECT ${table === "pile_members" ? "pile_id" : "asset_id"} AS owner,
               ${BUCKET_COLUMNS.join(", ")}, added_at${extra}
-         FROM ${table}`,
+         FROM ${table}${
+           table === "pile_members"
+             ? scope === null
+               ? ""
+               : " WHERE pile_id IN (SELECT id FROM piles WHERE arrangement_id = $1)"
+             : owned("asset_id")
+         }`,
+      scoped,
     );
   const group = <R extends { owner: string }>(list: R[]) => {
     const out = new Map<string, R[]>();
@@ -465,9 +514,13 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
   const poolMembers = await lines("pool_members", "");
   const pileMembers = await lines("pile_members", "");
   const piles = await sql.select<{ id: string; arrangement_id: string; position: number; name: string; query: string | null }>(
-    "SELECT id, arrangement_id, position, name, query FROM piles ORDER BY position",
+    `SELECT id, arrangement_id, position, name, query FROM piles${owned("arrangement_id")} ORDER BY position`,
+    scoped,
   );
-  const refs = await sql.select<RefRow>("SELECT asset_id, role, target_id, path, rooted, facets FROM asset_refs");
+  const refs = await sql.select<RefRow>(
+    `SELECT asset_id, role, target_id, path, rooted, facets FROM asset_refs${owned("asset_id")}`,
+    scoped,
+  );
 
   // What the file says about each card, from the store.
   const all = [...countedLines, ...poolMembers, ...pileMembers];
@@ -542,7 +595,8 @@ export async function readLab(sql: Sql, cards: Sql): Promise<V5Library> {
       case "folder": {
         // Implied in the file when it has children and nothing of its own.
         const bare = row.notes === null && row.created_at === null && row.updated_at === null;
-        if (!(bare && (children.get(row.id) ?? []).length)) assets.push({ ...common, type: "folder" });
+        // Asked for by path, though, it is there.
+        if (scope !== null || !(bare && (children.get(row.id) ?? []).length)) assets.push({ ...common, type: "folder" });
         break;
       }
       case "sum":

@@ -16,6 +16,7 @@ import { SplitPane } from "./components/SplitPane";
 import { AssetTree } from "./components/AssetTree";
 import { AssetView, type LabTarget } from "./components/AssetView";
 import { BucketsSection, FindSection } from "./components/BucketsSection";
+import { LAB_CHANGED } from "./api/bridge";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   assetTree,
@@ -340,6 +341,15 @@ export default function App() {
   const labTarget = labTargetId ? (assetById.get(labTargetId) ?? null) : null;
   // Bumped by an edit to the target, so its counts and any open view read again.
   const [targetVersion, setTargetVersion] = useState(0);
+  // An agent's write through the API: the tree and any open view read again.
+  useEffect(() => {
+    const changed = () => {
+      void reloadAssets();
+      setTargetVersion((v) => v + 1);
+    };
+    window.addEventListener(LAB_CHANGED, changed);
+    return () => window.removeEventListener(LAB_CHANGED, changed);
+  }, [reloadAssets]);
   const [targetHolds, setTargetHolds] = useState<Map<string, number> | null>(null);
   useEffect(() => {
     if (!labTarget || !TARGETABLE.has(labTarget.type)) {
