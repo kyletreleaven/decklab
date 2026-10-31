@@ -229,3 +229,23 @@ integration pass proves the SQL is valid and selects what it should.
 
 **Candidate stretch:** price comparisons (`usd>5`) are easy via
 `json_extract(prices, '$.usd')` and need no new storage.
+
+## Considering: a line's printing state
+
+Not built. A suggested printing never matches
+([`inventory/buckets.md`](inventory/buckets.md) → *Suggested printings*), so today a
+suggested line is searched as printing not recorded: `e:fic` misses a
+line whose suggestion is FIC. Two DeckLab terms would make suggestions
+findable without breaking that rule. Both are about a **line**, not a
+card, so they work only where lines are searched — asset views, locally —
+and are refused against All Magic:
+
+- **`printing:bound`**, **`printing:suggested`**, **`printing:none`**:
+  which of the three states the line's printing is in.
+- **`art:fic`**, **`art:fic/263`**: lines *drawn* as that set or
+  printing, bound or suggested. It names what is shown, not what is asked
+  for, so it cannot be mistaken for `e:`.
+
+`printing:suggested -art:fic` would then find what *Suggest from set → FIC*
+did not reach. New keys rather than `is:suggested`, since `is:` is
+unsupported locally and means card properties when it lands.
