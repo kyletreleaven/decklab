@@ -213,3 +213,18 @@ export async function recordDefaults(sql: Sql, cards: Card[], at: string): Promi
     );
   }
 }
+
+/** Of these cards, those whose whole print run the store has within the TTL. */
+export async function completeRuns(sql: Sql, oracleIds: string[], now: number): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (let i = 0; i < oracleIds.length; i += 400) {
+    const chunk = oracleIds.slice(i, i + 400);
+    const rows = await sql.select<{ oracle_id: string }>(
+      `SELECT oracle_id FROM oracle_fetches
+        WHERE printings_fetched_at >= $1 AND oracle_id IN (${chunk.map((_, j) => `$${j + 2}`).join(", ")})`,
+      [cutoff(now), ...chunk],
+    );
+    for (const r of rows) out.add(r.oracle_id);
+  }
+  return out;
+}

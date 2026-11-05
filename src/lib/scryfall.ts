@@ -6,6 +6,7 @@ import { cardStore } from "./db";
 import { scheduledFetch, type Lane } from "./scheduler";
 import {
   completePrintings,
+  completeRuns,
   freshById,
   freshBySetNumber,
   freshDefaults,
@@ -356,6 +357,61 @@ export async function printings(oracleId: string): Promise<Card[]> {
   return task;
 }
 
+/** Cards to one print-run search: a short enough query, few enough requests. */
+const ORACLES_PER_SEARCH = 25;
+
+/**
+ * Make sure of these cards' whole print runs, for what a checklist costs:
+ * those the store has within the TTL are skipped, the rest searched
+ * `ORACLES_PER_SEARCH` at a time — `oracleid:` ORed, every page, background lane —
+ * and stamped complete once all their pages are in. Bounded by the cards
+ * asked; a second look costs nothing until the TTL. `stop` is asked
+ * between batches: a view no longer active starts no more. Basic lands are
+ * left to what the store has: hundreds of printings, worth cents.
+ */
+export async function ensurePrintRuns(
+  oracleIds: string[],
+  { stop = () => false, onBatch }: { stop?: () => boolean; onBatch?: () => void } = {},
+): Promise<{ requests: number; done: boolean }> {
+  const store = await cardStore();
+  const complete = await completeRuns(store, oracleIds, Date.now());
+  const basics = new Set(
+    (
+      await store.select<{ oracle_id: string }>(
+        `SELECT DISTINCT oracle_id FROM cards WHERE type_line LIKE 'Basic Land%' AND oracle_id IN (${oracleIds.map((_, i) => `$${i + 1}`).join(", ") || "''"})`,
+        oracleIds,
+      )
+    ).map((r) => r.oracle_id),
+  );
+  const wanted = oracleIds.filter((o) => !complete.has(o) && !basics.has(o) && /^[0-9a-f-]{36}$/.test(o));
+  let requests = 0;
+  for (let i = 0; i < wanted.length; i += ORACLES_PER_SEARCH) {
+    const chunk = wanted.slice(i, i + ORACLES_PER_SEARCH);
+    // Asked before a batch, never inside one: its pages are only any use together.
+    if (stop()) return { requests, done: false };
+    const q = chunk.map((o) => `oracleid:${o}`).join(" or ");
+    for (let page = 1; ; page++) {
+      let list: ScryfallList;
+      try {
+        requests++;
+        list = await request<ScryfallList>(`/cards/search?${new URLSearchParams({ q, unique: "prints", page: String(page) })}`, {
+          lane: "background",
+        });
+      } catch (error) {
+        if (error instanceof ScryfallError && error.status === 404) break;
+        throw error;
+      }
+      await keep(list.data.map(normalize));
+      if (!list.has_more) break;
+    }
+    // Stamped only once every page is in: a stop part-way leaves them to fetch again.
+    const at = new Date().toISOString();
+    for (const o of chunk) await markPrintingsFetched(store, o, at);
+    onBatch?.();
+  }
+  return { requests, done: true };
+}
+
 /** Identifier shapes accepted by Scryfall's /cards/collection endpoint. */
 export type Identifier =
   | { id: string }
@@ -443,8 +499,8 @@ export async function resolveIdentifiers(
   // ORed, one page a chunk.
   const unnamed = notFound.flatMap((i) => ("name" in i ? [i.name] : []));
   const aliased = new Set<string>();
-  for (let i = 0; i < unnamed.length; i += ALIASES_A_SEARCH) {
-    const chunk = unnamed.slice(i, i + ALIASES_A_SEARCH);
+  for (let i = 0; i < unnamed.length; i += ALIASES_PER_SEARCH) {
+    const chunk = unnamed.slice(i, i + ALIASES_PER_SEARCH);
     const q = chunk.map((n) => `!"${n.replace(/"/g, "")}"`).join(" or ");
     let list: ScryfallList;
     try {
@@ -463,7 +519,7 @@ export async function resolveIdentifiers(
 }
 
 /** Names to a flavour-name search: short enough a query, few enough requests. */
-const ALIASES_A_SEARCH = 20;
+const ALIASES_PER_SEARCH = 20;
 
 export interface ResolveResult {
   found: Card[];

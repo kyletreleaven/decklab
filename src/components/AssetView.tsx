@@ -35,7 +35,8 @@ import { CATEGORY_ORDER, categoryOf } from "../lib/deckstats";
 import { CardImage } from "./CardImage";
 import { PullSheet } from "./PullSheet";
 import { plainestPrintings } from "../lib/printings";
-import { printingsInSet } from "../lib/scryfall";
+import { ensurePrintRuns, printingsInSet } from "../lib/scryfall";
+import { minimumPrice, storedPricing, type AskedLine, type MinimumPrice } from "../lib/price";
 import { LAB_CHANGED } from "../api/bridge";
 
 /** Tiles a section shows at first, and adds per "Show more": as the pool pages. */
@@ -511,6 +512,49 @@ export function AssetView({
     node.type === "checklist" ||
     node.type === "exact checklist" ||
     node.type === "decklist";
+
+  /**
+   * What it costs, at least, to buy what a checklist asks: each line at its
+   * cheapest printing (src/lib/price.ts). Print runs the store lacks are
+   * pulled while the view is open, batch by batch, the figure an upper bound
+   * ("≤") until they are all in.
+   */
+  const asked: AskedLine[] = isChecklist
+    ? (sections ?? []).filter((s) => s.zone !== "maybe").flatMap((s) => s.tiles).flatMap((t) => t.buckets.map((b) => ({ oracleId: t.oracleId, ...(b.printingId && { printingId: b.printingId }), ...(b.finish && { finish: b.finish }), qty: b.qty })))
+    : [];
+  const askedCards = [...new Set(asked.map((l) => l.oracleId))].sort().join(",");
+  const [runsIn, setRunsIn] = useState<{ cards: string; done: boolean; batches: number }>({ cards: "", done: false, batches: 0 });
+  useEffect(() => {
+    if (!askedCards) return;
+    let live = true;
+    setRunsIn({ cards: askedCards, done: false, batches: 0 });
+    void ensurePrintRuns(askedCards.split(","), {
+      stop: () => !live,
+      onBatch: () => live && setRunsIn((r) => ({ ...r, batches: r.batches + 1 })),
+    })
+      .then(({ done }) => live && setRunsIn((r) => ({ ...r, done })))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [askedCards]);
+  const [price, setPrice] = useState<(MinimumPrice & { exact: boolean }) | null>(null);
+  const askedKey = JSON.stringify(asked);
+  useEffect(() => {
+    if (!asked.length) {
+      setPrice(null);
+      return;
+    }
+    let live = true;
+    const exact = runsIn.cards === askedCards && runsIn.done;
+    void cardStore()
+      .then((store) => storedPricing(store, askedCards.split(",")))
+      .then((ps) => live && setPrice({ ...minimumPrice(asked, ps), exact }));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedKey, runsIn]);
   const built =
     sections?.every((s) => s.built) && sections.length > 0
       ? sections.reduce(
@@ -804,6 +848,24 @@ export function AssetView({
             <span className="label">Unique</span>
             <span className="value">{all.length}</span>
           </div>
+          {price && (
+            <div
+              className="stat"
+              title={[
+                "The least it costs to buy, by Scryfall's prices: each line at its cheapest printing that fills it",
+                price.exact ? "" : "Still fetching print runs: a cheaper printing may yet turn up",
+                price.unpriced ? `${price.unpriced} lines without a price, left out` : "",
+              ]
+                .filter(Boolean)
+                .join(". ")}
+            >
+              <span className="label">Price</span>
+              <span className="value">
+                {price.exact ? "" : "≤ "}${price.total.toFixed(2)}
+                {price.unpriced > 0 && <span className="hint"> +{price.unpriced} unpriced</span>}
+              </span>
+            </div>
+          )}
           {standIns > 0 && (
             <div
               className="stat"
