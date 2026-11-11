@@ -130,28 +130,62 @@ syntax already uses for values (`o:"draw a card"`).
 
 ## Sources and targets
 
-How a view's cards reach another asset. Two roles, and one operation
-between them.
+How cards reach an asset. **The view you are in is the target; what is
+drawn behind it is the source.** A tile's buttons say what should happen to
+*this* asset.
 
-**The source is the view you are in.** A tile hands over the bucket it
-stands for, whole: printing, finish, attributes, as the source has them.
-From All Magic or a query pool that is what the grain says — the card at
-Cards, the printing at Printings; from an asset, the line itself. The
-target never guesses what a tile meant.
+This reverses the first design, a target set in the tree (*Set as target*)
+with the view as the source. One slot then did two jobs, being written to
+and being checked against, and a pool, a checklist by the ontology, could
+not be a source at all.
 
-**The target is set in the tree** (*Set as target*), and is what a tile's
-buttons act on. Its type decides what they do:
+**Behind is two checkboxes**, *Show source* and *Show goal*. Either, both,
+or neither:
 
-| Target | `+` | `−` |
-| --- | --- | --- |
-| list pool | the bucket becomes a member (`+`) | it stops being one (`×`) |
-| checklist, exact checklist | the line asks for one more, made at 1 | one fewer, gone at 0 |
-| place | one more copy in that bucket | one fewer, gone at 0 |
-| place, from another place | one copy **moves** to the target (`→`) | one moves back (`←`) |
+- **The source** is All Magic (the default), a pool, a place or a sum. A
+  checklist can be one too, read as its **support**: every line a `[0, ∞]`
+  member, a pool. A source gives membership only. Copies are drawn from a
+  place or from All Magic, never from a goal.
+- **The goal** is a checklist the view is checked against, and its bounds
+  are what count. Both checkboxes on draws their union. Only a deck checked
+  against the decklist it builds has a goal so far; disabled elsewhere.
 
-A copy is in one place at a time, so place to place is never *add*. A
-step is one; copying a whole line or asset is an action of its own. Viewing
-the target itself is editing it. A decklist is not a target: its zones are.
+**Drawn on two axes.** **Dim**: not in the view. **Outlined**: the goal is
+not met, short or over, in front or behind. A tile the view satisfies
+loses its outline. Behind, an outlined tile with `+` is one to fetch, and
+one without is one to buy.
+
+**A tile hands over the bucket it stands for**, whole: printing, finish,
+attributes, as the source has them. From All Magic or a query pool that is
+what the grain says — the card at Cards, the printing at Printings; from an
+asset, the line itself. The view never guesses what a tile meant.
+
+| View ↓ / source → | none | All Magic · pool · checklist | place | sum |
+| --- | --- | --- | --- | --- |
+| checklist, exact, decklist zone | `−` `+` step the line | `+` asks for one more, made at 1 | same | same |
+| list pool | `×` | `+` member, `×` not | same | same |
+| query pool | none: its members are its query | none | none | none |
+| place | `−` `+` correct what it holds | `+` `−`: a move from or to All Magic | `→` `←`: a copy moves | not yet: which place it leaves |
+| sum, deck | none | not yet: which place receives it | not yet | not yet |
+
+**Into a goal the source never matters**: nothing is consumed. **Into a
+place it must resolve to one place**, or to All Magic — *add and remove
+are moves to and from All Magic* ([`moves.md`](moves.md)) — so a pool behind a
+place adds as All Magic does. A sum on either side waits on choosing its
+place; the detail already lists a sum's copies by place
+(`BucketsSection`), which is one way in.
+
+**A button shows only when it has something to do.** `+` needs a source
+holding the card, except into a goal or from All Magic; `−` and `←` need
+the view to hold it; `→` needs the source to. A place view shows one pair:
+`→` `←` while a place is behind it, `−` `+` otherwise, so a correction is
+never read as a move. A copy is in one place at a time, so place to place
+is never *add*. A step is one; copying a whole line or asset is an action
+of its own. A decklist is not a view to fill: its zones are.
+
+**Built:** the tree's target, as first designed; All Magic behind a place,
+checklist or pool, its buttons acting on that target. **Not yet:** all of
+the above.
 
 **How an asset is drawn**, so a tile can always say which bucket it is:
 

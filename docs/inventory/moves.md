@@ -47,7 +47,8 @@ always a location.
 - **Into a non-location** is a move into a temporary location, planned onward
   later.
 - An ω set as a source is All Magic with a constraint on the bucket. A goal
-  is never a source: no copies live there.
+  is never a source of copies: none live there. Read as its support, it is
+  an ω set like any other ([`asset-tree.md`](asset-tree.md) → *Sources and targets*).
 
 So a move's targets are always resolved, while its sources can be resolved
 one edge at a time. "Resolved" is not "committed": committing is carrying the
