@@ -131,18 +131,20 @@ export function PilesView({
           return label && <span className="qty-badge">{label}</span>;
         })()}
         <span className="tile-controls" onClick={(e) => e.stopPropagation()}>
-          <button
-            title="Remove one"
-            onClick={() => onChangeQuantity(entry, entry.quantity - 1)}
-          >
-            −
-          </button>
-          <button
-            title="Add one"
-            onClick={() => onChangeQuantity(entry, entry.quantity + 1)}
-          >
-            +
-          </button>
+          <span className="tile-set">
+            <button
+              title="Remove one"
+              onClick={() => onChangeQuantity(entry, entry.quantity - 1)}
+            >
+              −
+            </button>
+            <button
+              title="Add one"
+              onClick={() => onChangeQuantity(entry, entry.quantity + 1)}
+            >
+              +
+            </button>
+          </span>
         </span>
       </div>
     );

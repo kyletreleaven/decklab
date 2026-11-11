@@ -439,6 +439,7 @@ export default function App() {
         heldAt: labTargeting.countOf,
         add: (_: Card, bucket: Bucket) => labTargeting.step(bucket, 1),
         remove: (_: Card, bucket: Bucket) => labTargeting.step(bucket, -1),
+        active: true,
       }
     : null;
 
@@ -1186,7 +1187,22 @@ export default function App() {
                 selectedId={selectedCard?.id ?? null}
                 onSelect={setSelectedCard}
                 onHoverCard={hoverCard}
-                destination={labDestination}
+                // The asset's own buttons alone: what is drawn behind is a
+                // candidate for it, not for active. A dimmed tile is one the
+                // asset holds none of; once it holds one, its own tile evicts it.
+                destination={
+                  TARGETABLE.has(currentAsset.type)
+                    ? {
+                        name: currentAsset.name,
+                        quantities: {},
+                        quantityKind: currentAsset.type === "list pool" ? "binary" : "natural",
+                        heldAt: () => 0,
+                        add: (_: Card, bucket: Bucket) =>
+                          void editTarget(() => stepTarget(labSql, currentAsset, bucket, 1)),
+                        remove: () => {},
+                      }
+                    : null
+                }
                 source={{ kind: "universe" }}
                 activePrintings={activePrintings}
                 grainToggle

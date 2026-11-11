@@ -12,6 +12,7 @@ import {
   decklistCards,
   stepTarget,
   suggestPrintingsOf,
+  TARGETABLE,
   type PrintingChange,
   type AssetNode,
   type Bucket,
@@ -161,25 +162,33 @@ export interface LabTarget {
 }
 
 /**
- * A checklist is only ever a destination, never a source: in its own view —
- * a decklist's zones too — `−`/`+` ask for one fewer or one more of the
- * line, whatever the target is. Every open view reads again after.
+ * The asset a view shows, as its own buttons act on it: `−`/`+` step a
+ * checklist's or a place's line, `+`/`×` a list pool's member. Every open
+ * view reads again after.
  */
 export function selfTarget(
-  checklist: { id: string; type: AssetType; name: string },
+  asset: { id: string; type: AssetType; name: string },
   countOf: (bucket: Bucket) => number,
 ): LabTarget {
   return {
-    ...checklist,
+    ...asset,
     countOf,
     step: (bucket, delta) =>
-      void stepTarget({ select, execute }, checklist, bucket, delta).then(() => window.dispatchEvent(new Event(LAB_CHANGED))),
+      void stepTarget({ select, execute }, asset, bucket, delta).then(() => window.dispatchEvent(new Event(LAB_CHANGED))),
     move: () => {},
   };
 }
 
-/** A goal: what is asked for, drawn but never drawn from. */
-export const isGoal = (type: AssetType) => isA(type, "checklist");
+/**
+ * A tile's two sets of buttons are decided apart (docs/inventory/asset-tree.md
+ * → *Sources and targets*). Its own go by the viewed asset's type alone: a
+ * sum holds nothing of its own, so has none.
+ */
+export const editsItself = (type: AssetType) => TARGETABLE.has(type);
+
+/** Active's go by active's type, and are none when active is the bucket's own asset. */
+export const activeFor = (source: { id: string }, active: LabTarget | null | undefined) =>
+  active && active.id !== source.id ? active : null;
 
 /** The one bucket a tile stands for, whole; none when it covers several. */
 function bucketOf(t: Tile): Bucket | null {
@@ -204,21 +213,42 @@ function bucketOf(t: Tile): Bucket | null {
 function TileControls({
   tile,
   source,
-  target,
+  own,
+  active,
 }: {
   tile: Tile;
   source: { id: string; type: AssetType };
-  target: LabTarget;
+  /** The viewed asset's own buttons. */
+  own?: LabTarget | null;
+  /** Active's, named, beside them. */
+  active?: LabTarget | null;
 }) {
   const place = tile.buckets.length === 1 ? tile.buckets[0].place : undefined;
+  const from = place ? { id: place.id, type: "place" as const } : source;
+  const theirs = activeFor(from, active);
+  if (!own && !theirs) return null;
   return (
-    <BucketButtons
-      bucket={bucketOf(tile)}
-      several={tile.buckets.length}
-      source={place ? { id: place.id, type: "place" } : source}
-      target={target}
-      className="tile-controls"
-    />
+    <span className="tile-controls">
+      {theirs && (
+        <BucketButtons
+          bucket={bucketOf(tile)}
+          several={tile.buckets.length}
+          source={from}
+          target={theirs}
+          named
+          className="tile-set tile-active"
+        />
+      )}
+      {own && (
+        <BucketButtons
+          bucket={bucketOf(tile)}
+          several={tile.buckets.length}
+          source={from}
+          target={own}
+          className="tile-set"
+        />
+      )}
+    </span>
   );
 }
 
@@ -232,12 +262,15 @@ export function BucketButtons({
   several = 1,
   source,
   target,
+  named = false,
   className,
 }: {
   bucket: Bucket | null;
   several?: number;
   source: { id: string; type: AssetType };
   target: LabTarget;
+  /** Leads with the target's name: active's set, apart from the asset's own. */
+  named?: boolean;
   className: string;
 }) {
   const has = bucket ? target.countOf(bucket) : 0;
@@ -297,6 +330,7 @@ export function BucketButtons({
           ];
   return (
     <span className={className} onClick={(e) => e.stopPropagation()}>
+      {named && <span className="target-name" title={target.name}>{target.name}</span>}
       {/* Its own count is already on the tile or row. */}
       {target.type !== "list pool" && target.id !== source.id && bucket && (
         <span
@@ -601,11 +635,18 @@ export function AssetView({
       {!s.members && (
         <span className="qty-badge">{bounds(t, s.atLeast)}</span>
       )}
-      {s.source && isGoal(s.source.type) ? (
-        // A checklist's own view edits it, whatever the target.
-        <TileControls tile={t} source={s.source} target={selfTarget(s.source, () => t.count)} />
-      ) : (
-        target && s.source && t.state !== "missing" && <TileControls tile={t} source={s.source} target={target} />
+      {s.source && (
+        <TileControls
+          tile={t}
+          source={s.source}
+          // A place missing a card holds none of it to step.
+          own={
+            editsItself(s.source.type) && !(s.source.type === "place" && t.state === "missing")
+              ? selfTarget(s.source, () => t.count)
+              : null
+          }
+          active={t.state === "missing" ? null : target}
+        />
       )}
       {t.standIn && <span className="stand-in-badge">stand-in</span>}
     </div>

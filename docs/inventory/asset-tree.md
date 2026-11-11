@@ -183,9 +183,27 @@ never read as a move. A copy is in one place at a time, so place to place
 is never *add*. A step is one; copying a whole line or asset is an action
 of its own. A decklist is not a view to fill: its zones are.
 
-**Built:** the tree's target, as first designed; All Magic behind a place,
-checklist or pool, its buttons acting on that target. **Not yet:** all of
-the above.
+### Own and active buttons
+
+The model built first: **active** is set in the tree (*Set as target*), and
+a tile's buttons come in **two sets, decided apart**:
+
+- **Its own**, by the viewed asset's type alone: the *none* column above.
+  A sum holds nothing of its own, and All Magic and query pools have
+  nothing to edit, so they have none.
+- **Active's**, by active's type, named and in the accent: a place's bucket
+  into a place moves (`→` `←`), anything else steps or toggles. None when
+  active is the bucket's own asset.
+
+So a free view — All Magic, a query pool, a sum — sends to active without
+switching views, and a place or checklist can be edited while it does.
+
+All Magic as a view has active's set alone. **Drawn behind an asset it has
+the asset's own alone**: what is behind is a candidate for the view, not for
+active. Behind a sum, none.
+
+**Built:** both sets on tiles and in the detail's buckets. **Not yet:** the
+source and goal checkboxes; a sum on either side of a move.
 
 **How an asset is drawn**, so a tile can always say which bucket it is:
 

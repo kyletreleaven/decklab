@@ -1329,12 +1329,43 @@ a.external:hover {
   right: 6px;
   bottom: 6px;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 3px;
   opacity: 0;
 }
 
 .card-tile:hover .tile-controls {
   opacity: 1;
+}
+
+/* One set of buttons: the asset's own, or active's. */
+.tile-set {
+  display: flex;
+  gap: 3px;
+}
+
+.tile-set > span {
+  display: flex;
+}
+
+/* Active's set, named and in the accent, apart from the asset's own. */
+.tile-active {
+  padding: 2px;
+  border: 1px solid var(--accent);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.target-name {
+  align-self: center;
+  max-width: 72px;
+  padding: 0 4px;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* What the target holds of this tile's bucket, beside the buttons that change it. */
@@ -1346,10 +1377,6 @@ a.external:hover {
   background: rgba(0, 0, 0, 0.8);
   font-size: 11px;
   text-align: center;
-}
-
-.tile-controls > span {
-  display: flex;
 }
 
 /* Nothing to remove — kept visible rather than hidden so the pair does not

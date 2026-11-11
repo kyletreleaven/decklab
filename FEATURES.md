@@ -181,11 +181,13 @@ a library file ([`docs/lab.md`](docs/lab.md)); the model is
   toggle. The search box's text and the *More filters* settings are kept
   apart, so opening one gives the filters back as filters. *Rename to
   search* names the pool after its saved search, as *Save as* would
-- **The target** — a list pool, checklist or place — is what a tile's
-  buttons act on, from whatever view you are in. A list pool takes the
-  card or printing in or out (`+`, `×`); a checklist or place counts it
-  (`−`, `+`); from one place to another, a copy moves (`→`, `←`). A tile
-  standing for several buckets has its buttons greyed
+- **Own and active buttons.** A tile has up to two sets: its asset's own,
+  and the target's (*Set as target*), named in the accent. A list pool
+  takes the card or printing in or out (`+`, `×`); a checklist or place
+  counts it (`−`, `+`); from one place to another, a copy moves (`→`,
+  `←`). All Magic, query pools and collections have only the target's, so
+  they send without switching views. A tile standing for several buckets
+  has its buttons greyed
 - **Buckets in the detail:** selecting a tile in an asset lists its card's
   buckets there, each with the target's buttons and *Change…* — move some
   or all of a bucket to another printing, finish or attributes (condition,

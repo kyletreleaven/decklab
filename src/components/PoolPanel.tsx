@@ -155,6 +155,8 @@ export function PoolPanel({
      */
     add: (card: Card, bucket: Bucket) => void;
     remove: (card: Card, bucket: Bucket) => void;
+    /** The lab's active asset: its buttons drawn as active's, named. */
+    active?: boolean;
   } | null;
   /**
    * What this pane draws. Exactly one set — never a union.
@@ -1155,6 +1157,10 @@ export function PoolPanel({
                     className="tile-controls"
                     onClick={(e) => e.stopPropagation()}
                   >
+                  <span className={destination?.active ? "tile-set tile-active" : "tile-set"}>
+                    {destination?.active && (
+                      <span className="target-name" title={step.name}>{step.name}</span>
+                    )}
                     {step.dec && (
                       <button
                         title={`Remove one from ${step.name}`}
@@ -1181,6 +1187,7 @@ export function PoolPanel({
                         ×
                       </button>
                     )}
+                  </span>
                   </span>
                 )}
                 {/* How many are already in the destination — distinct from the
