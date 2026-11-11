@@ -39,6 +39,8 @@ import { plainestPrintings } from "../lib/printings";
 import { ensurePrintRuns, printingsInSet } from "../lib/scryfall";
 import { minimumPrice, storedPricing, type AskedLine, type MinimumPrice } from "../lib/price";
 import { LAB_CHANGED } from "../api/bridge";
+import { massEntry, type AskedPattern } from "../lib/massEntry";
+import type { Export, Format } from "./ExportDialog";
 
 /** Tiles a section shows at first, and adds per "Show more": as the pool pages. */
 const PAGE = 175;
@@ -195,6 +197,33 @@ export const editsItself = (type: AssetType) => TARGETABLE.has(type);
 /** Active's go by active's type, and are none when active is the bucket's own asset. */
 export const activeFor = (source: { id: string }, active: LabTarget | null | undefined) =>
   active && active.id !== source.id ? active : null;
+
+const MASS_ENTRY: Format[] = [
+  { value: "printings", label: "TCGplayer Mass Entry, printings kept", extension: "txt" },
+  { value: "any", label: "TCGplayer Mass Entry, any printing", extension: "txt" },
+];
+
+/** A checklist for the export dialog: every line, not what a search left showing. */
+async function exportChecklist(node: AssetNode): Promise<Export> {
+  const tiles = await lineContents({ select, execute }, await cardStore(), node.id, { by: "line" });
+  const lines: AskedPattern[] = tiles.flatMap((t) =>
+    t.buckets.map((b) => ({
+      oracleId: t.oracleId,
+      name: t.card.name,
+      ...(b.printingId && { printingId: b.printingId }),
+      ...(b.printing && { printing: b.printing }),
+      ...(b.finish && { finish: b.finish }),
+      attrs: b.attrs,
+      qty: b.qty,
+    })),
+  );
+  return {
+    title: node.name,
+    filenameBase: node.name,
+    formats: MASS_ENTRY,
+    render: (format) => massEntry(lines, { printings: format === "printings" }),
+  };
+}
 
 /** The one bucket a tile stands for, whole; none when it covers several. */
 function bucketOf(t: Tile): Bucket | null {
@@ -375,6 +404,7 @@ export function AssetView({
   decklists = [],
   onSetList,
   onConvert,
+  onExport,
   target,
   onSelectLines,
   behindShown = false,
@@ -392,6 +422,8 @@ export function AssetView({
   onSetList?: (deck: AssetNode, decklistId: string) => Promise<void>;
   /** Changes the asset's type: here, a checklist exact or not. */
   onConvert?: (node: AssetNode, to: AssetType) => Promise<void>;
+  /** Opens the export dialog: here, a checklist as TCGplayer Mass Entry. */
+  onExport?: (e: Export) => void;
   /**
    * The lab's target, which a tile's buttons act on — this view is the
    * source, and hands over the bucket a tile stands for. Absent, no buttons.
@@ -738,6 +770,19 @@ export function AssetView({
               </button>
             ))}
           </div>
+        )}
+        {(node.type === "checklist" || node.type === "exact checklist") && onExport && (
+          <button
+            className="ghost"
+            title="The checklist as text, for TCGplayer's Mass Entry"
+            onClick={() =>
+              void exportChecklist(node)
+                .then(onExport)
+                .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+            }
+          >
+            Export…
+          </button>
         )}
         {node.type === "decklist" && (
           <PrintingsMenu

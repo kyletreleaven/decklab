@@ -181,6 +181,11 @@ a library file ([`docs/lab.md`](docs/lab.md)); the model is
   toggle. The search box's text and the *More filters* settings are kept
   apart, so opening one gives the filters back as filters. *Rename to
   search* names the pool after its saved search, as *Save as* would
+- **Export a checklist for TCGplayer** (*Export…*): Mass Entry text, a
+  line per card (`4 Lightning Bolt`) or per printing named
+  (`1 Lightning Bolt [M10] 146`), to copy or save. Overlapping lines are
+  bought once: at least four Bolts and at least one M10 is four, one of
+  them M10, not five (`src/lib/massEntry.ts`)
 - **Own and active buttons.** A tile has up to two sets: its asset's own,
   and the target's (*Set as target*), named in the accent. A list pool
   takes the card or printing in or out (`+`, `×`); a checklist or place

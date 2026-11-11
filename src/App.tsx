@@ -8,7 +8,7 @@ import {
 } from "react";
 import { CardDetail } from "./components/CardDetail";
 import { DeckView } from "./components/DeckView";
-import { ExportDialog } from "./components/ExportDialog";
+import { ExportDialog, type Export } from "./components/ExportDialog";
 import { ImportDialog, type ImportTarget } from "./components/ImportDialog";
 import { ManaCost } from "./components/ManaCost";
 import { PoolPanel, type KeptSearch, type Scope } from "./components/PoolPanel";
@@ -193,11 +193,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showPool, setShowPool] = useState(false);
   const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
-  const [exportState, setExportState] = useState<{
-    title: string;
-    filenameBase: string;
-    render: (format: ExportFormat) => string;
-  } | null>(null);
+  const [exportState, setExportState] = useState<Export | null>(null);
 
   // Bumped whenever collection contents change, so views recompute ownership
   // and owned-copy counts without threading callbacks everywhere.
@@ -1072,7 +1068,7 @@ export default function App() {
               setExportState({
                 title: currentDeck.name,
                 filenameBase: currentDeck.name,
-                render: (format) => exportDeck(entries, format),
+                render: (format) => exportDeck(entries, format as ExportFormat),
               })
             }
             poolOn={showPool}
@@ -1163,6 +1159,7 @@ export default function App() {
             decklists={decklists}
             onSetList={setList}
             onConvert={convert}
+            onExport={setExportState}
             target={labTargeting ?? undefined}
             refreshKey={targetVersion}
             onSelectLines={(source, oracleId, missing) => setSelectedLines({ sourceId: source.id, oracleId, missing })}
@@ -1312,7 +1309,7 @@ export default function App() {
                 setExportState({
                   title: currentCollection.name,
                   filenameBase: currentCollection.name,
-                  render: (format) => exportCollection(items, format),
+                  render: (format) => exportCollection(items, format as ExportFormat),
                 });
               },
             }}
@@ -1400,6 +1397,7 @@ export default function App() {
           title={exportState.title}
           filenameBase={exportState.filenameBase}
           render={exportState.render}
+          formats={exportState.formats}
           onClose={() => setExportState(null)}
         />
       )}

@@ -4,7 +4,21 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { useMemo, useState } from "react";
 import type { ExportFormat } from "../lib/decklist";
 
-const FORMATS: { value: ExportFormat; label: string; extension: string }[] = [
+export interface Format {
+  value: string;
+  label: string;
+  extension: string;
+}
+
+/** What the dialog is opened with. */
+export interface Export {
+  title: string;
+  filenameBase: string;
+  render: (format: string) => string;
+  formats?: Format[];
+}
+
+const DECKLIST_FORMATS: (Format & { value: ExportFormat })[] = [
   { value: "text", label: "Plain text", extension: "txt" },
   { value: "arena", label: "Arena (with set codes)", extension: "txt" },
   { value: "csv", label: "CSV", extension: "csv" },
@@ -14,15 +28,20 @@ export function ExportDialog({
   title,
   filenameBase,
   render,
+  formats = DECKLIST_FORMATS,
   onClose,
 }: {
   title: string;
   /** Used as the default filename, minus extension. */
   filenameBase: string;
-  render: (format: ExportFormat) => string;
+  /** The text in a format, by its `value`. */
+  render: (format: string) => string;
+  /** The first is the default. Absent, a decklist's. */
+  formats?: Format[];
   onClose: () => void;
 }) {
-  const [format, setFormat] = useState<ExportFormat>("text");
+  const FORMATS = formats;
+  const [format, setFormat] = useState<string>(formats[0].value);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,7 +95,7 @@ export function ExportDialog({
           <select
             value={format}
             onChange={(e) => {
-              setFormat(e.target.value as ExportFormat);
+              setFormat(e.target.value);
               setStatus(null);
             }}
           >
