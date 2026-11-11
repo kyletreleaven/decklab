@@ -197,7 +197,8 @@ a library file ([`docs/lab.md`](docs/lab.md)); the model is
   buckets there, each with the target's buttons and *Change…* — move some
   or all of a bucket to another printing, finish or attributes (condition,
   signed, altered, note), or clear them; a bucket that already exists is
-  merged into
+  merged into. The carousel above draws the printing highlighted in
+  *Change…*'s menu, else the one chosen, so you see what you will get
 - **Searching an asset:** places, checklists and pools have the search bar
   and filters, answered locally with no requests. A line with no printing
   recorded never matches a printing-level term like `s:` or `r:`, either

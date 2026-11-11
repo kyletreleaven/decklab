@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { PreviewPrinting } from "./CardDetail";
 import {
   bucketKey,
   bucketsOf,
@@ -306,6 +308,13 @@ function BucketEditor({
   const [busy, setBusy] = useState(false);
 
   const chosen = runs.find((c) => c.id === printingId);
+  // The carousel draws the printing highlighted in the menu, else the one
+  // chosen: what the move would make it. Back to its own when the editor closes.
+  const preview = useContext(PreviewPrinting);
+  const [hovered, setHovered] = useState<string | undefined>(undefined);
+  const showing = hovered ?? printingId;
+  useEffect(() => preview(showing || null), [preview, showing]);
+  useEffect(() => () => preview(null), [preview]);
   const finishes = (chosen?.data.finishes as string[] | undefined) ?? ANY_FINISHES;
   const badFinish = finish !== "" && !!chosen && !finishes.includes(finish);
   const asFlag = (v: string) => (v === "yes" ? true : v === "no" ? false : undefined);
@@ -336,19 +345,38 @@ function BucketEditor({
     <div className="bucket-editor">
       <label>
         Printing
-        <select value={printingId} onChange={(e) => setPrintingId(e.target.value)}>
-          <option value="">— {unknown}</option>
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-          {runs.map((c) => (
-            <option key={c.id} value={c.id}>
-              {printingLabel(c)}
-            </option>
-          ))}
-        </select>
+        {/* A menu, not a select: a native select cannot report which option
+            is highlighted, and the carousel shows that one (PreviewPrinting). */}
+        <DropdownMenu.Root onOpenChange={(open) => !open && setHovered(undefined)}>
+          <DropdownMenu.Trigger asChild>
+            <button className="printing-pick">
+              <span className="label">
+                {(chosen && printingLabel(chosen)) || (printingId && options[0]?.label) || `— ${unknown}`}
+              </span>
+              <span className="chevron">▾</span>
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="menu" align="start" sideOffset={4}>
+              <DropdownMenu.RadioGroup value={printingId} onValueChange={setPrintingId}>
+                {[{ id: "", label: `— ${unknown}` }, ...options, ...runs.map((c) => ({ id: c.id, label: printingLabel(c) }))].map(
+                  (o) => (
+                    <DropdownMenu.RadioItem
+                      key={o.id}
+                      value={o.id}
+                      className="menu-item"
+                      // Radix focuses the highlighted item, by pointer or key.
+                      onFocus={() => setHovered(o.id)}
+                    >
+                      <DropdownMenu.ItemIndicator className="menu-check">✓</DropdownMenu.ItemIndicator>
+                      {o.label}
+                    </DropdownMenu.RadioItem>
+                  ),
+                )}
+              </DropdownMenu.RadioGroup>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       </label>
       <label title="Bound: only this printing. Suggested: any printing, drawn as this one.">
         Printing is

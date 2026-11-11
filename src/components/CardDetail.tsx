@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { collectionCountsByPrinting } from "../lib/collections";
@@ -11,6 +11,13 @@ import { CardImage } from "./CardImage";
 import { ManaCost } from "./ManaCost";
 
 const LEGALITY_FORMATS = ["commander", "modern", "pioneer", "legacy", "vintage"];
+
+/**
+ * Shows a printing in the carousel without choosing it, or `null` to stop:
+ * for a picker inside the panel's `lab` slot, so what is about to be chosen
+ * is what is drawn. The carousel's own menu previews the same way.
+ */
+export const PreviewPrinting = createContext<(id: string | null) => void>(() => {});
 
 /** A link that opens in the browser rather than navigating the app's webview. */
 function External({ href, title, children }: { href: string; title: string; children: React.ReactNode }) {
@@ -311,7 +318,7 @@ export function CardDetail({
               The target is marked, so it is visible which one ± drives without
               needing separate text saying so. */}
           {lab ? (
-            lab
+            <PreviewPrinting.Provider value={setPreviewId}>{lab}</PreviewPrinting.Provider>
           ) : slots.length > 0 ? (
             <div className="slots">
               {slots.map((slot) => {

@@ -702,6 +702,43 @@ a.external:hover {
   min-width: 0;
 }
 
+/* The printing menu's trigger, in a select's place: drawn as one, so the
+   editor's fields read as a set. */
+.bucket-editor .printing-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 9px;
+  background: var(--bg);
+  text-align: left;
+  cursor: default;
+}
+
+.bucket-editor .printing-pick:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+.bucket-editor .printing-pick:focus,
+.bucket-editor .printing-pick[data-state="open"] {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.printing-pick .label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.printing-pick .chevron {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
 .bucket-editor .status,
 .bucket-move {
   grid-column: 1 / -1;
