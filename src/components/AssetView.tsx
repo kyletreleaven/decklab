@@ -142,11 +142,17 @@ function describe(b: HeldBucket, member = false): string {
 }
 
 /**
- * All Magic behind a collection drawn as one wall: a place or a sum. A
- * deck is a sum too, but drawn by zones, which wait (TODO). A pool shows
- * itself: All Magic with the pool targeted already marks its members.
+ * All Magic behind an asset drawn as one wall: a place, a sum, a checklist
+ * or a list pool. A deck is a sum too, but drawn by zones, which wait (TODO).
  */
-const behindable = (type: AssetType) => isA(type, "collection") && type !== "deck";
+const behindable = (type: AssetType) => (isA(type, "collection") && type !== "deck") || drawnByLine(type);
+
+/**
+ * A checklist's lines can overlap, and so can a list pool's members (any Bolt,
+ * and M10 Bolt): drawn a tile per line at either grain behind, never added up.
+ * Several lines of one card sit together where its tile would be.
+ */
+const drawnByLine = (type: AssetType) => type === "checklist" || type === "exact checklist" || type === "list pool";
 
 /** The lab's target, as a view's buttons act on it (App holds it). */
 export interface LabTarget {
@@ -530,7 +536,14 @@ export function AssetView({
       const at = (by: TileGrain) =>
         node.type === "sum"
           ? sumContents(lab, store, node.id, { by })
-          : lineContents(lab, store, node.id, { by });
+          : node.type === "list pool"
+            ? memberContents(lab, store, node.id, { by })
+            : lineContents(lab, store, node.id, { by });
+      if (drawnByLine(node.type)) {
+        const lines = await at("line");
+        if (live) setFront({ cards: lines, printings: lines });
+        return;
+      }
       const [cards, printings] = await Promise.all([at("card"), at("printing")]);
       if (live) setFront({ cards, printings });
     })().catch((e) => live && setError(e instanceof Error ? e.message : String(e)));

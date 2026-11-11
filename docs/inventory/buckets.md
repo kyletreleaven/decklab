@@ -294,6 +294,13 @@ At the Printings grain, an asset's *any printing* line has presence on its
 card's *any printing* row, not on a printing: it takes that row's place,
 and the card's printings stay All Magic's, each still something to add.
 
+**The grain is the behind's, not the asset's.** A checklist's lines can
+overlap — at least four Bolts, at least one of them M10 — and so can a list
+pool's members, so they are never added up: each stays its own tile, and
+the grain says only which of All Magic's tiles it evicts. At Cards, every
+line of a card takes the card's place, together; at Printings, each takes
+its printing's, or the *any printing* row.
+
 **Off, the asset alone, and nothing is requested.** All Magic is paged from
 Scryfall only when it is drawn. The search is then answered locally: every
 card an asset holds is in the card store, with Scryfall's data. Searching

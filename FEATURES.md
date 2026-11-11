@@ -196,8 +196,10 @@ a library file ([`docs/lab.md`](docs/lab.md)); the model is
 - **Searching an asset:** places, checklists and pools have the search bar
   and filters, answered locally with no requests. A line with no printing
   recorded never matches a printing-level term like `s:` or `r:`, either
-  way. A place can show **All Magic behind it** (*Show not in <place>*):
-  its own tiles where it has them, the rest of All Magic dimmed
+  way. A place, collection, checklist or list pool can show **All Magic
+  behind it** (*Show not in …*): its own tiles where it has them, the rest
+  of All Magic dimmed, each with the asset's own `+`. A checklist or pool
+  stays a tile per line at either grain
 
 ## Under the hood
 
