@@ -95,6 +95,17 @@ have to be right before the first write.
       hold up images; if they do, a lane below `background` (FIFO, never
       evicted), since the UI's responsiveness comes first and an agent can
       wait.
+- ⬜ **The rest of `PATCH`** ([`docs/agent-api.md`](docs/agent-api.md) →
+      *PATCH*). `add` on a list pool is built; each of these is a key in the
+      same body, every one a bound so a retry is safe:
+      - `remove` on a list pool: a difference, a line matching as a pattern
+        (`{card}` any printing). With it `strict`: absent on remove, present
+        on add, reported by default and refused when `true`; and `add`'s
+        answer gains `present`
+      - `atLeast` on a place: raise each card to at least its count
+      - `atMost` on a place: lower each to at most its count, `0` removing
+        it. Takes copies off a place's record, so it wants more care
+      - refuse a card in two opposite operations of one patch
 - ⬜ **Routes**, JSON, each a few lines over existing `src/lib/` code:
       - decks: `GET /decks/:id` (with entries), add, remove, import, export
       - collections: list, show, add, remove, import, export

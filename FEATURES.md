@@ -141,11 +141,13 @@ Early. Design and reasoning in
   JSON: `GET /lab/tree`, `GET /lab/assets/<path>` (a decklist also as
   text), `PUT /lab/assets/<path>` to create or replace a list pool, a
   query pool with its filters, or a decklist zone by zone (JSON, or text
-  with zone headings), and `DELETE`, refused while pinned or where copies
+  with zone headings), `PATCH /lab/assets/<path>` to add to a list pool
+  without replacing it (a union, leaving members as they were), and
+  `DELETE`, refused while pinned or where copies
   are recorded. A card the store has never had is fetched through the
   app's rate-limited channel, at most 150 a call; one Scryfall does not
   know is refused by name. The open lab redraws after a write
-- **`decklab assets tree | get | put | rm`** on the command line: assets as
+- **`decklab assets tree | get | put | patch | rm`** on the command line: assets as
   files through the API — a decklist out to a `.txt`, edited, back in zone
   by zone ([`docs/cli.md`](docs/cli.md))
 

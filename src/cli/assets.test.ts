@@ -85,6 +85,20 @@ describe("decklab assets, against the API itself", () => {
     expect(JSON.parse(printed)).toMatchObject({ path: ["Pools", "St. Louis"], type: "list pool" });
   });
 
+  it("patches a list pool from a .json patch or a .txt of cards to add", async () => {
+    files.set("ramp.json", JSON.stringify({ type: "list pool", cards: [{ card: "Sol Ring" }] }));
+    await assets("put", ["/Pools/ramp", "ramp.json"], {}, io);
+    files.set("more.json", JSON.stringify({ add: [{ card: "Sol Ring" }] }));
+    printed = "";
+    await assets("patch", ["/Pools/ramp", "more.json"], {}, io);
+    expect(printed).toBe('patched /Pools/ramp: {"added":0,"members":1}\n');
+    files.set("more.txt", "Lightning Bolt\nSol Ring\n");
+    printed = "";
+    await assets("patch", ["/Pools/ramp", "more.txt"], {}, io);
+    expect(printed).toBe('patched /Pools/ramp: {"added":1,"members":2}\n');
+    await expect(assets("patch", ["/Pools/ramp", "more.toml"], {}, io)).rejects.toThrow(/takes a .txt or a .json file/);
+  });
+
   it("reads what a collection holds, as a decklist or as JSON with places", async () => {
     await assets("held", ["/Binders/Red", "red.txt"], {}, io);
     expect(files.get("red.txt")).toBe("2 Lightning Bolt\n");

@@ -247,6 +247,7 @@ field it includes.
 | `GET /lab/assets/<path>` with `Accept: text/plain` | a decklist as text, zone by zone, the way `PUT` takes it |
 | `GET /lab/collections/<path>` | what a place, sum or deck holds: each card and its count; `?cards=` (repeated) narrows it, `?by_place=true` says where. Anything else at the path is a `400` |
 | `PUT /lab/assets/<path>` | create or replace a **pool** — a list pool's members (`cards`), a query pool's `query` and `filters` — or a **decklist**, zone by zone. Missing folders above it are made. A different type at the path is refused (409) |
+| `PATCH /lab/assets/<path>` | change what is there, never replace it: `{ "add": [cards] }` adds to a list pool. See [*PATCH*](#patch) |
 | `DELETE /lab/assets/<path>` | delete an asset and what is below it, as the tree does: refused (409) while something outside pins it, and where copies are recorded below it — those are the user's to drop |
 
 A list pool's members can also be sent as text: `PUT` with `Content-Type:
@@ -280,3 +281,50 @@ pool (`"zones": { "main": n, … }`, counts summed, for a decklist), `200`
 for a replaced one; a `DELETE`, `204`. A refusal is `{ "error": … }`, with
 `400` for a bad body or a card no one knows, `409` for another type at the
 path or something in the way, `503` when Scryfall did not answer.
+
+### PATCH
+
+**Prevents:** a merge done as read, merge, `PUT`. Between the read and the
+write the user's edits are lost, and the client must send back every line it
+did not mean to change exactly as stored — a text round trip turns a
+suggested printing into a pinned one. And a place has no `PUT` at all.
+
+A separate verb rather than `PUT ?merge=`: a dropped flag would turn a merge
+into a replace. The body names its operations, so more are a key each, never
+a new route. Every operation is **idempotent** — a bound, not a delta — so a
+retry is always safe: `+1` applied twice is wrong copies in a binder.
+
+| Operation | On | Built | Does |
+| --- | --- | --- | --- |
+| `add` | list pool | ✅ | union: a new card becomes a member; one already a member is left as it is, suggestion and `added` date both |
+| `remove` | list pool | ⬜ | difference |
+| `atLeast` | place | ⬜ | each card raised to at least its `qty`; none lowered, none not named touched |
+| `atMost` | place | ⬜ | each card lowered to at most its `qty`, `0` removing it. Takes copies off a place's record, so it wants more care than the rest |
+
+A card in two opposite operations of one patch is to be refused: the order
+they would apply in is not obvious.
+
+**A line is a pattern** (to build with `remove`): `{ "card": "Sol Ring" }`
+matches every member that is Sol Ring, any printing or finish, and `{ "set",
+"number" }` only one pinned there — a key left out means *any*, as
+everywhere else. An exact-member reading would leave a pinned Sol Ring behind
+after "no more Sol Ring".
+
+**`strict`, in the body, default `false`** (to build with `remove`). By
+default a patch is set arithmetic: removing a card that is not a member, or
+adding one that is, changes nothing and is reported — `absent`, `present` in
+the answer — so the same patch twice is the patch once. With `"strict": true`
+either is refused (`400`, naming the cards) and nothing is written: for a
+caller that believes it knows exactly what is there. In the body, not the
+query string, so it cannot be dropped apart from the operations it governs.
+A name no one knows is refused either way: a typo must not pass for absent. Nothing is made — the asset must exist,
+and `PUT` makes a pool — and every card is settled before the first write,
+as for a `PUT`. Answers `200` with `{ "added": n, "members": n }`; the app
+redraws only when something was added. Text (`Content-Type: text/plain`) is
+cards to `add`, read as a list pool `PUT` reads them: the verb already says
+nothing is replaced, so text has no other meaning to compete with.
+
+```bash
+curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"add":[{"card":"Sol Ring"}]}' "localhost:47474/lab/assets/Pools/ramp"
+```

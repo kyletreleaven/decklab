@@ -15,6 +15,9 @@ export const ASSETS_USAGE = `  assets tree                     every asset: its 
   assets put <path> <file>        create or replace from a file: .txt is a decklist
                                   or list pool (what is there says which; --type
                                   for a new one), .json any body the API takes
+  assets patch <path> <file>      change what is there, never replace it: add to a
+                                  list pool the cards of a .txt, or a .json patch,
+                                  {"add": [cards]}
   assets rm <path>                delete an asset and what is below it
   assets held <path> [file]       what a collection (place, sum, deck) holds, to file
                                   or standard output: as a decklist for a .txt file or
@@ -140,6 +143,26 @@ export async function assets(sub: string | undefined, args: string[], opts: Asse
       io.out(`${res.status === 201 ? "created" : "replaced"} ${formatPath(parsePath(path.startsWith("/") ? path : `/${path}`))}: ${await res.text()}\n`);
       return;
     }
+    case "patch": {
+      arity(2, 2, "a path and a file");
+      const [path, file] = args;
+      // Text is cards to add: the verb, not the body, says it replaces nothing.
+      const isText = file.endsWith(".txt");
+      if (!isText && !file.endsWith(".json")) throw new AssetsUsageError("assets patch takes a .txt or a .json file");
+      let body: string;
+      try {
+        body = io.readFile(file);
+      } catch (e) {
+        throw new AssetsError(`cannot read ${file}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      const res = await call(pathUrl(io.base, path), {
+        method: "PATCH",
+        headers: { "Content-Type": isText ? "text/plain" : "application/json" },
+        body,
+      });
+      io.out(`patched ${formatPath(parsePath(path.startsWith("/") ? path : `/${path}`))}: ${await res.text()}\n`);
+      return;
+    }
     case "rm": {
       arity(1, 1, "a path");
       await call(pathUrl(io.base, args[0]), { method: "DELETE" });
@@ -167,7 +190,7 @@ export async function assets(sub: string | undefined, args: string[], opts: Asse
     }
     default:
       throw new AssetsUsageError(
-        sub === undefined ? "assets needs a command: tree, get, put, rm or held" : `unknown assets command ${sub}`,
+        sub === undefined ? "assets needs a command: tree, get, put, patch, rm or held" : `unknown assets command ${sub}`,
       );
   }
 }

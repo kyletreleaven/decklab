@@ -39,13 +39,14 @@ cards, no counts); `query pool` (a saved search); `decklist`, `deck`,
 | `GET /lab/assets/<path>` + `Accept: text/plain` | a decklist as text |
 | `GET /lab/collections/<path>` | what a collection (place, sum, deck) holds: `{ card, oracle, qty }` per card; `?cards=Sol%20Ring&cards=…` for only those, `?by_place=true` to add `places: [{ path, qty }]` |
 | `PUT /lab/assets/<path>` | create or replace a **pool** or a **decklist** |
+| `PATCH /lab/assets/<path>` | add cards to a **list pool**, keeping what is there |
 | `DELETE /lab/assets/<path>` | delete an asset and everything below it |
 
 Paths go in the URL segment by segment, percent-encoded:
 `/lab/assets/Decklists/Golbez%20Proliferate/main`.
 
 With DeckLab's `decklab` command installed, `decklab assets tree | get |
-put | rm` does the same with files — `decklab assets get /Decklists/Golbez
+put | patch | rm` does the same with files — `decklab assets get /Decklists/Golbez
 golbez.txt`, edit, `decklab assets put /Decklists/Golbez golbez.txt` — the
 token in `$DECKLAB_TOKEN`. Its errors are the API's.
 
@@ -74,6 +75,21 @@ Planeswalker Land), `rarities` (of common uncommon rare mythic), `mvMin`,
 A `PUT` replaces the pool's members with what you send, makes any folders
 missing above it, and answers `201 {"created": true, "members": n}` for a
 new pool, `200` for a replaced one. The user's screen updates by itself.
+
+**Adding to a list pool** without replacing it — use this, not a `GET` then
+a `PUT`, whenever you mean *add*:
+
+```bash
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"add": [{"card": "Sol Ring"}, {"card": "Arcane Signet"}]}' \
+  http://127.0.0.1:47474/lab/assets/Pools/Golbez/ramp
+```
+
+Each line as a list pool `PUT` takes it. A card already a member is left
+exactly as it is, so sending the same patch twice is safe. The pool must
+exist (`404` if not; `PUT` makes one), and only a list pool takes one
+(`409` otherwise). Or send the cards as text (`Content-Type: text/plain`),
+one per line, as for a `PUT`. Answers `200 {"added": n, "members": n}`.
 
 **Writing a decklist** — as text, with zone headings:
 

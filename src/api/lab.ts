@@ -326,7 +326,7 @@ function parsed(text: string) {
  * A list pool from a decklist, as an import reads one: a card per line,
  * counts ignored — a pool has none — and `(SET) 123` pinning a printing.
  */
-export function poolFromText(text: string): PoolBody {
+export function poolFromText(text: string): Extract<PoolBody, { type: "list pool" }> {
   return { type: "list pool", cards: parsed(text).lines.map(textBucket) };
 }
 
@@ -483,6 +483,61 @@ export async function putPool(
   await replaceRows(lab, "pool_members", id, wanted, at);
   const [{ n }] = await lab.select<{ n: number }>("SELECT COUNT(*) AS n FROM pool_members WHERE asset_id = $1", [id]);
   return { created, members: n };
+}
+
+/** A `PATCH`: changes to an asset that exists, never its replacement. */
+export interface PatchBody {
+  /** List pool members to add. One already a member is left as it is. */
+  add: Bucket[];
+}
+
+/**
+ * A `PATCH` body from JSON: `{ add: [{ card, oracle, set, number, lang,
+ * finish, shown }] }`, each line as a list pool `PUT` takes it. Only `add`
+ * is built (docs/agent-api.md → *PATCH*).
+ */
+export function patchFromJson(json: unknown): PatchBody {
+  if (typeof json !== "object" || json === null || Array.isArray(json)) return bad("The body must be a JSON object.");
+  const o = json as Record<string, unknown>;
+  for (const k of Object.keys(o)) if (k !== "add") bad(`A patch: unknown key \`${k}\`. Only \`add\` is built.`);
+  if (!Array.isArray(o.add)) return bad("A patch needs `add`, an array.");
+  return { add: o.add.map((raw, i) => bucketFromJson(raw, `add[${i}]`).bucket) };
+}
+
+/**
+ * Add members to the list pool at `names`: a union. A card already a member
+ * is left exactly as it is — its suggestion, and when it was added — so the
+ * same patch twice is the same patch once. A new match comes in with the
+ * first suggestion its lines give, as in a `PUT`. Nothing is made: the pool
+ * must exist, and `PUT` makes one. Every card is settled before the first
+ * write.
+ */
+export async function patchPool(
+  lab: Sql,
+  cards: Sql,
+  names: string[],
+  body: PatchBody,
+  { fetch, at = new Date().toISOString() }: { fetch?: Fetch; at?: string } = {},
+): Promise<{ added: number; members: number }> {
+  if (!names.length) throw new LabApiError("The root is not an asset: read /lab/tree.", 400);
+  const node = await nodeAt(lab, names);
+  if (!node) throw new LabApiError(`Nothing at ${formatPath(names)}. PATCH changes a pool; PUT makes one.`, 404);
+  if (node.type !== "list pool") {
+    throw new LabApiError(`${formatPath(names)} is a ${node.type}: PATCH adds to a list pool only, so far.`, 409);
+  }
+  const resolve = await resolveForApi(body.add, cards, fetch ?? null).catch(refuse);
+
+  const wanted = new Map<string, Row>();
+  const had = await lab.select<Row>(
+    "SELECT oracle_id, printing_id, finish, attrs, shown_id, added_at FROM pool_members WHERE asset_id = $1",
+    [node.id],
+  );
+  for (const h of had) wanted.set(memberKey(h), h);
+  for (const s of body.add.map((b) => resolve(b))) if (!wanted.has(memberKey(s))) wanted.set(memberKey(s), s);
+  if (await replaceRows(lab, "pool_members", node.id, wanted, at)) {
+    await lab.execute("UPDATE assets SET updated_at = $2 WHERE id = $1", [node.id, at]);
+  }
+  return { added: wanted.size - had.length, members: wanted.size };
 }
 
 /**

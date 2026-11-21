@@ -13,6 +13,8 @@ import {
   deleteAt,
   LabApiError,
   type Fetch,
+  patchFromJson,
+  patchPool,
   poolFromText,
   putDecklist,
   putPool,
@@ -131,6 +133,30 @@ export function createApp(token: () => Promise<string | null>, labAccess?: LabAc
       body.type === "decklist" ? await putDecklist(sql, cards, names, body, { fetch }) : await putPool(sql, cards, names, body, { fetch });
     labAccess?.onWrite?.();
     return c.json(result, result.created ? 201 : 200);
+  });
+
+  // A change to what is there, never a replacement: a separate verb, so a
+  // dropped flag cannot turn a merge into a PUT's replace.
+  app.patch("/lab/assets/*", async (c) => {
+    const { lab: sql, cards, fetch } = await lab();
+    const text = await c.req.text();
+    let body;
+    if ((c.req.header("content-type") ?? "").startsWith("text/plain")) {
+      // The verb already says this is no replacement, so text can only mean
+      // *add these*: read as a list pool `PUT` reads it, `(SET) 123` and all.
+      body = { add: poolFromText(text).cards };
+    } else {
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new LabApiError('A PATCH body is JSON — `{"add": [{"card": "Sol Ring"}]}` — or text/plain cards to add.', 400);
+      }
+      body = patchFromJson(json);
+    }
+    const result = await patchPool(sql, cards, pathOf(c), body, { fetch });
+    if (result.added) labAccess?.onWrite?.();
+    return c.json(result);
   });
 
   app.delete("/lab/assets/*", async (c) => {

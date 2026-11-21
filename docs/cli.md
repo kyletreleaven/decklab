@@ -49,7 +49,7 @@ The database path must agree with the app's: the SQL plugin resolves
 No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
 → *Lab mode*), and nothing writes to a database the app has open.
 
-- **`decklab assets tree | get | put | rm`**: assets as files, for you or an
+- **`decklab assets tree | get | put | patch | rm | held`**: assets as files, for you or an
   agent working beside the app (`cmdr`'s, say). A thin client of the agent
   API ([`agents/using-the-api.md`](agents/using-the-api.md)), so the app must
   be open with the API enabled; the token comes from `$DECKLAB_TOKEN` or
@@ -62,6 +62,11 @@ No `load`. The lab is loaded at launch by the app itself ([`lab.md`](lab.md)
     or list pool, as what is at the path says; `--type decklist` for a new
     decklist — or a `.json` file, any body the API takes. A decklist is
     replaced zone by zone, the zones the file names.
+  - `patch <path> <file>`: change what is there, never replace it — so far,
+    add to a list pool the cards of a `.txt` file (one a line, as for `put`)
+    or a `.json` patch, `{"add": [cards]}`. A card already a member is left
+    as it is, so the same patch twice is the patch once
+    ([`agent-api.md`](agent-api.md#patch)).
   - `rm <path>`: delete, as the tree does.
   - `held <path> [file]`: what a collection — a place, a sum, a deck —
     holds, through `/lab/collections`: as a decklist (`qty name` a line)

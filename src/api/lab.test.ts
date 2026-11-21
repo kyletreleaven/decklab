@@ -70,6 +70,8 @@ describe("agent API, lab routes", () => {
 
   const put = (path: string, body: string, type = "application/json") =>
     app.request(path, { method: "PUT", headers: { ...auth, "Content-Type": type }, body });
+  const patch = (path: string, body: string) =>
+    app.request(path, { method: "PATCH", headers: { ...auth, "Content-Type": "application/json" }, body });
 
   it("serves its guide, behind the token like everything else", async () => {
     expect((await app.request("/guide")).status).toBe(401);
@@ -114,6 +116,56 @@ describe("agent API, lab routes", () => {
       ["sol", ""],
     ]);
     expect(members().find((m) => m.oracle_id === "sol")!.added_at).toBe(sol.added_at);
+  });
+
+  it("patches a list pool: a union, leaving every member it had as it was", async () => {
+    await put("/lab/assets/P", "1 Sol Ring (CMR) 472", "text/plain");
+    const members = () =>
+      db.prepare("SELECT oracle_id, shown_id, added_at FROM pool_members ORDER BY oracle_id").all() as { oracle_id: string; shown_id: string; added_at: string }[];
+    const [sol] = members();
+    onWrite.mockClear();
+
+    // Sol Ring again, with another suggestion: still the member it was.
+    const add = JSON.stringify({ add: [{ card: "Sol Ring", shown: { set: "c21", number: "263" } }, { card: "Lightning Bolt" }] });
+    const res = await patch("/lab/assets/P", add);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ added: 1, members: 2 });
+    expect(members().map((m) => m.oracle_id)).toEqual(["bolt", "sol"]);
+    expect(members().find((m) => m.oracle_id === "sol")).toEqual(sol);
+    expect(onWrite).toHaveBeenCalledTimes(1);
+
+    // The same patch twice is the patch once, and changes nothing to redraw.
+    expect(await (await patch("/lab/assets/P", add)).json()).toEqual({ added: 0, members: 2 });
+    expect(onWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("patches with text as cards to add, suggestions read as a PUT reads them", async () => {
+    await put("/lab/assets/P", "1 Sol Ring", "text/plain");
+    const res = await app.request("/lab/assets/P", {
+      method: "PATCH",
+      headers: { ...auth, "Content-Type": "text/plain" },
+      body: "Lightning Bolt (M10) 146\nSol Ring",
+    });
+    expect(await res.json()).toEqual({ added: 1, members: 2 });
+    expect(db.prepare("SELECT oracle_id, printing_id, shown_id FROM pool_members ORDER BY oracle_id").all()).toEqual([
+      { oracle_id: "bolt", printing_id: "", shown_id: "bolt-m10" },
+      { oracle_id: "sol", printing_id: "", shown_id: "" },
+    ]);
+  });
+
+  it("refuses a patch it cannot apply, writing nothing", async () => {
+    await put("/lab/assets/P", "1 Sol Ring", "text/plain");
+    const refused = async (res: Response, status: number, why: RegExp) => {
+      expect(res.status).toBe(status);
+      expect((await res.json()).error).toMatch(why);
+    };
+    const one = JSON.stringify({ add: [{ card: "Lightning Bolt" }] });
+    await refused(await patch("/lab/assets/Nope", one), 404, /PUT makes one/);
+    await refused(await patch("/lab/assets/Binders/Red", one), 409, /is a place: PATCH adds to a list pool only/);
+    await refused(await patch("/lab/assets/P", JSON.stringify({ remove: [{ card: "Sol Ring" }] })), 400, /unknown key `remove`/);
+    await refused(await patch("/lab/assets/P", "1 Lightning Bolt"), 400, /PATCH body is JSON/);
+    await refused(await patch("/lab/assets/P", JSON.stringify({ add: [{ card: "Lightning Bolt" }, { card: "No Such Card" }] })), 400, /No Such Card/);
+    expect(db.prepare("SELECT oracle_id FROM pool_members").all()).toEqual([{ oracle_id: "sol" }]);
   });
 
   it("replaces a big pool in chunks: hundreds in, hundreds out", async () => {
